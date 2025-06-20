@@ -1,0 +1,13 @@
+<Window x:Class="MsgToPdfConverter.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="MSG to PDF Converter" Height="350" Width="525">
+    <Grid>
+        <StackPanel Margin="10">
+            <TextBlock FontSize="16" FontWeight="Bold" Text="Select .msg Files to Convert to PDF" Margin="0,0,0,10"/>
+            <Button Name="SelectFilesButton" Content="Select .msg Files" Click="SelectFilesButton_Click" Margin="0,0,0,10"/>
+            <ListBox Name="FilesListBox" Height="150" Margin="0,0,0,10"/>
+            <Button Name="ConvertButton" Content="Convert to PDF" Click="ConvertButton_Click" IsEnabled="False"/>
+        </StackPanel>
+    </Grid>
+</Window>

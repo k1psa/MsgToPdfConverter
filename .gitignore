@@ -1,0 +1,60 @@
+# .gitignore for .NET/WPF projects
+
+# Build results
+bin/
+obj/
+TestResults/
+
+# User-specific files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.log
+*.ncrunch*
+*.vs/
+*.vscode/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Rider/JetBrains
+.idea/
+*.DotSettings.user
+
+# VS Code
+.history/
+
+# NuGet
+*.nupkg
+*.snupkg
+packages/
+
+# Others
+*.orig
+*.bak
+*.zip
+*.7z
+*.tar
+*.gz
+*.tgz
+*.rar
+*.db
+*.pidb
+*.sdf
+*.cache
+*.pdb
+*.mdb
+*.aps
+*.psess
+*.vsp
+*.vspx
+*.vspscc
+*.vssscc
+*.scc
+*.localhistory/
+*.resharper/
+*.dotCover
+*.dotCover.*
+*.sln.ide

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net5.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>MsgToPdfConverter</AssemblyName>
+    <RootNamespace>MsgToPdfConverter</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DinkToPdf" Version="1.0.8" />
+    <PackageReference Include="MsgReader" Version="3.0.0" />
+    <PackageReference Include="iText7" Version="7.1.15" />
+    <PackageReference Include="PdfSharp" Version="6.2.0" />
+  </ItemGroup>
+
+</Project>
