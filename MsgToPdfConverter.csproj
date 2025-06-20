@@ -1,19 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
 
   <PropertyGroup>
-    <OutputType>WinExe</OutputType>
-    <TargetFramework>net5.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net6.0-windows</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>MsgToPdfConverter</AssemblyName>
     <RootNamespace>MsgToPdfConverter</RootNamespace>
+    <StartupObject>MsgToPdfConverter.App</StartupObject>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="DinkToPdf" Version="1.0.8" />
+    <PackageReference Include="Microsoft.Office.Interop.Excel" Version="15.0.4795.1001" />
+    <PackageReference Include="Microsoft.Office.Interop.Word" Version="15.0.4797.1004" />
     <PackageReference Include="MsgReader" Version="3.0.0" />
     <PackageReference Include="iText7" Version="7.1.15" />
     <PackageReference Include="PdfSharp" Version="6.2.0" />
+    <None Update="PdfAppendTestInput.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

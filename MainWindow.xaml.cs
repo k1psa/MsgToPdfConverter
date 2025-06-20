@@ -10,6 +10,10 @@ using System.Diagnostics;
 using DinkToPdf;
 using DinkToPdf.Contracts;
 using System.Text.RegularExpressions;
+using iText.Kernel.Pdf;
+using iText.Layout;
+using iText.IO.Image;
+using iText.Layout.Element;
 
 namespace MsgToPdfConverter
 {
@@ -176,69 +180,455 @@ namespace MsgToPdfConverter
             return header + body;
         }
 
+        private void LogDebug(string message)
+        {
+            try
+            {
+                string logPath = Path.Combine(Path.GetTempPath(), "MsgToPdfConverter_debug.log");
+                File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\r\n");
+            }
+            catch { }
+        }
+
         private async void ConvertButton_Click(object sender, RoutedEventArgs e)
         {
+            Console.WriteLine("Convert clicked");
+            LogDebug("ConvertButton_Click started");
             if (selectedFiles == null || selectedFiles.Count == 0)
             {
-                MessageBox.Show("No files selected.", "Warning", MessageBoxButton.OK, MessageBoxImage.Warning);
+                LogDebug("No files selected");
+                Console.WriteLine("No files selected.");
                 return;
             }
+            Console.WriteLine("Files selected, starting conversion");
             int success = 0, fail = 0;
             ProgressBar.Visibility = Visibility.Visible;
             ProgressBar.Minimum = 0;
             ProgressBar.Maximum = selectedFiles.Count;
             ProgressBar.Value = 0;
             var converter = new SynchronizedConverter(new PdfTools());
+            bool appendAttachments = false;
+            Dispatcher.Invoke(() => appendAttachments = AppendAttachmentsCheckBox.IsChecked == true);
 
             await System.Threading.Tasks.Task.Run(() =>
             {
-                for (int i = 0; i < selectedFiles.Count; i++)
+                Console.WriteLine("[TASK] Started conversion task");
+                try
                 {
-                    var msgFilePath = selectedFiles[i];
-                    try
+                    for (int i = 0; i < selectedFiles.Count; i++)
                     {
-                        var msg = new Storage.Message(msgFilePath);
-                        string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
-                        string baseName = Path.GetFileNameWithoutExtension(msgFilePath);
-                        string dir = Path.GetDirectoryName(msgFilePath);
-                        string pdfFilePath = Path.Combine(dir, $"{baseName} - {datePart}.pdf");
-                        string htmlWithHeader = BuildEmailHtml(msg);
-                        var doc = new HtmlToPdfDocument()
+                        Console.WriteLine($"[TASK] Processing file {i + 1} of {selectedFiles.Count}: {selectedFiles[i]}");
+                        var msgFilePath = selectedFiles[i];
+                        LogDebug($"Processing file: {msgFilePath}");
+                        try
                         {
-                            GlobalSettings = new GlobalSettings
+                            var msg = new Storage.Message(msgFilePath);
+                            Console.WriteLine($"[TASK] Loaded MSG: {msgFilePath}");
+                            LogDebug($"Loaded MSG: {msgFilePath}");
+                            string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
+                            string baseName = Path.GetFileNameWithoutExtension(msgFilePath);
+                            string dir = Path.GetDirectoryName(msgFilePath);
+                            string pdfFilePath = Path.Combine(dir, $"{baseName} - {datePart}.pdf");
+                            string htmlWithHeader = BuildEmailHtml(msg);
+                            Console.WriteLine($"[TASK] Built HTML for: {msgFilePath}");
+                            LogDebug($"Building PDF: {pdfFilePath}");
+                            var doc = new HtmlToPdfDocument()
                             {
-                                ColorMode = ColorMode.Color,
-                                Orientation = Orientation.Portrait,
-                                PaperSize = PaperKind.A4,
-                                Out = pdfFilePath
-                            },
-                            Objects = {
-                                new ObjectSettings
+                                GlobalSettings = new GlobalSettings
                                 {
-                                    PagesCount = true,
-                                    HtmlContent = htmlWithHeader,
-                                    WebSettings = { DefaultEncoding = "utf-8" }
+                                    ColorMode = ColorMode.Color,
+                                    Orientation = Orientation.Portrait,
+                                    PaperSize = PaperKind.A4,
+                                    Out = pdfFilePath
+                                },
+                                Objects = {
+                                    new ObjectSettings
+                                    {
+                                        PagesCount = true,
+                                        HtmlContent = htmlWithHeader,
+                                        WebSettings = { DefaultEncoding = "utf-8" }
+                                    }
                                 }
+                            };
+                            Console.WriteLine("[TASK] About to call converter.Convert(doc);");
+                            converter.Convert(doc);
+                            Console.WriteLine("[TASK] Finished converter.Convert(doc);");
+                            Console.WriteLine($"[TASK] Email PDF created: {pdfFilePath}");
+                            LogDebug($"Email PDF created: {pdfFilePath}");
+
+                            if (appendAttachments && msg.Attachments != null && msg.Attachments.Count > 0)
+                            {
+                                // Step 1: Extract and convert attachments to PDF, collect all PDF paths
+                                var typedAttachments = new List<Storage.Attachment>();
+                                foreach (var att in msg.Attachments)
+                                {
+                                    if (att is Storage.Attachment a) typedAttachments.Add(a);
+                                }
+                                LogDebug($"Extracting and converting {typedAttachments.Count} attachments for {pdfFilePath}");
+                                Console.WriteLine($"Extracting and converting {typedAttachments.Count} attachments for {pdfFilePath}");
+                                var allPdfFiles = new List<string> { pdfFilePath };
+                                var allTempFiles = new List<string>(); // Track all temp files (originals and PDFs)
+                                string tempDir = Path.GetDirectoryName(pdfFilePath);
+                                foreach (var att in typedAttachments)
+                                {
+                                    string attName = att.FileName ?? "attachment";
+                                    string ext = Path.GetExtension(attName).ToLowerInvariant();
+                                    string attPath = Path.Combine(tempDir, attName);
+                                    string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
+                                    try
+                                    {
+                                        File.WriteAllBytes(attPath, att.Data);
+                                        allTempFiles.Add(attPath); // Track the extracted file
+                                        if (ext == ".pdf")
+                                        {
+                                            allPdfFiles.Add(attPath);
+                                        }
+                                        else if (ext == ".jpg" || ext == ".jpeg")
+                                        {
+                                            using (var writer = new iText.Kernel.Pdf.PdfWriter(attPdf))
+                                            using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
+                                            using (var docImg = new iText.Layout.Document(pdf))
+                                            {
+                                                var imgData = iText.IO.Image.ImageDataFactory.Create(attPath);
+                                                var image = new iText.Layout.Element.Image(imgData);
+                                                docImg.Add(image);
+                                            }
+                                            allPdfFiles.Add(attPdf);
+                                            allTempFiles.Add(attPdf); // Track the converted PDF
+                                        }
+                                        else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
+                                        {
+                                            if (TryConvertOfficeToPdf(attPath, attPdf))
+                                            {
+                                                allPdfFiles.Add(attPdf);
+                                                allTempFiles.Add(attPdf);
+                                            }
+                                        }
+                                        else if (ext == ".zip")
+                                        {
+                                            string extractDir = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName));
+                                            System.IO.Compression.ZipFile.ExtractToDirectory(attPath, extractDir);
+                                            allTempFiles.Add(attPath); // Track the zip file
+                                            var zipFiles = Directory.GetFiles(extractDir, "*.*", SearchOption.AllDirectories);
+                                            foreach (var zf in zipFiles)
+                                            {
+                                                allTempFiles.Add(zf); // Track all extracted files
+                                                string zfPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(zf) + ".pdf");
+                                                string zfExt = Path.GetExtension(zf).ToLowerInvariant();
+                                                if (zfExt == ".pdf")
+                                                {
+                                                    allPdfFiles.Add(zf);
+                                                }
+                                                else if (zfExt == ".doc" || zfExt == ".docx" || zfExt == ".xls" || zfExt == ".xlsx")
+                                                {
+                                                    if (TryConvertOfficeToPdf(zf, zfPdf))
+                                                    {
+                                                        allPdfFiles.Add(zfPdf);
+                                                        allTempFiles.Add(zfPdf);
+                                                    }
+                                                }
+                                            }
+                                            allTempFiles.Add(extractDir); // Track the extracted directory for cleanup
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        LogDebug($"Exception processing attachment: {ex}");
+                                        Console.WriteLine($"[ATTACH] Exception: {attName} - {ex}");
+                                    }
+                                }
+                                // Step 2: Merge all PDFs into a temp file
+                                string mergedPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
+                                PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf);
+                                // Step 3: Delete original files (main and attachments, and all temp files except merged)
+                                foreach (var f in allTempFiles)
+                                {
+                                    if (File.Exists(f) && !string.Equals(f, mergedPdf, StringComparison.OrdinalIgnoreCase) && !string.Equals(f, pdfFilePath, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        try { File.Delete(f); } catch { }
+                                    }
+                                    else if (Directory.Exists(f))
+                                    {
+                                        try { Directory.Delete(f, true); } catch { }
+                                    }
+                                }
+                                // Step 4: Rename merged file back to original name
+                                if (File.Exists(mergedPdf))
+                                {
+                                    File.Move(mergedPdf, pdfFilePath, true);
+                                }
+                                LogDebug($"Merged and replaced {pdfFilePath}");
+                                Console.WriteLine($"Merged and replaced {pdfFilePath}");
                             }
-                        };
-                        converter.Convert(doc);
-                        success++;
-                    }
-                    catch (Exception ex)
-                    {
-                        fail++;
-                        // Show error on UI thread
-                        Dispatcher.Invoke(() =>
+                            success++;
+                            LogDebug($"Success: {msgFilePath}");
+                        }
+                        catch (Exception ex)
                         {
-                            MessageBox.Show($"Failed to convert: {msgFilePath}\nError: {ex.Message}", "Conversion Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                        });
+                            fail++;
+                            LogDebug($"Failed: {msgFilePath} - {ex}");
+                            Console.WriteLine($"Failed to convert: {msgFilePath}\nError: {ex.Message}");
+                        }
+                        Dispatcher.Invoke(() => ProgressBar.Value = i + 1);
                     }
-                    // Update progress bar on UI thread
-                    Dispatcher.Invoke(() => ProgressBar.Value = i + 1);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[TASK] UNHANDLED EXCEPTION: {ex}");
                 }
             });
             ProgressBar.Visibility = Visibility.Collapsed;
-            MessageBox.Show($"Conversion completed. Success: {success}, Failed: {fail}", "Result", MessageBoxButton.OK, MessageBoxImage.Information);
+            LogDebug($"Conversion completed. Success: {success}, Failed: {fail}");
+            Console.WriteLine($"Conversion completed. Success: {success}, Failed: {fail}");
+        }
+
+        // Appends attachments as PDFs to the main email PDF
+        private void AppendAttachmentsToPdf(string mainPdfPath, List<Storage.Attachment> attachments, SynchronizedConverter converter)
+        {
+            LogDebug($"Total attachments: {attachments.Count}");
+            string allNames = string.Join(", ", attachments.ConvertAll(a => a.FileName ?? "(no name)"));
+            LogDebug($"Attachment names: {allNames}");
+            Console.WriteLine($"Total attachments: {attachments.Count}\nNames: {allNames}");
+            var tempPdfFiles = new List<string> { mainPdfPath };
+            // Use the original file directory for temp files
+            string tempDir = Path.GetDirectoryName(mainPdfPath);
+            // Directory.CreateDirectory(tempDir); // Not needed, should already exist
+
+            foreach (var att in attachments)
+            {
+                string attName = att.FileName ?? "attachment";
+                string ext = Path.GetExtension(attName).ToLowerInvariant();
+                string attPath = Path.Combine(tempDir, attName);
+                string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
+                try
+                {
+                    File.WriteAllBytes(attPath, att.Data);
+                    if (ext == ".pdf")
+                    {
+                        tempPdfFiles.Add(attPath);
+                    }
+                    else if (ext == ".jpg" || ext == ".jpeg")
+                    {
+                        // Convert JPG to PDF using iText7
+                        using (var writer = new iText.Kernel.Pdf.PdfWriter(attPdf))
+                        using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
+                        using (var doc = new iText.Layout.Document(pdf))
+                        {
+                            var imgData = iText.IO.Image.ImageDataFactory.Create(attPath);
+                            var image = new iText.Layout.Element.Image(imgData);
+                            doc.Add(image);
+                        }
+                        tempPdfFiles.Add(attPdf);
+                    }
+                    else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
+                    {
+                        if (TryConvertOfficeToPdf(attPath, attPdf))
+                        {
+                            tempPdfFiles.Add(attPdf);
+                        }
+                    }
+                    else if (ext == ".zip")
+                    {
+                        Console.WriteLine($"[ATTACH] ZIP detected, extracting: {attName}");
+                        string extractDir = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName));
+                        System.IO.Compression.ZipFile.ExtractToDirectory(attPath, extractDir);
+                        var zipFiles = Directory.GetFiles(extractDir, "*.*", SearchOption.AllDirectories);
+                        foreach (var zf in zipFiles)
+                        {
+                            string zfPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(zf) + ".pdf");
+                            string zfExt = Path.GetExtension(zf).ToLowerInvariant();
+                            if (zfExt == ".pdf")
+                            {
+                                string pdfCopy = Path.Combine(tempDir, Guid.NewGuid() + "_zipattachment.pdf");
+                                File.Copy(zf, pdfCopy, true);
+                                tempPdfFiles.Add(pdfCopy);
+                                Console.WriteLine($"[ATTACH] ZIP PDF added: {pdfCopy}");
+                            }
+                            else if (zfExt == ".doc" || zfExt == ".docx" || zfExt == ".xls" || zfExt == ".xlsx")
+                            {
+                                if (TryConvertOfficeToPdf(zf, zfPdf))
+                                {
+                                    tempPdfFiles.Add(zfPdf);
+                                    Console.WriteLine($"[ATTACH] ZIP Office converted: {zfPdf}");
+                                }
+                                else
+                                {
+                                    AddPlaceholderPdf(zfPdf, $"Could not convert attachment: {Path.GetFileName(zf)}");
+                                    Console.WriteLine($"[ATTACH] ZIP Office failed to convert: {zf}");
+                                }
+                            }
+                            else
+                            {
+                                AddPlaceholderPdf(zfPdf, $"Unsupported attachment: {Path.GetFileName(zf)}");
+                                tempPdfFiles.Add(zfPdf);
+                                Console.WriteLine($"[ATTACH] ZIP unsupported: {zf}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        AddPlaceholderPdf(attPdf, $"Unsupported attachment: {attName}");
+                        tempPdfFiles.Add(attPdf);
+                        Console.WriteLine($"[ATTACH] Unsupported type: {attName}");
+                    }
+                    Console.WriteLine($"[ATTACH] Finished: {attName}");
+                }
+                catch (Exception ex)
+                {
+                    AddPlaceholderPdf(attPdf, $"Error processing attachment: {ex.Message}");
+                    tempPdfFiles.Add(attPdf);
+                    LogDebug($"Exception processing attachment: {ex}");
+                    Console.WriteLine($"[ATTACH] Exception: {attName} - {ex}");
+                }
+            }
+
+            // Merge all tempPdfFiles using the robust iText7 method from PdfAppendTest
+            try
+            {
+                PdfAppendTest.AppendPdfs(tempPdfFiles, mainPdfPath);
+            }
+            finally
+            {
+                // Do not delete temp files for now
+            }
+        }
+
+        // Merges multiple PDFs into one using iText7, never including the output file as an input
+        private void MergePdfs(string[] pdfFiles, string outputPdf)
+        {
+            Console.WriteLine($"[MERGE] (iText7) Merging PDFs into: {outputPdf}");
+            // Filter out the output file if present in the input list
+            var inputFiles = new List<string>();
+            foreach (var f in pdfFiles)
+            {
+                if (!string.Equals(f, outputPdf, StringComparison.OrdinalIgnoreCase))
+                    inputFiles.Add(f);
+            }
+            // Filter out PDFs that are empty or invalid
+            var validInputFiles = new List<string>();
+            foreach (var pdf in inputFiles)
+            {
+                try
+                {
+                    using (var reader = new iText.Kernel.Pdf.PdfReader(pdf))
+                    using (var doc = new iText.Kernel.Pdf.PdfDocument(reader))
+                    {
+                        int n = doc.GetNumberOfPages();
+                        if (n > 0)
+                        {
+                            validInputFiles.Add(pdf);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[MERGE] Skipping empty PDF: {pdf}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[MERGE] Skipping invalid PDF: {pdf} - {ex.Message}");
+                }
+            }
+            if (validInputFiles.Count == 0)
+            {
+                Console.WriteLine("[MERGE] No valid PDFs to merge. Aborting.");
+                return;
+            }
+            using (var stream = new FileStream(outputPdf, FileMode.Create, FileAccess.Write))
+            using (var pdfWriter = new iText.Kernel.Pdf.PdfWriter(stream))
+            using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(pdfWriter))
+            {
+                foreach (var pdf in validInputFiles)
+                {
+                    using (var srcPdf = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(pdf)))
+                    {
+                        int n = srcPdf.GetNumberOfPages();
+                        srcPdf.CopyPagesTo(1, n, pdfDoc);
+                    }
+                }
+            }
+            Console.WriteLine($"[MERGE] (iText7) Saved merged PDF: {outputPdf}");
+        }
+
+        // Adds a single-page PDF with a message
+        private void AddPlaceholderPdf(string pdfPath, string message, string imagePath = null)
+        {
+            using (var doc = new PdfSharp.Pdf.PdfDocument())
+            {
+                var page = doc.AddPage();
+                using (var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(page))
+                {
+                    if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                    {
+                        try
+                        {
+                            Console.WriteLine($"[IMG2PDF] Attempting to load image: {imagePath}");
+                            var img = PdfSharp.Drawing.XImage.FromFile(imagePath);
+                            Console.WriteLine($"[IMG2PDF] Loaded image: {imagePath}");
+                            double maxWidth = page.Width.Point - 80;
+                            double maxHeight = page.Height.Point - 300;
+                            double scale = Math.Min(maxWidth / img.PixelWidth * 72.0 / img.HorizontalResolution, maxHeight / img.PixelHeight * 72.0 / img.VerticalResolution);
+                            double imgWidth = img.PixelWidth * 72.0 / img.HorizontalResolution * scale;
+                            double imgHeight = img.PixelHeight * 72.0 / img.VerticalResolution * scale;
+                            double x = (page.Width.Point - imgWidth) / 2;
+                            double y = 100;
+                            gfx.DrawImage(img, x, y, imgWidth, imgHeight);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[IMG2PDF] Failed to load image: {imagePath} - {ex.Message}");
+                        }
+                    }
+                    var font = new PdfSharp.Drawing.XFont("Arial", 16);
+                    gfx.DrawString(message, font, PdfSharp.Drawing.XBrushes.Black, new PdfSharp.Drawing.XRect(40, page.Height.Point - 200, page.Width.Point - 80, 100), PdfSharp.Drawing.XStringFormats.Center);
+                }
+                doc.Save(pdfPath);
+            }
+        }
+
+        // Attempts to convert Office files to PDF using Office Interop (requires Office installed)
+        private bool TryConvertOfficeToPdf(string inputPath, string outputPdf)
+        {
+            string ext = Path.GetExtension(inputPath).ToLowerInvariant();
+            bool result = false;
+            Exception threadEx = null;
+            var thread = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    if (ext == ".doc" || ext == ".docx")
+                    {
+                        var wordApp = new Microsoft.Office.Interop.Word.Application();
+                        var doc = wordApp.Documents.Open(inputPath);
+                        doc.ExportAsFixedFormat(outputPdf, Microsoft.Office.Interop.Word.WdExportFormat.wdExportFormatPDF);
+                        doc.Close();
+                        wordApp.Quit();
+                        result = true;
+                    }
+                    else if (ext == ".xls" || ext == ".xlsx")
+                    {
+                        var excelApp = new Microsoft.Office.Interop.Excel.Application();
+                        var wb = excelApp.Workbooks.Open(inputPath);
+                        wb.ExportAsFixedFormat(Microsoft.Office.Interop.Excel.XlFixedFormatType.xlTypePDF, outputPdf);
+                        wb.Close();
+                        excelApp.Quit();
+                        result = true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    threadEx = ex;
+                }
+            });
+            thread.SetApartmentState(System.Threading.ApartmentState.STA);
+            thread.Start();
+            thread.Join();
+            if (threadEx != null)
+            {
+                // Optionally log threadEx
+                return false;
+            }
+            return result;
         }
 
         private void FilesListBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)

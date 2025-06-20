@@ -12,6 +12,7 @@
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
         <TextBlock FontSize="16"
                    FontWeight="Bold"
@@ -33,6 +34,15 @@
                  SelectionMode="Extended"
                  KeyDown="FilesListBox_KeyDown"
                  Grid.Row="3"/>
+        <CheckBox x:Name="AppendAttachmentsCheckBox"
+                  Content="Append attachments as PDF at the end"
+                  Margin="0,0,0,10"
+                  Grid.Row="4"/>
+        <Button x:Name="ConvertButton"
+                Content="Convert to PDF"
+                Click="ConvertButton_Click"
+                IsEnabled="False"
+                Grid.Row="5"/>
         <ProgressBar x:Name="ProgressBar"
                      Height="20"
                      Margin="0,0,0,10"
@@ -40,11 +50,6 @@
                      Maximum="100"
                      Value="0"
                      Visibility="Collapsed"
-                     Grid.Row="4"/>
-        <Button x:Name="ConvertButton"
-                Content="Convert to PDF"
-                Click="ConvertButton_Click"
-                IsEnabled="False"
-                Grid.Row="5"/>
+                     Grid.Row="6"/>
     </Grid>
 </Window>
