@@ -138,6 +138,26 @@ namespace MsgToPdfConverter
             });
         }
 
+        private string BuildEmailHtml(Storage.Message msg)
+        {
+            string from = msg.Sender?.DisplayName ?? msg.Sender?.Email ?? "";
+            string sent = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("f") : "";
+            string to = string.Join(", ", msg.Recipients?.FindAll(r => r.Type == Storage.Recipient.RecipientType.To)?.ConvertAll(r => r.DisplayName + (string.IsNullOrEmpty(r.Email) ? "" : $" <{r.Email}>")) ?? new List<string>());
+            string cc = string.Join(", ", msg.Recipients?.FindAll(r => r.Type == Storage.Recipient.RecipientType.Cc)?.ConvertAll(r => r.DisplayName + (string.IsNullOrEmpty(r.Email) ? "" : $" <{r.Email}>")) ?? new List<string>());
+            string subject = msg.Subject ?? "";
+            string body = EmbedInlineImages(msg) ?? "";
+
+            string header = $@"
+                <div style='font-family:Segoe UI,Arial,sans-serif;font-size:12pt;margin-bottom:16px;'>
+                    <div><b>From:</b> {System.Net.WebUtility.HtmlEncode(from)}</div>
+                    <div><b>Sent:</b> {System.Net.WebUtility.HtmlEncode(sent)}</div>
+                    <div><b>To:</b> {System.Net.WebUtility.HtmlEncode(to)}</div>
+                    {(string.IsNullOrWhiteSpace(cc) ? "" : $"<div><b>Cc:</b> {System.Net.WebUtility.HtmlEncode(cc)}</div>")}
+                    <div><b>Subject:</b> {System.Net.WebUtility.HtmlEncode(subject)}</div>
+                </div>";
+            return header + body;
+        }
+
         private void ConvertButton_Click(object sender, RoutedEventArgs e)
         {
             if (selectedFiles == null || selectedFiles.Count == 0)
@@ -153,7 +173,7 @@ namespace MsgToPdfConverter
                 {
                     var msg = new Storage.Message(msgFilePath);
                     string pdfFilePath = Path.ChangeExtension(msgFilePath, ".pdf");
-                    string htmlWithImages = EmbedInlineImages(msg);
+                    string htmlWithHeader = BuildEmailHtml(msg);
                     var doc = new HtmlToPdfDocument()
                     {
                         GlobalSettings = new GlobalSettings
@@ -167,7 +187,7 @@ namespace MsgToPdfConverter
                             new ObjectSettings
                             {
                                 PagesCount = true,
-                                HtmlContent = htmlWithImages,
+                                HtmlContent = htmlWithHeader,
                                 WebSettings = { DefaultEncoding = "utf-8" }
                             }
                         }
