@@ -334,19 +334,28 @@ namespace MsgToPdfConverter
                                 var allPdfFiles = new List<string> { pdfFilePath };
                                 var allTempFiles = new List<string>();
                                 string tempDir = Path.GetDirectoryName(pdfFilePath);
-                                foreach (var att in typedAttachments)
+                                int totalAttachments = typedAttachments.Count;
+                                for (int attIndex = 0; attIndex < typedAttachments.Count; attIndex++)
                                 {
+                                    var att = typedAttachments[attIndex];
                                     string attName = att.FileName ?? "attachment";
                                     string ext = Path.GetExtension(attName).ToLowerInvariant();
                                     string attPath = Path.Combine(tempDir, attName);
                                     string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
+                                    string headerText = $"Attachment: {attIndex + 1}/{totalAttachments}";
                                     try
                                     {
                                         File.WriteAllBytes(attPath, att.Data);
                                         allTempFiles.Add(attPath);
+                                        string finalAttachmentPdf = null;
                                         if (ext == ".pdf")
                                         {
-                                            allPdfFiles.Add(attPath);
+                                            string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                                            AddHeaderPdf(headerPdf, headerText);
+                                            finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                                            PdfAppendTest.AppendPdfs(new List<string> { headerPdf, attPath }, finalAttachmentPdf);
+                                            allTempFiles.Add(headerPdf);
+                                            allTempFiles.Add(finalAttachmentPdf);
                                         }
                                         else if (ext == ".jpg" || ext == ".jpeg")
                                         {
@@ -354,19 +363,34 @@ namespace MsgToPdfConverter
                                             using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
                                             using (var docImg = new iText.Layout.Document(pdf))
                                             {
+                                                var p = new iText.Layout.Element.Paragraph(headerText)
+                                                    .SetTextAlignment(iText.Layout.Properties.TextAlignment.CENTER)
+                                                    .SetFontSize(16);
+                                                docImg.Add(p);
                                                 var imgData = iText.IO.Image.ImageDataFactory.Create(attPath);
                                                 var image = new iText.Layout.Element.Image(imgData);
                                                 docImg.Add(image);
                                             }
-                                            allPdfFiles.Add(attPdf);
+                                            finalAttachmentPdf = attPdf;
                                             allTempFiles.Add(attPdf);
                                         }
                                         else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
                                         {
                                             if (TryConvertOfficeToPdf(attPath, attPdf))
                                             {
-                                                allPdfFiles.Add(attPdf);
-                                                allTempFiles.Add(attPdf);
+                                                string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                                                AddHeaderPdf(headerPdf, headerText);
+                                                finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                                                PdfAppendTest.AppendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
+                                                allTempFiles.Add(headerPdf);
+                                                allTempFiles.Add(finalAttachmentPdf);
+                                            }
+                                            else
+                                            {
+                                                // Conversion failed, add placeholder
+                                                finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
+                                                AddHeaderPdf(finalAttachmentPdf, headerText + "\n(Conversion failed)");
+                                                allTempFiles.Add(finalAttachmentPdf);
                                             }
                                         }
                                         else if (ext == ".zip")
@@ -375,29 +399,70 @@ namespace MsgToPdfConverter
                                             System.IO.Compression.ZipFile.ExtractToDirectory(attPath, extractDir);
                                             allTempFiles.Add(attPath);
                                             var zipFiles = Directory.GetFiles(extractDir, "*.*", SearchOption.AllDirectories);
+                                            int zipFileIndex = 0;
                                             foreach (var zf in zipFiles)
                                             {
-                                                allTempFiles.Add(zf);
+                                                zipFileIndex++;
                                                 string zfPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(zf) + ".pdf");
                                                 string zfExt = Path.GetExtension(zf).ToLowerInvariant();
+                                                string zipHeader = $"Attachment: {attIndex + 1}/{totalAttachments} (ZIP {zipFileIndex}/{zipFiles.Length})";
+                                                string finalZipPdf = null;
                                                 if (zfExt == ".pdf")
                                                 {
-                                                    allPdfFiles.Add(zf);
+                                                    string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                                                    AddHeaderPdf(headerPdf, zipHeader);
+                                                    string mergedZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                                                    PdfAppendTest.AppendPdfs(new List<string> { headerPdf, zf }, mergedZipPdf);
+                                                    allPdfFiles.Add(mergedZipPdf);
+                                                    allTempFiles.Add(headerPdf);
+                                                    allTempFiles.Add(mergedZipPdf);
                                                 }
                                                 else if (zfExt == ".doc" || zfExt == ".docx" || zfExt == ".xls" || zfExt == ".xlsx")
                                                 {
                                                     if (TryConvertOfficeToPdf(zf, zfPdf))
                                                     {
-                                                        allPdfFiles.Add(zfPdf);
-                                                        allTempFiles.Add(zfPdf);
+                                                        string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                                                        AddHeaderPdf(headerPdf, zipHeader);
+                                                        finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                                                        PdfAppendTest.AppendPdfs(new List<string> { headerPdf, zfPdf }, finalZipPdf);
+                                                        allTempFiles.Add(headerPdf);
+                                                        allTempFiles.Add(finalZipPdf);
+                                                    }
+                                                    else
+                                                    {
+                                                        finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
+                                                        AddHeaderPdf(finalZipPdf, zipHeader + "\n(Conversion failed)");
+                                                        allTempFiles.Add(finalZipPdf);
                                                     }
                                                 }
+                                                else
+                                                {
+                                                    finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
+                                                    AddHeaderPdf(finalZipPdf, zipHeader + "\n(Unsupported type)");
+                                                    allTempFiles.Add(finalZipPdf);
+                                                }
+                                                if (finalZipPdf != null)
+                                                    allPdfFiles.Add(finalZipPdf);
                                             }
                                             allTempFiles.Add(extractDir);
                                         }
+                                        else
+                                        {
+                                            // Unsupported type, add placeholder
+                                            finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
+                                            AddHeaderPdf(finalAttachmentPdf, headerText + "\n(Unsupported type)");
+                                            allTempFiles.Add(finalAttachmentPdf);
+                                        }
+                                        if (finalAttachmentPdf != null)
+                                            allPdfFiles.Add(finalAttachmentPdf);
                                     }
                                     catch (Exception ex)
                                     {
+                                        // On error, add placeholder
+                                        string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
+                                        AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
+                                        allPdfFiles.Add(errorPdf);
+                                        allTempFiles.Add(errorPdf);
                                         Console.WriteLine($"[ATTACH] Exception: {attName} - {ex}");
                                     }
                                 }
@@ -666,6 +731,20 @@ namespace MsgToPdfConverter
                     gfx.DrawString(message, font, PdfSharp.Drawing.XBrushes.Black, new PdfSharp.Drawing.XRect(40, page.Height.Point - 200, page.Width.Point - 80, 100), PdfSharp.Drawing.XStringFormats.Center);
                 }
                 doc.Save(pdfPath);
+            }
+        }
+
+        // Helper to create a single-page PDF with a header text at the top center using iText
+        private void AddHeaderPdf(string pdfPath, string headerText)
+        {
+            using (var writer = new iText.Kernel.Pdf.PdfWriter(pdfPath))
+            using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
+            using (var doc = new iText.Layout.Document(pdf))
+            {
+                var p = new iText.Layout.Element.Paragraph(headerText)
+                    .SetTextAlignment(iText.Layout.Properties.TextAlignment.CENTER)
+                    .SetFontSize(18);
+                doc.Add(p);
             }
         }
 
