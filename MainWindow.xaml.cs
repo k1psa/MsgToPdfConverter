@@ -14,12 +14,15 @@ using iText.Kernel.Pdf;
 using iText.Layout;
 using iText.IO.Image;
 using iText.Layout.Element;
+using System.Threading.Tasks;
 
 namespace MsgToPdfConverter
 {
     public partial class MainWindow : Window
     {
         private List<string> selectedFiles = new List<string>();
+        private int convertButtonClickCount = 0;
+        private bool isConverting = false;
 
         public MainWindow()
         {
@@ -180,94 +183,144 @@ namespace MsgToPdfConverter
             return header + body;
         }
 
-        private void LogDebug(string message)
+        private void KillWkhtmltopdfProcesses()
         {
             try
             {
-                string logPath = Path.Combine(Path.GetTempPath(), "MsgToPdfConverter_debug.log");
-                File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}\r\n");
+                var procs = System.Diagnostics.Process.GetProcessesByName("wkhtmltopdf");
+                foreach (var proc in procs)
+                {
+                    try { proc.Kill(); } catch { }
+                }
+                Console.WriteLine($"Killed {procs.Length} lingering wkhtmltopdf processes.");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error killing wkhtmltopdf processes: {ex.Message}");
+            }
+        }
+
+        private void RunDinkToPdfConversion(HtmlToPdfDocument doc)
+        {
+            Exception threadEx = null;
+            Console.WriteLine("[DEBUG] About to create STA thread for DinkToPdf");
+            var staThread = new System.Threading.Thread(() =>
+            {
+                try
+                {
+                    Console.WriteLine("[DEBUG] Inside STA thread: Killing lingering wkhtmltopdf processes");
+                    KillWkhtmltopdfProcesses();
+                    Console.WriteLine("[DEBUG] Inside STA thread: Creating SynchronizedConverter");
+                    var converter = new SynchronizedConverter(new PdfTools());
+                    Console.WriteLine("[DEBUG] Inside STA thread: Starting converter.Convert");
+                    converter.Convert(doc);
+                    Console.WriteLine("[DEBUG] Inside STA thread: Finished converter.Convert");
+                    KillWkhtmltopdfProcesses();
+                    GC.Collect();
+                    GC.WaitForPendingFinalizers();
+                }
+                catch (Exception ex)
+                {
+                    threadEx = ex;
+                    Console.WriteLine($"[DINKTOPDF] Exception: {ex}");
+                }
+            });
+            staThread.SetApartmentState(System.Threading.ApartmentState.STA);
+            Console.WriteLine("[DEBUG] About to start STA thread");
+            staThread.Start();
+            Console.WriteLine("[DEBUG] Waiting for STA thread to finish");
+            staThread.Join();
+            Console.WriteLine("[DEBUG] STA thread finished");
+            if (threadEx != null)
+                throw new Exception("DinkToPdf conversion failed", threadEx);
         }
 
         private async void ConvertButton_Click(object sender, RoutedEventArgs e)
         {
-            Console.WriteLine("Convert clicked");
-            LogDebug("ConvertButton_Click started");
-            if (selectedFiles == null || selectedFiles.Count == 0)
+            Console.WriteLine("[DEBUG] Entered ConvertButton_Click");
+            if (isConverting)
             {
-                LogDebug("No files selected");
-                Console.WriteLine("No files selected.");
+                Console.WriteLine("[DEBUG] Conversion already in progress, ignoring click.");
                 return;
             }
-            Console.WriteLine("Files selected, starting conversion");
-            int success = 0, fail = 0;
-            ProgressBar.Visibility = Visibility.Visible;
-            ProgressBar.Minimum = 0;
-            ProgressBar.Maximum = selectedFiles.Count;
-            ProgressBar.Value = 0;
-            var converter = new SynchronizedConverter(new PdfTools());
-            bool appendAttachments = false;
-            Dispatcher.Invoke(() => appendAttachments = AppendAttachmentsCheckBox.IsChecked == true);
-
-            await System.Threading.Tasks.Task.Run(() =>
+            isConverting = true;
+            convertButtonClickCount++;
+            Console.WriteLine($"[DEBUG] Convert button pressed {convertButtonClickCount} time(s)");
+            try
             {
-                Console.WriteLine("[TASK] Started conversion task");
-                try
+                Console.WriteLine("[DEBUG] Disabling ConvertButton and showing ProgressBar");
+                ConvertButton.IsEnabled = false;
+                ProgressBar.Visibility = Visibility.Visible;
+                ProgressBar.Minimum = 0;
+                ProgressBar.Maximum = selectedFiles.Count;
+                ProgressBar.Value = 0;
+                int success = 0, fail = 0;
+                bool appendAttachments = AppendAttachmentsCheckBox.IsChecked == true;
+                Console.WriteLine($"[DEBUG] appendAttachments: {appendAttachments}");
+                await Task.Run(() =>
                 {
+                    Console.WriteLine("[DEBUG] Starting batch loop");
                     for (int i = 0; i < selectedFiles.Count; i++)
                     {
-                        Console.WriteLine($"[TASK] Processing file {i + 1} of {selectedFiles.Count}: {selectedFiles[i]}");
-                        var msgFilePath = selectedFiles[i];
-                        LogDebug($"Processing file: {msgFilePath}");
+                        Console.WriteLine($"[DEBUG] Loop index: {i}");
                         try
                         {
+                            Console.WriteLine($"[TASK] Processing file {i + 1} of {selectedFiles.Count}: {selectedFiles[i]}");
+                            var msgFilePath = selectedFiles[i];
+                            Console.WriteLine($"[TASK] Loading MSG: {msgFilePath}");
                             var msg = new Storage.Message(msgFilePath);
                             Console.WriteLine($"[TASK] Loaded MSG: {msgFilePath}");
-                            LogDebug($"Loaded MSG: {msgFilePath}");
-                            string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
+                            string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
                             string baseName = Path.GetFileNameWithoutExtension(msgFilePath);
                             string dir = Path.GetDirectoryName(msgFilePath);
                             string pdfFilePath = Path.Combine(dir, $"{baseName} - {datePart}.pdf");
+                            if (File.Exists(pdfFilePath))
+                            {
+                                try { File.Delete(pdfFilePath); Console.WriteLine($"[DEBUG] Deleted old PDF: {pdfFilePath}"); } catch (Exception ex) { Console.WriteLine($"[DEBUG] Could not delete old PDF: {ex.Message}"); }
+                            }
+                            Console.WriteLine($"[TASK] Output PDF path: {pdfFilePath}");
                             string htmlWithHeader = BuildEmailHtml(msg);
                             Console.WriteLine($"[TASK] Built HTML for: {msgFilePath}");
-                            LogDebug($"Building PDF: {pdfFilePath}");
-                            var doc = new HtmlToPdfDocument()
+                            Console.WriteLine($"[TASK] HTML length: {htmlWithHeader?.Length ?? 0}");
+                            // Write HTML to a temp file
+                            string tempHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
+                            File.WriteAllText(tempHtmlPath, htmlWithHeader);
+                            Console.WriteLine($"[DEBUG] Written HTML to temp file: {tempHtmlPath}");
+                            // Launch a new process for each conversion
+                            var psi = new System.Diagnostics.ProcessStartInfo
                             {
-                                GlobalSettings = new GlobalSettings
-                                {
-                                    ColorMode = ColorMode.Color,
-                                    Orientation = Orientation.Portrait,
-                                    PaperSize = PaperKind.A4,
-                                    Out = pdfFilePath
-                                },
-                                Objects = {
-                                    new ObjectSettings
-                                    {
-                                        PagesCount = true,
-                                        HtmlContent = htmlWithHeader,
-                                        WebSettings = { DefaultEncoding = "utf-8" }
-                                    }
-                                }
+                                FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
+                                Arguments = $"--html2pdf \"{tempHtmlPath}\" \"{pdfFilePath}\"",
+                                UseShellExecute = false,
+                                CreateNoWindow = true,
+                                RedirectStandardOutput = true,
+                                RedirectStandardError = true
                             };
-                            Console.WriteLine("[TASK] About to call converter.Convert(doc);");
-                            converter.Convert(doc);
-                            Console.WriteLine("[TASK] Finished converter.Convert(doc);");
+                            Console.WriteLine($"[DEBUG] Starting HtmlToPdfWorker process: {psi.FileName} {psi.Arguments}");
+                            var proc = System.Diagnostics.Process.Start(psi);
+                            string stdOut = proc.StandardOutput.ReadToEnd();
+                            string stdErr = proc.StandardError.ReadToEnd();
+                            proc.WaitForExit();
+                            Console.WriteLine($"[DEBUG] HtmlToPdfWorker exit code: {proc.ExitCode}");
+                            if (proc.ExitCode != 0)
+                            {
+                                Console.WriteLine($"[DEBUG] HtmlToPdfWorker failed. StdOut: {stdOut} StdErr: {stdErr}");
+                                throw new Exception($"HtmlToPdfWorker failed: {stdErr}");
+                            }
+                            File.Delete(tempHtmlPath);
                             Console.WriteLine($"[TASK] Email PDF created: {pdfFilePath}");
-                            LogDebug($"Email PDF created: {pdfFilePath}");
-
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
                             if (appendAttachments && msg.Attachments != null && msg.Attachments.Count > 0)
                             {
-                                // Step 1: Extract and convert attachments to PDF, collect all PDF paths
+                                Console.WriteLine($"[DEBUG] Processing attachments for {pdfFilePath}");
                                 var typedAttachments = new List<Storage.Attachment>();
                                 foreach (var att in msg.Attachments)
                                 {
                                     if (att is Storage.Attachment a) typedAttachments.Add(a);
                                 }
-                                LogDebug($"Extracting and converting {typedAttachments.Count} attachments for {pdfFilePath}");
-                                Console.WriteLine($"Extracting and converting {typedAttachments.Count} attachments for {pdfFilePath}");
                                 var allPdfFiles = new List<string> { pdfFilePath };
-                                var allTempFiles = new List<string>(); // Track all temp files (originals and PDFs)
+                                var allTempFiles = new List<string>();
                                 string tempDir = Path.GetDirectoryName(pdfFilePath);
                                 foreach (var att in typedAttachments)
                                 {
@@ -278,7 +331,7 @@ namespace MsgToPdfConverter
                                     try
                                     {
                                         File.WriteAllBytes(attPath, att.Data);
-                                        allTempFiles.Add(attPath); // Track the extracted file
+                                        allTempFiles.Add(attPath);
                                         if (ext == ".pdf")
                                         {
                                             allPdfFiles.Add(attPath);
@@ -294,7 +347,7 @@ namespace MsgToPdfConverter
                                                 docImg.Add(image);
                                             }
                                             allPdfFiles.Add(attPdf);
-                                            allTempFiles.Add(attPdf); // Track the converted PDF
+                                            allTempFiles.Add(attPdf);
                                         }
                                         else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
                                         {
@@ -308,11 +361,11 @@ namespace MsgToPdfConverter
                                         {
                                             string extractDir = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName));
                                             System.IO.Compression.ZipFile.ExtractToDirectory(attPath, extractDir);
-                                            allTempFiles.Add(attPath); // Track the zip file
+                                            allTempFiles.Add(attPath);
                                             var zipFiles = Directory.GetFiles(extractDir, "*.*", SearchOption.AllDirectories);
                                             foreach (var zf in zipFiles)
                                             {
-                                                allTempFiles.Add(zf); // Track all extracted files
+                                                allTempFiles.Add(zf);
                                                 string zfPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(zf) + ".pdf");
                                                 string zfExt = Path.GetExtension(zf).ToLowerInvariant();
                                                 if (zfExt == ".pdf")
@@ -328,67 +381,86 @@ namespace MsgToPdfConverter
                                                     }
                                                 }
                                             }
-                                            allTempFiles.Add(extractDir); // Track the extracted directory for cleanup
+                                            allTempFiles.Add(extractDir);
                                         }
                                     }
                                     catch (Exception ex)
                                     {
-                                        LogDebug($"Exception processing attachment: {ex}");
                                         Console.WriteLine($"[ATTACH] Exception: {attName} - {ex}");
                                     }
                                 }
-                                // Step 2: Merge all PDFs into a temp file
                                 string mergedPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
+                                Console.WriteLine($"[DEBUG] Before PDF merge: {string.Join(", ", allPdfFiles)} -> {mergedPdf}");
                                 PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf);
-                                // Step 3: Delete original files (main and attachments, and all temp files except merged)
+                                Console.WriteLine("[DEBUG] After PDF merge");
+                                GC.Collect();
+                                GC.WaitForPendingFinalizers();
+                                System.Threading.Thread.Sleep(200);
                                 foreach (var f in allTempFiles)
                                 {
-                                    if (File.Exists(f) && !string.Equals(f, mergedPdf, StringComparison.OrdinalIgnoreCase) && !string.Equals(f, pdfFilePath, StringComparison.OrdinalIgnoreCase))
+                                    try
                                     {
-                                        try { File.Delete(f); } catch { }
+                                        if (File.Exists(f) && !string.Equals(f, mergedPdf, StringComparison.OrdinalIgnoreCase) && !string.Equals(f, pdfFilePath, StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            File.Delete(f);
+                                        }
+                                        else if (Directory.Exists(f))
+                                        {
+                                            Directory.Delete(f, true);
+                                        }
                                     }
-                                    else if (Directory.Exists(f))
+                                    catch (Exception ex)
                                     {
-                                        try { Directory.Delete(f, true); } catch { }
+                                        Console.WriteLine($"Failed to delete temp file or directory: {f} - {ex.Message}");
                                     }
                                 }
-                                // Step 4: Rename merged file back to original name
+                                Console.WriteLine("[DEBUG] Finished temp file deletion");
                                 if (File.Exists(mergedPdf))
                                 {
                                     File.Move(mergedPdf, pdfFilePath, true);
                                 }
-                                LogDebug($"Merged and replaced {pdfFilePath}");
                                 Console.WriteLine($"Merged and replaced {pdfFilePath}");
                             }
                             success++;
-                            LogDebug($"Success: {msgFilePath}");
+                            Console.WriteLine($"[DEBUG] Success count: {success}");
                         }
                         catch (Exception ex)
                         {
                             fail++;
-                            LogDebug($"Failed: {msgFilePath} - {ex}");
-                            Console.WriteLine($"Failed to convert: {msgFilePath}\nError: {ex.Message}");
+                            Console.WriteLine($"[ERROR] Failed to convert: {selectedFiles[i]}\nError: {ex}");
                         }
-                        Dispatcher.Invoke(() => ProgressBar.Value = i + 1);
+                        finally
+                        {
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
+                            KillWkhtmltopdfProcesses();
+                            Dispatcher.Invoke(() => ProgressBar.Value = i + 1);
+                            Console.WriteLine($"[DEBUG] Cleanup complete for file {i + 1}");
+                        }
                     }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[TASK] UNHANDLED EXCEPTION: {ex}");
-                }
-            });
-            ProgressBar.Visibility = Visibility.Collapsed;
-            LogDebug($"Conversion completed. Success: {success}, Failed: {fail}");
-            Console.WriteLine($"Conversion completed. Success: {success}, Failed: {fail}");
+                    Console.WriteLine($"[DEBUG] Batch loop finished. Success: {success}, Fail: {fail}");
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DEBUG] Exception in ConvertButton_Click outer: {ex}");
+                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                isConverting = false;
+                ProgressBar.Visibility = Visibility.Collapsed;
+                ConvertButton.IsEnabled = true;
+                Console.WriteLine("[DEBUG] ConvertButton_Click finished");
+            }
         }
 
         // Appends attachments as PDFs to the main email PDF
         private void AppendAttachmentsToPdf(string mainPdfPath, List<Storage.Attachment> attachments, SynchronizedConverter converter)
         {
-            LogDebug($"Total attachments: {attachments.Count}");
+            Console.WriteLine($"Total attachments: {attachments.Count}");
             string allNames = string.Join(", ", attachments.ConvertAll(a => a.FileName ?? "(no name)"));
-            LogDebug($"Attachment names: {allNames}");
-            Console.WriteLine($"Total attachments: {attachments.Count}\nNames: {allNames}");
+            Console.WriteLine($"Attachment names: {allNames}");
             var tempPdfFiles = new List<string> { mainPdfPath };
             // Use the original file directory for temp files
             string tempDir = Path.GetDirectoryName(mainPdfPath);
@@ -477,7 +549,6 @@ namespace MsgToPdfConverter
                 {
                     AddPlaceholderPdf(attPdf, $"Error processing attachment: {ex.Message}");
                     tempPdfFiles.Add(attPdf);
-                    LogDebug($"Exception processing attachment: {ex}");
                     Console.WriteLine($"[ATTACH] Exception: {attName} - {ex}");
                 }
             }
@@ -647,6 +718,13 @@ namespace MsgToPdfConverter
                 }
                 ConvertButton.IsEnabled = FilesListBox.Items.Count > 0;
             }
+        }
+
+        private void ResetApplication()
+        {
+            // Option 1: Restart the application programmatically
+            System.Diagnostics.Process.Start(System.Windows.Application.ResourceAssembly.Location);
+            System.Windows.Application.Current.Shutdown();
         }
     }
 }

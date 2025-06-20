@@ -9,6 +9,16 @@ namespace MsgToPdfConverter
     {
         protected override void OnStartup(StartupEventArgs e)
         {
+            // Command-line worker mode: --html2pdf <htmlPath> <pdfPath>
+            if (e.Args != null && e.Args.Length == 3 && e.Args[0] == "--html2pdf")
+            {
+                string htmlPath = e.Args[1];
+                string pdfPath = e.Args[2];
+                string html = File.ReadAllText(htmlPath);
+                int result = MsgToPdfConverter.HtmlToPdfWorker.Convert(html, pdfPath);
+                Environment.Exit(result);
+                return;
+            }
             if (!IsDotNetDesktopRuntimeInstalled())
             {
                 var result = MessageBox.Show(
