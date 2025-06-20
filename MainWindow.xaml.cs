@@ -240,5 +240,23 @@ namespace MsgToPdfConverter
             ProgressBar.Visibility = Visibility.Collapsed;
             MessageBox.Show($"Conversion completed. Success: {success}, Failed: {fail}", "Result", MessageBoxButton.OK, MessageBoxImage.Information);
         }
+
+        private void FilesListBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (e.Key == System.Windows.Input.Key.Delete && FilesListBox.SelectedItems.Count > 0)
+            {
+                var itemsToRemove = new List<string>();
+                foreach (var item in FilesListBox.SelectedItems)
+                {
+                    itemsToRemove.Add(item as string);
+                }
+                foreach (var item in itemsToRemove)
+                {
+                    FilesListBox.Items.Remove(item);
+                    selectedFiles.Remove(item);
+                }
+                ConvertButton.IsEnabled = FilesListBox.Items.Count > 0;
+            }
+        }
     }
 }
