@@ -15,6 +15,7 @@ using iText.Layout;
 using iText.IO.Image;
 using iText.Layout.Element;
 using System.Threading.Tasks;
+using System.Linq;
 
 namespace MsgToPdfConverter
 {
@@ -286,6 +287,8 @@ namespace MsgToPdfConverter
                             string tempHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
                             File.WriteAllText(tempHtmlPath, htmlWithHeader);
                             Console.WriteLine($"[DEBUG] Written HTML to temp file: {tempHtmlPath}");
+                            // Find all inline ContentIds
+                            var inlineContentIds = GetInlineContentIds(htmlWithHeader);
                             // Launch a new process for each conversion
                             var psi = new System.Diagnostics.ProcessStartInfo
                             {
@@ -317,7 +320,16 @@ namespace MsgToPdfConverter
                                 var typedAttachments = new List<Storage.Attachment>();
                                 foreach (var att in msg.Attachments)
                                 {
-                                    if (att is Storage.Attachment a) typedAttachments.Add(a);
+                                    // Exclude inline images (signature, etc.)
+                                    if (att is Storage.Attachment a)
+                                    {
+                                        if ((a.IsInline == true) || (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '\"', '\'', ' '))))
+                                        {
+                                            Console.WriteLine($"[DEBUG] Skipping inline attachment: {a.FileName} (ContentId: {a.ContentId}, IsInline: {a.IsInline})");
+                                            continue;
+                                        }
+                                        typedAttachments.Add(a);
+                                    }
                                 }
                                 var allPdfFiles = new List<string> { pdfFilePath };
                                 var allTempFiles = new List<string>();
@@ -725,6 +737,21 @@ namespace MsgToPdfConverter
             // Option 1: Restart the application programmatically
             System.Diagnostics.Process.Start(System.Windows.Application.ResourceAssembly.Location);
             System.Windows.Application.Current.Shutdown();
+        }
+
+        // Returns all ContentIds referenced as inline images in the HTML
+        private HashSet<string> GetInlineContentIds(string html)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrEmpty(html)) return set;
+            // Match src='cid:...' or src="cid:..." and optional angle brackets
+            var regex = new Regex("<img[^>]+src=['\"]cid:<?([^'\">]+)>?['\"]", RegexOptions.IgnoreCase);
+            foreach (Match match in regex.Matches(html))
+            {
+                if (match.Groups.Count > 1)
+                    set.Add(match.Groups[1].Value.Trim('<', '>', '\"', '\'', ' '));
+            }
+            return set;
         }
     }
 }
