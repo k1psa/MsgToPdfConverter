@@ -172,7 +172,10 @@ namespace MsgToPdfConverter
                 try
                 {
                     var msg = new Storage.Message(msgFilePath);
-                    string pdfFilePath = Path.ChangeExtension(msgFilePath, ".pdf");
+                    string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
+                    string baseName = Path.GetFileNameWithoutExtension(msgFilePath);
+                    string dir = Path.GetDirectoryName(msgFilePath);
+                    string pdfFilePath = Path.Combine(dir, $"{baseName} - {datePart}.pdf");
                     string htmlWithHeader = BuildEmailHtml(msg);
                     var doc = new HtmlToPdfDocument()
                     {
