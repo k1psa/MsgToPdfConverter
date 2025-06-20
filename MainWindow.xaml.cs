@@ -158,7 +158,7 @@ namespace MsgToPdfConverter
             return header + body;
         }
 
-        private void ConvertButton_Click(object sender, RoutedEventArgs e)
+        private async void ConvertButton_Click(object sender, RoutedEventArgs e)
         {
             if (selectedFiles == null || selectedFiles.Count == 0)
             {
@@ -166,44 +166,60 @@ namespace MsgToPdfConverter
                 return;
             }
             int success = 0, fail = 0;
+            ProgressBar.Visibility = Visibility.Visible;
+            ProgressBar.Minimum = 0;
+            ProgressBar.Maximum = selectedFiles.Count;
+            ProgressBar.Value = 0;
             var converter = new SynchronizedConverter(new PdfTools());
-            foreach (var msgFilePath in selectedFiles)
+
+            await System.Threading.Tasks.Task.Run(() =>
             {
-                try
+                for (int i = 0; i < selectedFiles.Count; i++)
                 {
-                    var msg = new Storage.Message(msgFilePath);
-                    string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
-                    string baseName = Path.GetFileNameWithoutExtension(msgFilePath);
-                    string dir = Path.GetDirectoryName(msgFilePath);
-                    string pdfFilePath = Path.Combine(dir, $"{baseName} - {datePart}.pdf");
-                    string htmlWithHeader = BuildEmailHtml(msg);
-                    var doc = new HtmlToPdfDocument()
+                    var msgFilePath = selectedFiles[i];
+                    try
                     {
-                        GlobalSettings = new GlobalSettings
+                        var msg = new Storage.Message(msgFilePath);
+                        string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
+                        string baseName = Path.GetFileNameWithoutExtension(msgFilePath);
+                        string dir = Path.GetDirectoryName(msgFilePath);
+                        string pdfFilePath = Path.Combine(dir, $"{baseName} - {datePart}.pdf");
+                        string htmlWithHeader = BuildEmailHtml(msg);
+                        var doc = new HtmlToPdfDocument()
                         {
-                            ColorMode = ColorMode.Color,
-                            Orientation = Orientation.Portrait,
-                            PaperSize = PaperKind.A4,
-                            Out = pdfFilePath
-                        },
-                        Objects = {
-                            new ObjectSettings
+                            GlobalSettings = new GlobalSettings
                             {
-                                PagesCount = true,
-                                HtmlContent = htmlWithHeader,
-                                WebSettings = { DefaultEncoding = "utf-8" }
+                                ColorMode = ColorMode.Color,
+                                Orientation = Orientation.Portrait,
+                                PaperSize = PaperKind.A4,
+                                Out = pdfFilePath
+                            },
+                            Objects = {
+                                new ObjectSettings
+                                {
+                                    PagesCount = true,
+                                    HtmlContent = htmlWithHeader,
+                                    WebSettings = { DefaultEncoding = "utf-8" }
+                                }
                             }
-                        }
-                    };
-                    converter.Convert(doc);
-                    success++;
+                        };
+                        converter.Convert(doc);
+                        success++;
+                    }
+                    catch (Exception ex)
+                    {
+                        fail++;
+                        // Show error on UI thread
+                        Dispatcher.Invoke(() =>
+                        {
+                            MessageBox.Show($"Failed to convert: {msgFilePath}\nError: {ex.Message}", "Conversion Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                        });
+                    }
+                    // Update progress bar on UI thread
+                    Dispatcher.Invoke(() => ProgressBar.Value = i + 1);
                 }
-                catch (Exception ex)
-                {
-                    fail++;
-                    MessageBox.Show($"Failed to convert: {msgFilePath}\nError: {ex.Message}", "Conversion Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-            }
+            });
+            ProgressBar.Visibility = Visibility.Collapsed;
             MessageBox.Show($"Conversion completed. Success: {success}, Failed: {fail}", "Result", MessageBoxButton.OK, MessageBoxImage.Information);
         }
     }
