@@ -14,6 +14,10 @@
                     Content="Select .msg Files"
                     Click="SelectFilesButton_Click"
                     Margin="0,0,0,10"/>
+            <Button x:Name="SelectFolderButton"
+                    Content="Select Folder"
+                    Click="SelectFolderButton_Click"
+                    Margin="0,0,0,10"/>
             <ListBox x:Name="FilesListBox"
                      Height="150"
                      Margin="0,0,0,10"/>
