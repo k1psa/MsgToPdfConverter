@@ -24,21 +24,25 @@ namespace MsgToPdfConverter.Utils
             }
 
             return result;
-        }
-
-        public static List<string> OpenMsgFolderDialog()
+        }        public static List<string> OpenMsgFolderDialog()
         {
             var result = new List<string>();
-            using (var dialog = new FolderBrowserDialog())
+
+            using (var folderDialog = new FolderBrowserDialog())
             {
-                dialog.Description = "Select a folder containing .msg files";
-                var dr = dialog.ShowDialog();
-                if (dr == DialogResult.OK && !string.IsNullOrWhiteSpace(dialog.SelectedPath))
+                folderDialog.Description = "Select Folder Containing .msg Files";
+                folderDialog.ShowNewFolderButton = false;
+
+                if (folderDialog.ShowDialog() == DialogResult.OK)
                 {
-                    string folder = dialog.SelectedPath;
-                    result.AddRange(Directory.GetFiles(folder, "*.msg", SearchOption.AllDirectories));
+                    string folderPath = folderDialog.SelectedPath;
+                    if (!string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
+                    {
+                        result.AddRange(Directory.GetFiles(folderPath, "*.msg", SearchOption.AllDirectories));
+                    }
                 }
             }
+
             return result;
         }
     }

@@ -4,52 +4,88 @@
         Title="MSG to PDF Converter"
         Height="370"
         Width="525">
-    <Grid Margin="10">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-        <TextBlock FontSize="16"
-                   FontWeight="Bold"
-                   Text="Select .msg Files to Convert to PDF"
-                   Margin="0,0,0,10"
-                   Grid.Row="0"/>
-        <Button x:Name="SelectFilesButton"
-                Content="Select .msg Files"
-                Click="SelectFilesButton_Click"
-                Margin="0,0,0,10"
-                Grid.Row="1"/>
-        <Button x:Name="SelectFolderButton"
-                Content="Select Folder"
-                Click="SelectFolderButton_Click"
-                Margin="0,0,0,10"
-                Grid.Row="2"/>
-        <ListBox x:Name="FilesListBox"
-                 Margin="0,0,0,10"
-                 SelectionMode="Extended"
-                 KeyDown="FilesListBox_KeyDown"
-                 Grid.Row="3"/>
-        <CheckBox x:Name="AppendAttachmentsCheckBox"
-                  Content="Append attachments as PDF at the end"
-                  Margin="0,0,0,10"
-                  Grid.Row="4"/>
-        <Button x:Name="ConvertButton"
-                Content="Convert to PDF"
-                Click="ConvertButton_Click"
-                IsEnabled="False"
-                Grid.Row="5"/>
-        <ProgressBar x:Name="ProgressBar"
-                     Height="20"
-                     Margin="0,0,0,10"
-                     Minimum="0"
-                     Maximum="100"
-                     Value="0"
-                     Visibility="Collapsed"
-                     Grid.Row="6"/>
-    </Grid>
+        <Grid Margin="10">
+                <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock FontSize="16"
+                           FontWeight="Bold"
+                           Text="Select .msg Files to Convert to PDF"
+                           Margin="0,0,0,10"
+                           Grid.Row="0"/>
+                <Button x:Name="SelectFilesButton"
+                        Content="Select .msg Files"
+                        Click="SelectFilesButton_Click"
+                        Margin="0,0,0,10"
+                        Grid.Row="1"/>
+                <Button x:Name="SelectFolderButton"
+                        Content="Select Folder"
+                        Click="SelectFolderButton_Click"
+                        Margin="0,0,0,10"
+                        Grid.Row="2"/>
+                <TextBlock x:Name="FileCountLabel"
+                           Text="Files selected: 0"
+                           FontStyle="Italic"
+                           Foreground="Gray"
+                           Margin="0,0,0,10"
+                           Grid.Row="3"/>
+                <ListBox x:Name="FilesListBox"
+                         Margin="0,0,0,10"
+                         SelectionMode="Extended"
+                         KeyDown="FilesListBox_KeyDown"
+                         AllowDrop="True"
+                         Drop="FilesListBox_Drop"
+                         DragEnter="FilesListBox_DragEnter"
+                         DragOver="FilesListBox_DragOver"
+                         Grid.Row="4"
+                         MinHeight="150">
+                        <ListBox.Style>
+                                <Style TargetType="ListBox">
+                                        <Style.Triggers>
+                                                <Trigger Property="HasItems" Value="False">
+                                                        <Setter Property="Template">
+                                                                <Setter.Value>
+                                                                        <ControlTemplate>
+                                                                                <Border Background="{TemplateBinding Background}"
+                                                                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                                                                        BorderThickness="{TemplateBinding BorderThickness}">
+                                                                                        <TextBlock Text="Drop .msg files or folders here, or use the buttons above"
+                                                                                                   Foreground="Gray"
+                                                                                                   FontStyle="Italic"
+                                                                                                   HorizontalAlignment="Center"
+                                                                                                   VerticalAlignment="Center"
+                                                                                                   Margin="10"/>
+                                                                                </Border>
+                                                                        </ControlTemplate>
+                                                                </Setter.Value>
+                                                        </Setter>
+                                                </Trigger>
+                                        </Style.Triggers>
+                                </Style>                        </ListBox.Style>
+                </ListBox>
+                <CheckBox x:Name="AppendAttachmentsCheckBox"
+                          Content="Append attachments as PDF at the end"
+                          Margin="0,0,0,10"
+                          Grid.Row="5"/>
+                <Button x:Name="ConvertButton"
+                        Content="Convert to PDF"
+                        Click="ConvertButton_Click"
+                        IsEnabled="False"
+                        Grid.Row="6"/>
+                <ProgressBar x:Name="ProgressBar"
+                             Height="20"
+                             Margin="0,0,0,10"
+                             Minimum="0"
+                             Maximum="100"
+                             Value="0"
+                             Visibility="Collapsed"
+                             Grid.Row="7"/>
+        </Grid>
 </Window>

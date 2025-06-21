@@ -79,9 +79,7 @@ namespace MsgToPdfConverter
                 }
             }
             return false;
-        }
-
-        private void SelectFilesButton_Click(object sender, RoutedEventArgs e)
+        }        private void SelectFilesButton_Click(object sender, RoutedEventArgs e)
         {
             selectedFiles = FileDialogHelper.OpenMsgFileDialog();
             FilesListBox.Items.Clear();
@@ -91,12 +89,8 @@ namespace MsgToPdfConverter
                 {
                     FilesListBox.Items.Add(file);
                 }
-                ConvertButton.IsEnabled = true;
             }
-            else
-            {
-                ConvertButton.IsEnabled = false;
-            }
+            UpdateFileCountAndButtons();
         }
 
         private void SelectFolderButton_Click(object sender, RoutedEventArgs e)
@@ -951,7 +945,126 @@ namespace MsgToPdfConverter
                     FilesListBox.Items.Remove(item);
                     selectedFiles.Remove(item);
                 }
-                ConvertButton.IsEnabled = FilesListBox.Items.Count > 0;
+                UpdateFileCountAndButtons();
+            }
+        }
+
+        private void UpdateFileCountAndButtons()
+        {
+            int fileCount = FilesListBox.Items.Count;
+            FileCountLabel.Text = $"Files selected: {fileCount}";
+            ConvertButton.IsEnabled = fileCount > 0;
+        }
+
+        private void FilesListBox_DragEnter(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                e.Effects = DragDropEffects.Copy;
+            }
+            else
+            {
+                e.Effects = DragDropEffects.None;
+            }
+        }
+
+        private void FilesListBox_DragOver(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                e.Effects = DragDropEffects.Copy;
+            }
+            else
+            {
+                e.Effects = DragDropEffects.None;
+            }
+        }
+
+        private void FilesListBox_Drop(object sender, DragEventArgs e)
+        {
+            if (e.Data.GetDataPresent(DataFormats.FileDrop))
+            {
+                string[] droppedItems = (string[])e.Data.GetData(DataFormats.FileDrop);
+                var newFiles = new List<string>();
+
+                foreach (string item in droppedItems)
+                {
+                    if (File.Exists(item))
+                    {
+                        // It's a file
+                        if (Path.GetExtension(item).ToLowerInvariant() == ".msg")
+                        {
+                            if (!selectedFiles.Contains(item))
+                            {
+                                newFiles.Add(item);
+                            }
+                        }
+                    }
+                    else if (Directory.Exists(item))
+                    {
+                        // It's a folder - recursively find all .msg files
+                        var msgFiles = Directory.GetFiles(item, "*.msg", SearchOption.AllDirectories);
+                        foreach (string msgFile in msgFiles)
+                        {
+                            if (!selectedFiles.Contains(msgFile))
+                            {
+                                newFiles.Add(msgFile);
+                            }
+                        }
+                    }
+                }
+
+                // Add new files to the collection and UI
+                foreach (string file in newFiles)
+                {                    selectedFiles.Add(file);
+                    FilesListBox.Items.Add(file);
+                }
+
+                UpdateFileCountAndButtons();
+            }        }
+
+        // Robust file deletion with retries and Excel-specific handling
+        private void RobustDeleteFile(string filePath, int maxRetries = 5, int delayMs = 500)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    if (File.Exists(filePath))
+                    {
+                        File.Delete(filePath);
+
+                        // Wait a moment and verify the file is actually gone
+                        System.Threading.Thread.Sleep(100);
+
+                        if (!File.Exists(filePath))
+                        {
+                            Console.WriteLine($"[CLEANUP] Successfully deleted temp file: {filePath}");
+                            return;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[CLEANUP] File.Delete() succeeded but file still exists (attempt {i + 1}): {filePath}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[CLEANUP] File does not exist, skipping deletion: {filePath}");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[CLEANUP] Error deleting temp file (attempt {i + 1}/{maxRetries}): {filePath} - {ex.Message}");
+                    if (i == maxRetries - 1)
+                    {
+                        Console.WriteLine($"[CLEANUP] Failed to delete temp file after {maxRetries} attempts: {filePath}");
+                    }
+                    else
+                    {
+                        System.Threading.Thread.Sleep(delayMs);
+                    }
+                }
             }
         }
 
@@ -975,251 +1088,6 @@ namespace MsgToPdfConverter
                     set.Add(match.Groups[1].Value.Trim('<', '>', '\"', '\'', ' '));
             }
             return set;
-        }        // Robust file deletion with retries and Excel-specific handling
-        private void RobustDeleteFile(string filePath, int maxRetries = 5, int delayMs = 500)
-        {
-            for (int i = 0; i < maxRetries; i++)
-            {
-                try
-                {
-                    if (File.Exists(filePath))
-                    {
-                        File.Delete(filePath);
-
-                        // Wait a moment and verify the file is actually gone
-                        System.Threading.Thread.Sleep(100);
-
-                        if (!File.Exists(filePath))
-                        {
-                            Console.WriteLine($"[CLEANUP] Successfully deleted temp file: {filePath}");
-                            return;
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[CLEANUP] File.Delete() succeeded but file still exists (attempt {i + 1}): {filePath}");
-
-                            // For Excel files, try killing Excel processes on the last few attempts
-                            if (i >= maxRetries - 2 && (filePath.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) || filePath.EndsWith(".xls", StringComparison.OrdinalIgnoreCase)))
-                            {
-                                Console.WriteLine($"[CLEANUP] Excel file locked, attempting to kill Excel processes...");
-                                KillExcelProcesses();
-                            }
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[CLEANUP] File no longer exists: {filePath}");
-                        return;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[CLEANUP] Delete attempt {i + 1} failed for {filePath}: {ex.Message}");
-                }
-
-                System.Threading.Thread.Sleep(delayMs);
-            }
-
-            if (File.Exists(filePath))
-            {
-                Console.WriteLine($"[CLEANUP][ERROR] File still exists after all retries: {filePath}");
-                Console.WriteLine($"[CLEANUP] This file may be locked by Excel.exe or another process.");
-            }
-        }
-
-        // Kill Excel processes that may be holding files open
-        private void KillExcelProcesses()
-        {
-            try
-            {
-                var excelProcesses = Process.GetProcessesByName("EXCEL");
-                foreach (var process in excelProcesses)
-                {
-                    try
-                    {
-                        Console.WriteLine($"[CLEANUP] Killing Excel process PID: {process.Id}");
-                        process.Kill();
-                        process.WaitForExit(2000);
-                        Console.WriteLine($"[CLEANUP] Successfully killed Excel process PID: {process.Id}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[CLEANUP] Failed to kill Excel process PID {process.Id}: {ex.Message}");
-                    }
-                }
-
-                if (excelProcesses.Length == 0)
-                {
-                    Console.WriteLine("[CLEANUP] No Excel processes found to kill.");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[CLEANUP] Failed to enumerate Excel processes: {ex.Message}");
-            }
-        }
-
-        // Recursive method to process MSG files (handles nested MSG attachments)
-        private List<string> ProcessMsgFileRecursive(string msgFilePath, string tempDir, int depth = 0, int maxDepth = 3)
-        {
-            var resultPdfs = new List<string>();
-
-            // Prevent infinite recursion
-            if (depth > maxDepth)
-            {
-                Console.WriteLine($"[MSG] Max recursion depth reached ({maxDepth}), skipping: {msgFilePath}");
-                return resultPdfs;
-            }
-
-            try
-            {
-                Console.WriteLine($"[MSG] Processing nested MSG file (depth {depth}): {Path.GetFileName(msgFilePath)}");
-
-                using (var msg = new Storage.Message(msgFilePath))
-                {
-                    // Create main email PDF
-                    string emailHtml = BuildEmailHtml(msg);
-                    string emailPdf = Path.Combine(tempDir, $"{Guid.NewGuid()}_msg_depth{depth}.pdf");
-
-                    // Convert HTML to PDF using HtmlToPdfWorker
-                    string tempHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
-                    File.WriteAllText(tempHtmlPath, emailHtml);
-
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = System.Reflection.Assembly.GetExecutingAssembly().Location,
-                        Arguments = $"--html2pdf \"{tempHtmlPath}\" \"{emailPdf}\"",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-
-                    using (var process = Process.Start(startInfo))
-                    {
-                        process.WaitForExit();
-                        if (process.ExitCode == 0)
-                        {
-                            resultPdfs.Add(emailPdf);
-                            Console.WriteLine($"[MSG] Created PDF for nested MSG: {emailPdf}");
-                        }
-                    }
-
-                    File.Delete(tempHtmlPath);
-
-                    // Process attachments of the nested MSG file
-                    if (msg.Attachments != null && msg.Attachments.Count > 0)
-                    {
-                        var inlineContentIds = GetInlineContentIds(emailHtml);
-
-                        foreach (var att in msg.Attachments)
-                        {
-                            if (att is Storage.Attachment attachment)
-                            {
-                                // Skip inline images
-                                if ((attachment.IsInline == true) || (!string.IsNullOrEmpty(attachment.ContentId) && inlineContentIds.Contains(attachment.ContentId.Trim('<', '>', '\"', '\'', ' '))))
-                                {
-                                    continue;
-                                }
-
-                                string attName = attachment.FileName ?? "attachment";
-                                string ext = Path.GetExtension(attName).ToLowerInvariant();
-
-                                if (ext == ".msg")
-                                {
-                                    // Recursive call for nested MSG files
-                                    string nestedMsgPath = Path.Combine(tempDir, $"{Guid.NewGuid()}_{attName}");
-                                    File.WriteAllBytes(nestedMsgPath, attachment.Data);
-
-                                    var nestedPdfs = ProcessMsgFileRecursive(nestedMsgPath, tempDir, depth + 1, maxDepth);
-                                    resultPdfs.AddRange(nestedPdfs);
-
-                                    File.Delete(nestedMsgPath); // Clean up temp MSG file
-                                }
-                                else
-                                {
-                                    // Process other attachments normally
-                                    string attPath = Path.Combine(tempDir, $"{Guid.NewGuid()}_{attName}");
-                                    File.WriteAllBytes(attPath, attachment.Data);
-
-                                    string attPdf = ProcessSingleAttachment(attPath, tempDir, $"Attachment (depth {depth}): {attName}");
-                                    if (!string.IsNullOrEmpty(attPdf))
-                                    {
-                                        resultPdfs.Add(attPdf);
-                                    }
-
-                                    File.Delete(attPath); // Clean up temp attachment file
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[MSG] Error processing nested MSG file {msgFilePath}: {ex.Message}");
-            }
-
-            return resultPdfs;
-        }
-
-        // Helper method to process a single attachment and return PDF path
-        private string ProcessSingleAttachment(string attPath, string tempDir, string headerText)
-        {
-            string ext = Path.GetExtension(attPath).ToLowerInvariant();
-            string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attPath) + "_" + Guid.NewGuid() + ".pdf");
-
-            try
-            {
-                if (ext == ".pdf")
-                {
-                    string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    AddHeaderPdf(headerPdf, headerText);
-                    string finalPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    PdfAppendTest.AppendPdfs(new List<string> { headerPdf, attPath }, finalPdf);
-                    File.Delete(headerPdf);
-                    return finalPdf;
-                }
-                else if (ext == ".jpg" || ext == ".jpeg")
-                {
-                    using (var writer = new iText.Kernel.Pdf.PdfWriter(attPdf))
-                    using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
-                    using (var docImg = new iText.Layout.Document(pdf))
-                    {
-                        var p = new iText.Layout.Element.Paragraph(headerText)
-                            .SetTextAlignment(iText.Layout.Properties.TextAlignment.CENTER)
-                            .SetFontSize(16);
-                        docImg.Add(p);
-                        var imgData = iText.IO.Image.ImageDataFactory.Create(attPath);
-                        var image = new iText.Layout.Element.Image(imgData);
-                        docImg.Add(image);
-                    }
-                    return attPdf;
-                }
-                else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
-                {
-                    if (TryConvertOfficeToPdf(attPath, attPdf))
-                    {
-                        string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                        AddHeaderPdf(headerPdf, headerText);
-                        string finalPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                        PdfAppendTest.AppendPdfs(new List<string> { headerPdf, attPdf }, finalPdf);
-                        File.Delete(headerPdf);
-                        File.Delete(attPdf);
-                        return finalPdf;
-                    }
-                }
-                else
-                {
-                    // Create placeholder for unsupported files
-                    AddHeaderPdf(attPdf, headerText + "\n(Unsupported file type)");
-                    return attPdf;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ATTACH] Error processing attachment {attPath}: {ex.Message}");
-            }
-
-            return null;
         }
     }
 }
