@@ -2,12 +2,13 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net6.0-windows</TargetFramework>
+    <TargetFramework>net48</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
     <AssemblyName>MsgToPdfConverter</AssemblyName>
     <RootNamespace>MsgToPdfConverter</RootNamespace>
     <StartupObject>MsgToPdfConverter.App</StartupObject>
+    <PlatformTarget>x64</PlatformTarget>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,6 +18,8 @@
     <PackageReference Include="MsgReader" Version="3.0.0" />
     <PackageReference Include="iText7" Version="7.1.15" />
     <PackageReference Include="PdfSharp" Version="6.2.0" />
+    <PackageReference Include="GemBox.Spreadsheet" Version="*" />
+    <PackageReference Include="GemBox.Document" Version="2025.6.105" />
     <None Update="PdfAppendTestInput.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

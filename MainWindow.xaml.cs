@@ -27,7 +27,6 @@ namespace MsgToPdfConverter
 
         public MainWindow()
         {
-            System.Text.Encoding.RegisterProvider(System.Text.CodePagesEncodingProvider.Instance);
             InitializeComponent();
             CheckDotNetRuntime();
         }
@@ -494,7 +493,9 @@ namespace MsgToPdfConverter
                                 Console.WriteLine("[DEBUG] Finished temp file deletion");
                                 if (File.Exists(mergedPdf))
                                 {
-                                    File.Move(mergedPdf, pdfFilePath, true);
+                                    if (File.Exists(pdfFilePath))
+                                        File.Delete(pdfFilePath);
+                                    File.Move(mergedPdf, pdfFilePath);
                                 }
                                 Console.WriteLine($"Merged and replaced {pdfFilePath}");
                             }
@@ -787,7 +788,7 @@ namespace MsgToPdfConverter
             thread.Join();
             if (threadEx != null)
             {
-                // Optionally log threadEx
+                Console.WriteLine($"[Interop] Office to PDF conversion failed: {threadEx.Message}");
                 return false;
             }
             return result;
