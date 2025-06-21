@@ -1,0 +1,17 @@
+MISSING NATIVE LIBRARIES FOR DINKOTPDF
+======================================
+
+The following native libraries are required for DinkToPdf (HTML to PDF conversion) to work:
+
+Required files:
+- x64\libwkhtmltox.dll (for 64-bit systems)
+- x86\libwkhtmltox.dll (for 32-bit systems)
+
+Download from: https://wkhtmltopdf.org/downloads.html
+1. Download "wkhtmltopdf 0.12.6 (with patched qt)" for Windows
+2. Extract libwkhtmltox.dll from the installation
+3. Place in the appropriate architecture folder (x64 or x86)
+
+Alternative: Copy from a previous working build or from another DinkToPdf project.
+
+The application will not be able to convert HTML to PDF without these libraries.
