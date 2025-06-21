@@ -196,6 +196,71 @@ namespace MsgToPdfConverter
             }
         }
 
+        private void ConfigureDinkToPdfPath(PdfTools pdfTools)
+        {
+            try
+            {
+                // Try to find wkhtmltopdf binaries in various locations
+                string appDir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
+                string architecture = Environment.Is64BitProcess ? "x64" : "x86";
+
+                // Check if architecture folder exists in the same directory as exe
+                string archPath = Path.Combine(appDir, architecture);
+                if (Directory.Exists(archPath))
+                {
+                    Console.WriteLine($"[DEBUG] Found architecture folder: {archPath}");
+                    return; // DinkToPdf should find it automatically
+                }
+
+                // Check if architecture folder exists in libraries subfolder
+                string librariesArchPath = Path.Combine(appDir, "libraries", architecture);
+                if (Directory.Exists(librariesArchPath))
+                {
+                    Console.WriteLine($"[DEBUG] Found architecture folder in libraries: {librariesArchPath}");
+                    // Copy the architecture folder to the main directory temporarily
+                    string tempArchPath = Path.Combine(appDir, architecture);
+                    if (!Directory.Exists(tempArchPath))
+                    {
+                        Console.WriteLine($"[DEBUG] Copying {librariesArchPath} to {tempArchPath}");
+                        DirectoryCopy(librariesArchPath, tempArchPath, true);
+                    }
+                    return;
+                }
+
+                Console.WriteLine("[DEBUG] No wkhtmltopdf architecture folder found");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DEBUG] Error configuring DinkToPdf path: {ex.Message}");
+            }
+        }
+
+        private void DirectoryCopy(string sourceDirName, string destDirName, bool copySubDirs)
+        {
+            DirectoryInfo dir = new DirectoryInfo(sourceDirName);
+            if (!dir.Exists)
+                throw new DirectoryNotFoundException($"Source directory does not exist or could not be found: {sourceDirName}");
+
+            DirectoryInfo[] dirs = dir.GetDirectories();
+            Directory.CreateDirectory(destDirName);
+
+            FileInfo[] files = dir.GetFiles();
+            foreach (FileInfo file in files)
+            {
+                string tempPath = Path.Combine(destDirName, file.Name);
+                file.CopyTo(tempPath, true);
+            }
+
+            if (copySubDirs)
+            {
+                foreach (DirectoryInfo subdir in dirs)
+                {
+                    string tempPath = Path.Combine(destDirName, subdir.Name);
+                    DirectoryCopy(subdir.FullName, tempPath, copySubDirs);
+                }
+            }
+        }
+
         private void RunDinkToPdfConversion(HtmlToPdfDocument doc)
         {
             Exception threadEx = null;
@@ -207,7 +272,12 @@ namespace MsgToPdfConverter
                     Console.WriteLine("[DEBUG] Inside STA thread: Killing lingering wkhtmltopdf processes");
                     KillWkhtmltopdfProcesses();
                     Console.WriteLine("[DEBUG] Inside STA thread: Creating SynchronizedConverter");
-                    var converter = new SynchronizedConverter(new PdfTools());
+
+                    // Configure DinkToPdf to use the correct path for wkhtmltopdf binaries
+                    var pdfTools = new PdfTools();
+                    ConfigureDinkToPdfPath(pdfTools);
+
+                    var converter = new SynchronizedConverter(pdfTools);
                     Console.WriteLine("[DEBUG] Inside STA thread: Starting converter.Convert");
                     converter.Convert(doc);
                     Console.WriteLine("[DEBUG] Inside STA thread: Finished converter.Convert");
