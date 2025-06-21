@@ -1448,14 +1448,33 @@ namespace MsgToPdfConverter
                     AddHeaderPdf(finalZipPdf, zipHeader + "\n(Unsupported type)");
                     allTempFiles.Add(finalZipPdf);
                 }
-
                 if (finalZipPdf != null)
                     zipPdfFiles.Add(finalZipPdf);
             }
 
-            // If there are multiple files in the ZIP, we could merge them all into one PDF
-            // For now, we'll just return the first one or create a placeholder
-            return zipPdfFiles.FirstOrDefault();
+            // Merge all files from the ZIP into a single PDF
+            if (zipPdfFiles.Count == 0)
+            {
+                // No processable files found in ZIP
+                string placeholderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_empty_zip.pdf");
+                AddHeaderPdf(placeholderPdf, headerText + "\n(Empty or no processable files in ZIP)");
+                allTempFiles.Add(placeholderPdf);
+                return placeholderPdf;
+            }
+            else if (zipPdfFiles.Count == 1)
+            {
+                // Only one file, return it directly
+                return zipPdfFiles[0];
+            }
+            else
+            {
+                // Multiple files - merge them all into one comprehensive PDF
+                string mergedZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_merged.pdf");
+                Console.WriteLine($"[ZIP] Merging {zipPdfFiles.Count} files from ZIP into single PDF: {mergedZipPdf}");
+                PdfAppendTest.AppendPdfs(zipPdfFiles, mergedZipPdf);
+                allTempFiles.Add(mergedZipPdf);
+                return mergedZipPdf;
+            }
         }
     }
 }
