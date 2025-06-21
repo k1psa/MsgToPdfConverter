@@ -14,21 +14,35 @@ namespace MsgToPdfConverter.Utils
 
             using (var dialog = new System.Windows.Forms.OpenFileDialog())
             {
-                dialog.Title = "Select .msg Files or navigate to Folders and click Add";
+                dialog.Title = "Select .msg Files or Folders (type folder path in filename)";
                 dialog.Filter = "Outlook Message Files (*.msg)|*.msg|All Files (*.*)|*.*";
                 dialog.FilterIndex = 1;
                 dialog.Multiselect = true;
                 dialog.CheckFileExists = false;
-                dialog.CheckPathExists = true;
+                dialog.CheckPathExists = false;
                 dialog.ValidateNames = false;
                 dialog.DereferenceLinks = false;
+                dialog.FileName = "Folder Selection";
 
                 var dialogResult = dialog.ShowDialog();
                 if (dialogResult == DialogResult.OK)
                 {
                     foreach (string selectedPath in dialog.FileNames)
                     {
-                        if (File.Exists(selectedPath))
+                        // Clean the path (remove the dummy filename if present)
+                        string cleanPath = selectedPath;
+                        if (selectedPath.EndsWith("\\Folder Selection") || selectedPath.EndsWith("/Folder Selection"))
+                        {
+                            cleanPath = Path.GetDirectoryName(selectedPath);
+                        }
+
+                        if (Directory.Exists(cleanPath))
+                        {
+                            // It's a directory - add all .msg files recursively
+                            var msgFiles = Directory.GetFiles(cleanPath, "*.msg", SearchOption.AllDirectories);
+                            result.AddRange(msgFiles);
+                        }
+                        else if (File.Exists(selectedPath))
                         {
                             // It's a file
                             if (Path.GetExtension(selectedPath).ToLowerInvariant() == ".msg")
@@ -38,16 +52,11 @@ namespace MsgToPdfConverter.Utils
                         }
                         else
                         {
-                            // Try to treat it as a folder path
+                            // Try parent directory
                             string folderPath = Path.GetDirectoryName(selectedPath);
                             if (Directory.Exists(folderPath))
                             {
                                 var msgFiles = Directory.GetFiles(folderPath, "*.msg", SearchOption.AllDirectories);
-                                result.AddRange(msgFiles);
-                            }
-                            else if (Directory.Exists(selectedPath))
-                            {
-                                var msgFiles = Directory.GetFiles(selectedPath, "*.msg", SearchOption.AllDirectories);
                                 result.AddRange(msgFiles);
                             }
                         }
