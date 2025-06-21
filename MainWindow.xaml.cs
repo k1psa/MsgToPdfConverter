@@ -25,6 +25,7 @@ namespace MsgToPdfConverter
         private List<string> selectedFiles = new List<string>();
         private int convertButtonClickCount = 0;
         private bool isConverting = false;
+        private bool cancellationRequested = false;
 
         public MainWindow()
         {
@@ -79,7 +80,8 @@ namespace MsgToPdfConverter
                 }
             }
             return false;
-        }        private void SelectFilesButton_Click(object sender, RoutedEventArgs e)
+        }
+        private void SelectFilesButton_Click(object sender, RoutedEventArgs e)
         {
             selectedFiles = FileDialogHelper.OpenMsgFileDialog();
             FilesListBox.Items.Clear();
@@ -240,16 +242,14 @@ namespace MsgToPdfConverter
             }
             isConverting = true;
             convertButtonClickCount++;
-            Console.WriteLine($"[DEBUG] Convert button pressed {convertButtonClickCount} time(s)");
-            try
+            Console.WriteLine($"[DEBUG] Convert button pressed {convertButtonClickCount} time(s)"); try
             {
-                Console.WriteLine("[DEBUG] Disabling ConvertButton and showing ProgressBar");
-                ConvertButton.IsEnabled = false;
-                ProgressBar.Visibility = Visibility.Visible;
+                Console.WriteLine("[DEBUG] Disabling UI and showing progress");
+                SetProcessingState(true);
                 ProgressBar.Minimum = 0;
                 ProgressBar.Maximum = selectedFiles.Count;
                 ProgressBar.Value = 0;
-                int success = 0, fail = 0;
+                int success = 0, fail = 0, processed = 0;
                 bool appendAttachments = AppendAttachmentsCheckBox.IsChecked == true;
                 Console.WriteLine($"[DEBUG] appendAttachments: {appendAttachments}");
                 await Task.Run(() =>
@@ -257,9 +257,23 @@ namespace MsgToPdfConverter
                     Console.WriteLine("[DEBUG] Starting batch loop");
                     for (int i = 0; i < selectedFiles.Count; i++)
                     {
+                        if (cancellationRequested)
+                        {
+                            Console.WriteLine("[DEBUG] Cancellation requested, breaking loop");
+                            break;
+                        }
+
+                        processed++;
                         Console.WriteLine($"[DEBUG] Loop index: {i}");
                         try
                         {
+                            // Update status on UI thread
+                            Dispatcher.Invoke(() =>
+                            {
+                                ProcessingStatusLabel.Text = $"Processing file {processed}/{selectedFiles.Count}: {Path.GetFileName(selectedFiles[i])}";
+                                ProgressBar.Value = i;
+                            });
+
                             Console.WriteLine($"[TASK] Processing file {i + 1} of {selectedFiles.Count}: {selectedFiles[i]}");
                             var msgFilePath = selectedFiles[i];
                             Console.WriteLine($"[TASK] Loading MSG: {msgFilePath}");
@@ -604,8 +618,22 @@ namespace MsgToPdfConverter
                             Console.WriteLine($"[DEBUG] Cleanup complete for file {i + 1}");
                         }
                     }
-                    Console.WriteLine($"[DEBUG] Batch loop finished. Success: {success}, Fail: {fail}");
+                    Console.WriteLine($"[DEBUG] Batch loop finished. Success: {success}, Fail: {fail}, Processed: {processed}");
                 });
+
+                // Show final results
+                string statusMessage;
+                if (cancellationRequested)
+                {
+                    statusMessage = $"Processing cancelled. Processed {processed} files. Success: {success}, Failed: {fail}";
+                }
+                else
+                {
+                    statusMessage = $"Processing completed. Total files: {selectedFiles.Count}, Success: {success}, Failed: {fail}";
+                }
+
+                MessageBox.Show(statusMessage, "Processing Results", MessageBoxButton.OK,
+                    fail > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
@@ -614,9 +642,7 @@ namespace MsgToPdfConverter
             }
             finally
             {
-                isConverting = false;
-                ProgressBar.Visibility = Visibility.Collapsed;
-                ConvertButton.IsEnabled = true;
+                SetProcessingState(false);
                 Console.WriteLine("[DEBUG] ConvertButton_Click finished");
             }
         }
@@ -948,12 +974,44 @@ namespace MsgToPdfConverter
                 UpdateFileCountAndButtons();
             }
         }
-
         private void UpdateFileCountAndButtons()
         {
             int fileCount = FilesListBox.Items.Count;
             FileCountLabel.Text = $"Files selected: {fileCount}";
-            ConvertButton.IsEnabled = fileCount > 0;
+            ConvertButton.IsEnabled = fileCount > 0 && !isConverting;
+        }
+
+        private void SetProcessingState(bool processing)
+        {
+            isConverting = processing;
+
+            // Disable/enable main buttons
+            SelectFilesButton.IsEnabled = !processing;
+            SelectFolderButton.IsEnabled = !processing;
+            ConvertButton.IsEnabled = !processing && FilesListBox.Items.Count > 0;
+            AppendAttachmentsCheckBox.IsEnabled = !processing;
+            FilesListBox.IsEnabled = !processing;
+
+            // Show/hide cancel button
+            CancelButton.Visibility = processing ? Visibility.Visible : Visibility.Collapsed;
+
+            // Show/hide progress elements
+            ProgressBar.Visibility = processing ? Visibility.Visible : Visibility.Collapsed;
+            ProcessingStatusLabel.Visibility = processing ? Visibility.Visible : Visibility.Collapsed;
+
+            if (!processing)
+            {
+                ProcessingStatusLabel.Text = "";
+                cancellationRequested = false;
+            }
+        }
+
+        private void CancelButton_Click(object sender, RoutedEventArgs e)
+        {
+            cancellationRequested = true;
+            CancelButton.IsEnabled = false;
+            ProcessingStatusLabel.Text = "Cancelling... Please wait.";
+            ProcessingStatusLabel.Foreground = System.Windows.Media.Brushes.Red;
         }
 
         private void FilesListBox_DragEnter(object sender, DragEventArgs e)
@@ -1016,12 +1074,14 @@ namespace MsgToPdfConverter
 
                 // Add new files to the collection and UI
                 foreach (string file in newFiles)
-                {                    selectedFiles.Add(file);
+                {
+                    selectedFiles.Add(file);
                     FilesListBox.Items.Add(file);
                 }
 
                 UpdateFileCountAndButtons();
-            }        }
+            }
+        }
 
         // Robust file deletion with retries and Excel-specific handling
         private void RobustDeleteFile(string filePath, int maxRetries = 5, int delayMs = 500)

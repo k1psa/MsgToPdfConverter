@@ -14,6 +14,7 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <TextBlock FontSize="16"
                            FontWeight="Bold"
@@ -49,7 +50,8 @@
                         <ListBox.Style>
                                 <Style TargetType="ListBox">
                                         <Style.Triggers>
-                                                <Trigger Property="HasItems" Value="False">
+                                                <Trigger Property="HasItems"
+                                                                Value="False">
                                                         <Setter Property="Template">
                                                                 <Setter.Value>
                                                                         <ControlTemplate>
@@ -68,17 +70,35 @@
                                                         </Setter>
                                                 </Trigger>
                                         </Style.Triggers>
-                                </Style>                        </ListBox.Style>
+                                </Style>
+                        </ListBox.Style>
                 </ListBox>
                 <CheckBox x:Name="AppendAttachmentsCheckBox"
                           Content="Append attachments as PDF at the end"
                           Margin="0,0,0,10"
                           Grid.Row="5"/>
-                <Button x:Name="ConvertButton"
-                        Content="Convert to PDF"
-                        Click="ConvertButton_Click"
-                        IsEnabled="False"
-                        Grid.Row="6"/>
+                <StackPanel Orientation="Horizontal"
+                                Grid.Row="6"
+                                Margin="0,0,0,10">
+                        <Button x:Name="ConvertButton"
+                                Content="Convert to PDF"
+                                Click="ConvertButton_Click"
+                                IsEnabled="False"
+                                Width="120"
+                                Margin="0,0,10,0"/>
+                        <Button x:Name="CancelButton"
+                                Content="Cancel"
+                                Click="CancelButton_Click"
+                                Width="80"
+                                Visibility="Collapsed"/>
+                </StackPanel>
+                <TextBlock x:Name="ProcessingStatusLabel"
+                           Text=""
+                           FontWeight="Bold"
+                           Foreground="Blue"
+                           Margin="0,0,0,10"
+                           Visibility="Collapsed"
+                           Grid.Row="7"/>
                 <ProgressBar x:Name="ProgressBar"
                              Height="20"
                              Margin="0,0,0,10"
@@ -86,6 +106,6 @@
                              Maximum="100"
                              Value="0"
                              Visibility="Collapsed"
-                             Grid.Row="7"/>
+                             Grid.Row="8"/>
         </Grid>
 </Window>

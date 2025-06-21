@@ -24,7 +24,8 @@ namespace MsgToPdfConverter.Utils
             }
 
             return result;
-        }        public static List<string> OpenMsgFolderDialog()
+        }
+        public static List<string> OpenMsgFolderDialog()
         {
             var result = new List<string>();
 
