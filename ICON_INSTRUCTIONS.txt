@@ -1,0 +1,29 @@
+ADDING AN ICON TO YOUR APPLICATION
+===================================
+
+You need to add an "icon.ico" file to this folder.
+
+OPTION 1 - Use an existing .ico file:
+- Find or download a .ico file (16x16, 32x32, 48x48, 256x256 pixels)
+- Rename it to "icon.ico"
+- Place it in the project root (same folder as MsgToPdfConverter.csproj)
+
+OPTION 2 - Convert an image to .ico:
+- Use an online converter like favicon.io or convertio.co
+- Upload a PNG/JPG image (preferably square, at least 256x256)
+- Download the .ico file
+- Rename it to "icon.ico" and place in project root
+
+OPTION 3 - Use Visual Studio:
+- Right-click project in Solution Explorer
+- Add > New Item > Icon File
+- Name it "icon.ico"
+- Design your icon in the built-in editor
+
+SUGGESTED ICON THEMES FOR MSG TO PDF CONVERTER:
+- Document/file conversion icons
+- Email + PDF combination
+- Arrow showing transformation
+- Simple "PDF" text icon
+
+After adding the icon file, rebuild the project and the executable will have your custom icon!

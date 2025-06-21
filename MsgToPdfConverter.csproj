@@ -8,6 +8,7 @@
     <RootNamespace>MsgToPdfConverter</RootNamespace>
     <StartupObject>MsgToPdfConverter.App</StartupObject>
     <PlatformTarget>x64</PlatformTarget>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -17,11 +18,12 @@
     <PackageReference Include="MsgReader" Version="3.0.0" />
     <PackageReference Include="iText7" Version="7.1.15" />
     <PackageReference Include="PdfSharp" Version="6.2.0" />
-    <PackageReference Include="GemBox.Spreadsheet" Version="*" />
-    <PackageReference Include="GemBox.Document" Version="2025.6.105" />
     <None Update="PdfAppendTestInput.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
+    <Content Include="icon.ico">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
 </Project>
