@@ -152,8 +152,7 @@ namespace MsgToPdfConverter
                 return match.Value;
             });
         }
-
-        private string BuildEmailHtml(Storage.Message msg)
+        private string BuildEmailHtml(Storage.Message msg, bool extractOriginalOnly = false)
         {
             string from = msg.Sender?.DisplayName ?? msg.Sender?.Email ?? "";
             string sent = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("f") : "";
@@ -161,6 +160,13 @@ namespace MsgToPdfConverter
             string cc = string.Join(", ", msg.Recipients?.FindAll(r => r.Type == Storage.Recipient.RecipientType.Cc)?.ConvertAll(r => r.DisplayName + (string.IsNullOrEmpty(r.Email) ? "" : $" <{r.Email}>")) ?? new List<string>());
             string subject = msg.Subject ?? "";
             string body = EmbedInlineImages(msg) ?? "";
+
+            // Extract original content if requested
+            if (extractOriginalOnly)
+            {
+                body = ExtractOriginalEmailContent(body);
+                Console.WriteLine($"[DEBUG] Original content extraction applied. Body length: {body?.Length ?? 0}");
+            }
 
             string header = $@"
                 <div style='font-family:Segoe UI,Arial,sans-serif;font-size:12pt;margin-bottom:16px;'>
@@ -241,10 +247,11 @@ namespace MsgToPdfConverter
                 SetProcessingState(true);
                 ProgressBar.Minimum = 0;
                 ProgressBar.Maximum = selectedFiles.Count;
-                ProgressBar.Value = 0;
-                int success = 0, fail = 0, processed = 0;
+                ProgressBar.Value = 0; int success = 0, fail = 0, processed = 0;
                 bool appendAttachments = AppendAttachmentsCheckBox.IsChecked == true;
+                bool extractOriginalOnly = ExtractOriginalOnlyCheckBox.IsChecked == true;
                 Console.WriteLine($"[DEBUG] appendAttachments: {appendAttachments}");
+                Console.WriteLine($"[DEBUG] extractOriginalOnly: {extractOriginalOnly}");
                 await Task.Run(() =>
                 {
                     Console.WriteLine("[DEBUG] Starting batch loop");
@@ -281,7 +288,7 @@ namespace MsgToPdfConverter
                                 try { File.Delete(pdfFilePath); Console.WriteLine($"[DEBUG] Deleted old PDF: {pdfFilePath}"); } catch (Exception ex) { Console.WriteLine($"[DEBUG] Could not delete old PDF: {ex.Message}"); }
                             }
                             Console.WriteLine($"[TASK] Output PDF path: {pdfFilePath}");
-                            string htmlWithHeader = BuildEmailHtml(msg);
+                            string htmlWithHeader = BuildEmailHtml(msg, extractOriginalOnly);
                             Console.WriteLine($"[TASK] Built HTML for: {msgFilePath}");
                             Console.WriteLine($"[TASK] HTML length: {htmlWithHeader?.Length ?? 0}");
                             // Write HTML to a temp file
@@ -499,7 +506,7 @@ namespace MsgToPdfConverter
                                         Console.WriteLine($"[MSG] Processing nested message: {msgSubject}");
 
                                         // Create PDF for the nested MSG
-                                        string nestedHtml = BuildEmailHtml(nestedMsg);
+                                        string nestedHtml = BuildEmailHtml(nestedMsg, extractOriginalOnly);
                                         string nestedPdf = Path.Combine(tempDir, $"{Guid.NewGuid()}_nested_msg.pdf");
                                         // Convert HTML to PDF
                                         string nestedHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
@@ -981,6 +988,7 @@ namespace MsgToPdfConverter
             ClearListButton.IsEnabled = !processing;
             ConvertButton.IsEnabled = !processing && FilesListBox.Items.Count > 0;
             AppendAttachmentsCheckBox.IsEnabled = !processing;
+            ExtractOriginalOnlyCheckBox.IsEnabled = !processing;
             FilesListBox.IsEnabled = !processing;
 
             // Show/hide cancel button
@@ -1139,6 +1147,129 @@ namespace MsgToPdfConverter
                     set.Add(match.Groups[1].Value.Trim('<', '>', '\"', '\'', ' '));
             }
             return set;
+        }
+
+        private string ExtractOriginalEmailContent(string emailBody)
+        {
+            if (string.IsNullOrEmpty(emailBody))
+                return emailBody;
+
+            // Common patterns that indicate the start of a reply or forward
+            var replyIndicators = new[]
+            {
+                // English patterns
+                @"-----Original Message-----",
+                @"From:.*Sent:.*To:.*Subject:",
+                @"On .* wrote:",
+                @"On .* at .* .* wrote:",
+                @"> .*wrote:",
+                @"<.*> wrote:",
+                @"From: .*\r?\n.*Sent: .*\r?\n.*To: .*\r?\n.*Subject:",
+                @"________________________________",
+                @"From:.*\r?\nSent:.*\r?\nTo:.*\r?\nSubject:",
+                
+                // Additional patterns for forwarded messages
+                @"Begin forwarded message:",
+                @"---------- Forwarded message ----------",
+                @"Forwarded Message",
+                @"FW:",
+                @"Fwd:",
+                
+                // HTML patterns
+                @"<div class=""gmail_quote"">",
+                @"<div class=""OutlookMessageHeader"">",
+                @"<div.*class.*quoted.*>",
+                @"<blockquote.*>",
+                
+                // Outlook Web App patterns
+                @"<hr.*>.*From:",
+                @"<div.*outlook.*>.*From:",
+                
+                // Generic separator patterns
+                @"^-{5,}.*$",
+                @"^_{5,}.*$",
+                @"^={5,}.*$"
+            };
+
+            string originalContent = emailBody;
+
+            // Try each pattern and find the earliest match
+            int earliestIndex = originalContent.Length;
+
+            foreach (var pattern in replyIndicators)
+            {
+                try
+                {
+                    var matches = Regex.Matches(originalContent, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline);
+                    if (matches.Count > 0)
+                    {
+                        var firstMatch = matches[0];
+                        if (firstMatch.Index < earliestIndex)
+                        {
+                            earliestIndex = firstMatch.Index;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[DEBUG] Regex pattern failed: {pattern}, Error: {ex.Message}");
+                }
+            }
+
+            // If we found a reply/forward indicator, extract content before it
+            if (earliestIndex < originalContent.Length)
+            {
+                originalContent = originalContent.Substring(0, earliestIndex).Trim();
+            }
+
+            // Additional cleanup for HTML content
+            if (originalContent.Contains("<") && originalContent.Contains(">"))
+            {
+                // Remove trailing empty divs, paragraphs, or line breaks that might be left
+                originalContent = Regex.Replace(originalContent, @"(<br\s*/?>|<p\s*>|<div\s*>|\s)*$", "", RegexOptions.IgnoreCase);
+
+                // Close any unclosed tags properly
+                originalContent = CloseUnmatchedHtmlTags(originalContent);
+            }
+
+            return originalContent;
+        }
+
+        private string CloseUnmatchedHtmlTags(string html)
+        {
+            if (string.IsNullOrEmpty(html))
+                return html;
+
+            try
+            {
+                // Simple approach: count opening and closing tags for common elements
+                var tagsToCheck = new[] { "div", "p", "span", "b", "i", "strong", "em", "table", "tr", "td", "th" };
+                var result = html;
+
+                foreach (var tag in tagsToCheck)
+                {
+                    var openPattern = $@"<{tag}(\s[^>]*)?>";
+                    var closePattern = $@"</{tag}>";
+
+                    var openMatches = Regex.Matches(result, openPattern, RegexOptions.IgnoreCase);
+                    var closeMatches = Regex.Matches(result, closePattern, RegexOptions.IgnoreCase);
+
+                    int unclosedTags = openMatches.Count - closeMatches.Count;
+
+                    // Add closing tags if needed
+                    for (int i = 0; i < unclosedTags; i++)
+                    {
+                        result += $"</{tag}>";
+                    }
+                }
+
+                return result;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DEBUG] Error closing HTML tags: {ex.Message}");
+                return html; // Return original if there's an error
+            }
         }
     }
 }

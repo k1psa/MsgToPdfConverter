@@ -17,12 +17,12 @@
                 </Grid.RowDefinitions>
                 <TextBlock FontSize="16"
                            FontWeight="Bold"
-                                Text="Select .msg Files or Folders to Convert to PDF"
+                           Text="Select .msg Files or Folders to Convert to PDF"
                            Margin="0,0,0,10"
                            Grid.Row="0"/>
                 <StackPanel Orientation="Horizontal"
-                                Grid.Row="1"
-                                Margin="0,0,0,10">
+                            Grid.Row="1"
+                            Margin="0,0,0,10">
                         <Button x:Name="SelectFilesButton"
                                 Content="Add .msg Files or Folders"
                                 Click="SelectFilesButton_Click"
@@ -79,8 +79,12 @@
                           Content="Append attachments as PDF at the end"
                           Margin="0,0,0,10"
                           Grid.Row="4"/>
+                <CheckBox x:Name="ExtractOriginalOnlyCheckBox"
+                          Content="Extract original email only (remove replies/forwards)"
+                          Margin="0,0,0,10"
+                          Grid.Row="5"/>
                 <StackPanel Orientation="Horizontal"
-                            Grid.Row="5"
+                            Grid.Row="6"
                             Margin="0,0,0,10">
                         <Button x:Name="ConvertButton"
                                 Content="Convert to PDF"
@@ -100,7 +104,7 @@
                            Foreground="Blue"
                            Margin="0,0,0,10"
                            Visibility="Collapsed"
-                           Grid.Row="6"/>
+                                Grid.Row="7"/>
                 <ProgressBar x:Name="ProgressBar"
                              Height="20"
                              Margin="0,0,0,10"
