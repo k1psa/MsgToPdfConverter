@@ -2,6 +2,7 @@ using Microsoft.Win32;
 using System.Collections.Generic;
 using System.IO;
 using System.Windows.Forms;
+using System;
 
 namespace MsgToPdfConverter.Utils
 {
@@ -9,37 +10,47 @@ namespace MsgToPdfConverter.Utils
     {
         public static List<string> OpenMsgFileDialog()
         {
-            var openFileDialog = new Microsoft.Win32.OpenFileDialog
-            {
-                Title = "Select .msg Files",
-                Filter = "Outlook Message Files (*.msg)|*.msg",
-                Multiselect = true
-            };
-
             var result = new List<string>();
 
-            if (openFileDialog.ShowDialog() == true)
+            using (var dialog = new System.Windows.Forms.OpenFileDialog())
             {
-                result.AddRange(openFileDialog.FileNames);
-            }
+                dialog.Title = "Select .msg Files or navigate to Folders and click Add";
+                dialog.Filter = "Outlook Message Files (*.msg)|*.msg|All Files (*.*)|*.*";
+                dialog.FilterIndex = 1;
+                dialog.Multiselect = true;
+                dialog.CheckFileExists = false;
+                dialog.CheckPathExists = true;
+                dialog.ValidateNames = false;
+                dialog.DereferenceLinks = false;
 
-            return result;
-        }
-        public static List<string> OpenMsgFolderDialog()
-        {
-            var result = new List<string>();
-
-            using (var folderDialog = new FolderBrowserDialog())
-            {
-                folderDialog.Description = "Select Folder Containing .msg Files";
-                folderDialog.ShowNewFolderButton = false;
-
-                if (folderDialog.ShowDialog() == DialogResult.OK)
+                var dialogResult = dialog.ShowDialog();
+                if (dialogResult == DialogResult.OK)
                 {
-                    string folderPath = folderDialog.SelectedPath;
-                    if (!string.IsNullOrWhiteSpace(folderPath) && Directory.Exists(folderPath))
+                    foreach (string selectedPath in dialog.FileNames)
                     {
-                        result.AddRange(Directory.GetFiles(folderPath, "*.msg", SearchOption.AllDirectories));
+                        if (File.Exists(selectedPath))
+                        {
+                            // It's a file
+                            if (Path.GetExtension(selectedPath).ToLowerInvariant() == ".msg")
+                            {
+                                result.Add(selectedPath);
+                            }
+                        }
+                        else
+                        {
+                            // Try to treat it as a folder path
+                            string folderPath = Path.GetDirectoryName(selectedPath);
+                            if (Directory.Exists(folderPath))
+                            {
+                                var msgFiles = Directory.GetFiles(folderPath, "*.msg", SearchOption.AllDirectories);
+                                result.AddRange(msgFiles);
+                            }
+                            else if (Directory.Exists(selectedPath))
+                            {
+                                var msgFiles = Directory.GetFiles(selectedPath, "*.msg", SearchOption.AllDirectories);
+                                result.AddRange(msgFiles);
+                            }
+                        }
                     }
                 }
             }

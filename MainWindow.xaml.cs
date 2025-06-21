@@ -95,24 +95,6 @@ namespace MsgToPdfConverter
             UpdateFileCountAndButtons();
         }
 
-        private void SelectFolderButton_Click(object sender, RoutedEventArgs e)
-        {
-            selectedFiles = FileDialogHelper.OpenMsgFolderDialog();
-            FilesListBox.Items.Clear();
-            if (selectedFiles != null && selectedFiles.Count > 0)
-            {
-                foreach (var file in selectedFiles)
-                {
-                    FilesListBox.Items.Add(file);
-                }
-                ConvertButton.IsEnabled = true;
-            }
-            else
-            {
-                ConvertButton.IsEnabled = false;
-            }
-        }
-
         private string GetMimeTypeFromFileName(string fileName)
         {
             if (string.IsNullOrEmpty(fileName)) return "image/png";
@@ -983,11 +965,8 @@ namespace MsgToPdfConverter
 
         private void SetProcessingState(bool processing)
         {
-            isConverting = processing;
-
-            // Disable/enable main buttons
+            isConverting = processing;            // Disable/enable main buttons
             SelectFilesButton.IsEnabled = !processing;
-            SelectFolderButton.IsEnabled = !processing;
             ConvertButton.IsEnabled = !processing && FilesListBox.Items.Count > 0;
             AppendAttachmentsCheckBox.IsEnabled = !processing;
             FilesListBox.IsEnabled = !processing;
