@@ -16,6 +16,7 @@ using iText.IO.Image;
 using iText.Layout.Element;
 using System.Threading.Tasks;
 using System.Linq;
+using System.Runtime.InteropServices;
 
 namespace MsgToPdfConverter
 {
@@ -382,6 +383,7 @@ namespace MsgToPdfConverter
                                                 finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
                                                 PdfAppendTest.AppendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
                                                 allTempFiles.Add(headerPdf);
+                                                allTempFiles.Add(attPdf); // Add the Office-generated PDF to cleanup list
                                                 allTempFiles.Add(finalAttachmentPdf);
                                             }
                                             else
@@ -425,6 +427,7 @@ namespace MsgToPdfConverter
                                                         finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
                                                         PdfAppendTest.AppendPdfs(new List<string> { headerPdf, zfPdf }, finalZipPdf);
                                                         allTempFiles.Add(headerPdf);
+                                                        allTempFiles.Add(zfPdf); // Add the Office-generated PDF to cleanup list
                                                         allTempFiles.Add(finalZipPdf);
                                                     }
                                                     else
@@ -478,19 +481,28 @@ namespace MsgToPdfConverter
                                     {
                                         if (File.Exists(f) && !string.Equals(f, mergedPdf, StringComparison.OrdinalIgnoreCase) && !string.Equals(f, pdfFilePath, StringComparison.OrdinalIgnoreCase))
                                         {
-                                            File.Delete(f);
+                                            RobustDeleteFile(f);
                                         }
                                         else if (Directory.Exists(f))
                                         {
-                                            Directory.Delete(f, true);
+                                            try
+                                            {
+                                                Directory.Delete(f, true);
+                                                Console.WriteLine($"[CLEANUP] Deleted temp directory: {f}");
+                                            }
+                                            catch (Exception ex)
+                                            {
+                                                Console.WriteLine($"[CLEANUP] Failed to delete temp directory: {f} - {ex.Message}");
+                                            }
                                         }
                                     }
                                     catch (Exception ex)
                                     {
-                                        Console.WriteLine($"Failed to delete temp file or directory: {f} - {ex.Message}");
+                                        Console.WriteLine($"[CLEANUP] Unexpected error deleting temp file or directory: {f} - {ex.Message}");
                                     }
                                 }
                                 Console.WriteLine("[DEBUG] Finished temp file deletion");
+
                                 if (File.Exists(mergedPdf))
                                 {
                                     if (File.Exists(pdfFilePath))
@@ -575,6 +587,8 @@ namespace MsgToPdfConverter
                         if (TryConvertOfficeToPdf(attPath, attPdf))
                         {
                             tempPdfFiles.Add(attPdf);
+                            // Also add to cleanup list so the Office-generated PDF gets deleted
+                            Console.WriteLine($"[ATTACH] Adding Office-generated PDF to cleanup list: {attPdf}");
                         }
                     }
                     else if (ext == ".zip")
@@ -765,16 +779,34 @@ namespace MsgToPdfConverter
                         var doc = wordApp.Documents.Open(inputPath);
                         doc.ExportAsFixedFormat(outputPdf, Microsoft.Office.Interop.Word.WdExportFormat.wdExportFormatPDF);
                         doc.Close();
+                        Marshal.ReleaseComObject(doc);
                         wordApp.Quit();
+                        Marshal.ReleaseComObject(wordApp);
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
                         result = true;
                     }
                     else if (ext == ".xls" || ext == ".xlsx")
                     {
                         var excelApp = new Microsoft.Office.Interop.Excel.Application();
-                        var wb = excelApp.Workbooks.Open(inputPath);
-                        wb.ExportAsFixedFormat(Microsoft.Office.Interop.Excel.XlFixedFormatType.xlTypePDF, outputPdf);
-                        wb.Close();
-                        excelApp.Quit();
+                        Microsoft.Office.Interop.Excel.Workbooks workbooks = null;
+                        Microsoft.Office.Interop.Excel.Workbook wb = null;
+                        try
+                        {
+                            workbooks = excelApp.Workbooks;
+                            wb = workbooks.Open(inputPath);
+                            wb.ExportAsFixedFormat(Microsoft.Office.Interop.Excel.XlFixedFormatType.xlTypePDF, outputPdf);
+                        }
+                        finally
+                        {
+                            if (wb != null) wb.Close(false);
+                            if (wb != null) Marshal.ReleaseComObject(wb);
+                            if (workbooks != null) Marshal.ReleaseComObject(workbooks);
+                            if (excelApp != null) excelApp.Quit();
+                            if (excelApp != null) Marshal.ReleaseComObject(excelApp);
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
+                        }
                         result = true;
                     }
                 }
@@ -782,10 +814,38 @@ namespace MsgToPdfConverter
                 {
                     threadEx = ex;
                 }
-            });
-            thread.SetApartmentState(System.Threading.ApartmentState.STA);
+            }); thread.SetApartmentState(System.Threading.ApartmentState.STA);
             thread.Start();
-            thread.Join();
+            thread.Join();            // Give Office extra time to release the generated PDF file
+            if (result)
+            {
+                Console.WriteLine($"[Interop] Waiting for Office to release PDF file: {outputPdf}");
+
+                // Wait longer and verify the PDF is not locked
+                for (int i = 0; i < 10; i++)
+                {
+                    System.Threading.Thread.Sleep(500);
+
+                    // Try to open the PDF file to verify it's not locked
+                    try
+                    {
+                        using (var fs = new FileStream(outputPdf, FileMode.Open, FileAccess.Read, FileShare.Read))
+                        {
+                            // If we can open it, it's not locked
+                            Console.WriteLine($"[Interop] PDF file ready after {(i + 1) * 500}ms: {outputPdf}");
+                            break;
+                        }
+                    }
+                    catch (IOException)
+                    {
+                        if (i == 9) // Last attempt
+                        {
+                            Console.WriteLine($"[Interop][WARNING] PDF file may still be locked after 5 seconds: {outputPdf}");
+                        }
+                    }
+                }
+            }
+
             if (threadEx != null)
             {
                 Console.WriteLine($"[Interop] Office to PDF conversion failed: {threadEx.Message}");
@@ -832,6 +892,88 @@ namespace MsgToPdfConverter
                     set.Add(match.Groups[1].Value.Trim('<', '>', '\"', '\'', ' '));
             }
             return set;
+        }        // Robust file deletion with retries and Excel-specific handling
+        private void RobustDeleteFile(string filePath, int maxRetries = 5, int delayMs = 500)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    if (File.Exists(filePath))
+                    {
+                        File.Delete(filePath);
+
+                        // Wait a moment and verify the file is actually gone
+                        System.Threading.Thread.Sleep(100);
+
+                        if (!File.Exists(filePath))
+                        {
+                            Console.WriteLine($"[CLEANUP] Successfully deleted temp file: {filePath}");
+                            return;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[CLEANUP] File.Delete() succeeded but file still exists (attempt {i + 1}): {filePath}");
+
+                            // For Excel files, try killing Excel processes on the last few attempts
+                            if (i >= maxRetries - 2 && (filePath.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase) || filePath.EndsWith(".xls", StringComparison.OrdinalIgnoreCase)))
+                            {
+                                Console.WriteLine($"[CLEANUP] Excel file locked, attempting to kill Excel processes...");
+                                KillExcelProcesses();
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[CLEANUP] File no longer exists: {filePath}");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[CLEANUP] Delete attempt {i + 1} failed for {filePath}: {ex.Message}");
+                }
+
+                System.Threading.Thread.Sleep(delayMs);
+            }
+
+            if (File.Exists(filePath))
+            {
+                Console.WriteLine($"[CLEANUP][ERROR] File still exists after all retries: {filePath}");
+                Console.WriteLine($"[CLEANUP] This file may be locked by Excel.exe or another process.");
+            }
+        }
+
+        // Kill Excel processes that may be holding files open
+        private void KillExcelProcesses()
+        {
+            try
+            {
+                var excelProcesses = Process.GetProcessesByName("EXCEL");
+                foreach (var process in excelProcesses)
+                {
+                    try
+                    {
+                        Console.WriteLine($"[CLEANUP] Killing Excel process PID: {process.Id}");
+                        process.Kill();
+                        process.WaitForExit(2000);
+                        Console.WriteLine($"[CLEANUP] Successfully killed Excel process PID: {process.Id}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[CLEANUP] Failed to kill Excel process PID {process.Id}: {ex.Message}");
+                    }
+                }
+
+                if (excelProcesses.Length == 0)
+                {
+                    Console.WriteLine("[CLEANUP] No Excel processes found to kill.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CLEANUP] Failed to enumerate Excel processes: {ex.Message}");
+            }
         }
     }
 }
