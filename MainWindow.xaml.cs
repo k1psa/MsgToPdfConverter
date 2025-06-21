@@ -83,15 +83,26 @@ namespace MsgToPdfConverter
         }
         private void SelectFilesButton_Click(object sender, RoutedEventArgs e)
         {
-            selectedFiles = FileDialogHelper.OpenMsgFileDialog();
-            FilesListBox.Items.Clear();
-            if (selectedFiles != null && selectedFiles.Count > 0)
+            var newFiles = FileDialogHelper.OpenMsgFileDialog();
+            if (newFiles != null && newFiles.Count > 0)
             {
-                foreach (var file in selectedFiles)
+                foreach (var file in newFiles)
                 {
-                    FilesListBox.Items.Add(file);
+                    // Only add if not already in the list
+                    if (!selectedFiles.Contains(file))
+                    {
+                        selectedFiles.Add(file);
+                        FilesListBox.Items.Add(file);
+                    }
                 }
             }
+            UpdateFileCountAndButtons();
+        }
+
+        private void ClearListButton_Click(object sender, RoutedEventArgs e)
+        {
+            selectedFiles.Clear();
+            FilesListBox.Items.Clear();
             UpdateFileCountAndButtons();
         }
 
@@ -967,6 +978,7 @@ namespace MsgToPdfConverter
         {
             isConverting = processing;            // Disable/enable main buttons
             SelectFilesButton.IsEnabled = !processing;
+            ClearListButton.IsEnabled = !processing;
             ConvertButton.IsEnabled = !processing && FilesListBox.Items.Count > 0;
             AppendAttachmentsCheckBox.IsEnabled = !processing;
             FilesListBox.IsEnabled = !processing;
