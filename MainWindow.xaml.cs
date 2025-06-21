@@ -1105,17 +1105,87 @@ namespace MsgToPdfConverter
                 return html; // Return original if there's an error
             }
         }
-
         private void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5)
         {
             // Prevent infinite recursion
-            if (depth > maxDepth || msg.Attachments == null || msg.Attachments.Count == 0)
+            if (depth > maxDepth)
             {
-                Console.WriteLine($"[MSG] Stopping recursion at depth {depth} - no attachments or max depth reached");
+                Console.WriteLine($"[MSG] Stopping recursion at depth {depth} - max depth reached");
                 return;
             }
 
-            Console.WriteLine($"[MSG] Processing attachments recursively at depth {depth}, found {msg.Attachments.Count} attachments");
+            Console.WriteLine($"[MSG] Processing message recursively at depth {depth}: {msg.Subject ?? "No Subject"}");
+
+            // First, create PDF for the nested MSG body content (if we're processing a nested message)
+            if (depth > 0)
+            {
+                string msgSubject = msg.Subject ?? $"nested_msg_depth_{depth}";
+                string headerText = $"Nested Email (Depth {depth}): {msgSubject}";
+
+                try
+                {
+                    Console.WriteLine($"[MSG] Depth {depth} - Creating PDF for nested message body: {msgSubject}");
+
+                    // Create PDF for the nested MSG body
+                    string nestedHtml = BuildEmailHtml(msg, extractOriginalOnly);
+                    string nestedPdf = Path.Combine(tempDir, $"depth{depth}_{Guid.NewGuid()}_nested_msg.pdf");
+
+                    // Convert HTML to PDF
+                    string nestedHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
+                    File.WriteAllText(nestedHtmlPath, nestedHtml);
+
+                    var startInfo = new ProcessStartInfo
+                    {
+                        FileName = System.Reflection.Assembly.GetExecutingAssembly().Location,
+                        Arguments = $"--html2pdf \"{nestedHtmlPath}\" \"{nestedPdf}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+
+                    using (var process = Process.Start(startInfo))
+                    {
+                        process.WaitForExit();
+                        if (process.ExitCode == 0)
+                        {
+                            // Add header and merge
+                            string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                            AddHeaderPdf(headerPdf, headerText);
+                            string finalNestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested_merged.pdf");
+                            PdfAppendTest.AppendPdfs(new List<string> { headerPdf, nestedPdf }, finalNestedPdf);
+
+                            allPdfFiles.Add(finalNestedPdf);
+                            allTempFiles.Add(headerPdf);
+                            allTempFiles.Add(nestedPdf);
+                            allTempFiles.Add(finalNestedPdf);
+
+                            Console.WriteLine($"[MSG] Depth {depth} - Successfully created PDF for nested MSG body: {msgSubject}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[MSG] Depth {depth} - Failed to convert nested MSG body to PDF: {msgSubject}");
+                        }
+                    }
+
+                    File.Delete(nestedHtmlPath);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[MSG] Depth {depth} - Error processing nested MSG body {msgSubject}: {ex.Message}");
+                    string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_msg_error.pdf");
+                    AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
+                    allPdfFiles.Add(errorPdf);
+                    allTempFiles.Add(errorPdf);
+                }
+            }
+
+            // Now process attachments if they exist
+            if (msg.Attachments == null || msg.Attachments.Count == 0)
+            {
+                Console.WriteLine($"[MSG] Depth {depth} - No attachments to process");
+                return;
+            }
+
+            Console.WriteLine($"[MSG] Processing attachments at depth {depth}, found {msg.Attachments.Count} attachments");
 
             var inlineContentIds = GetInlineContentIds(msg.BodyHtml ?? "");
             var typedAttachments = new List<Storage.Attachment>();
@@ -1149,7 +1219,6 @@ namespace MsgToPdfConverter
             {
                 var att = typedAttachments[attIndex];
                 string attName = att.FileName ?? "attachment";
-                string ext = Path.GetExtension(attName).ToLowerInvariant();
                 string attPath = Path.Combine(tempDir, $"depth{depth}_{attName}");
                 string headerText = $"Attachment (Depth {depth}): {attIndex + 1}/{totalAttachments} - {attName}";
 
@@ -1172,67 +1241,12 @@ namespace MsgToPdfConverter
                 }
             }
 
-            // Process nested MSG files recursively
+            // Process nested MSG files recursively (this will handle both their body content and attachments)
             for (int msgIndex = 0; msgIndex < nestedMessages.Count; msgIndex++)
             {
                 var nestedMsg = nestedMessages[msgIndex];
-                string msgSubject = nestedMsg.Subject ?? $"nested_msg_{msgIndex}";
-                string headerText = $"Nested Email (Depth {depth}): {msgIndex + 1}/{nestedMessages.Count} - {msgSubject}";
-
-                try
-                {
-                    Console.WriteLine($"[MSG] Depth {depth} - Processing nested message: {msgSubject}");                    // Create PDF for the nested MSG
-                    string nestedHtml = BuildEmailHtml(nestedMsg, extractOriginalOnly);
-                    string nestedPdf = Path.Combine(tempDir, $"depth{depth}_{Guid.NewGuid()}_nested_msg.pdf");
-
-                    // Convert HTML to PDF
-                    string nestedHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
-                    File.WriteAllText(nestedHtmlPath, nestedHtml);
-
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = System.Reflection.Assembly.GetExecutingAssembly().Location,
-                        Arguments = $"--html2pdf \"{nestedHtmlPath}\" \"{nestedPdf}\"",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-
-                    using (var process = Process.Start(startInfo))
-                    {
-                        process.WaitForExit();
-                        if (process.ExitCode == 0)
-                        {
-                            // Add header and merge
-                            string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                            AddHeaderPdf(headerPdf, headerText);
-                            string finalNestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested_merged.pdf");
-                            PdfAppendTest.AppendPdfs(new List<string> { headerPdf, nestedPdf }, finalNestedPdf);
-
-                            allPdfFiles.Add(finalNestedPdf);
-                            allTempFiles.Add(headerPdf);
-                            allTempFiles.Add(nestedPdf);
-                            allTempFiles.Add(finalNestedPdf);
-
-                            Console.WriteLine($"[MSG] Depth {depth} - Successfully processed nested MSG: {msgSubject}");
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[MSG] Depth {depth} - Failed to convert nested MSG to PDF: {msgSubject}");
-                        }
-                    }
-
-                    File.Delete(nestedHtmlPath);                    // Recursively process attachments of this nested message
-                    ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, depth + 1, maxDepth);
-
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[MSG] Depth {depth} - Error processing nested MSG {msgSubject}: {ex.Message}");
-                    string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_msg_error.pdf");
-                    AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
-                    allPdfFiles.Add(errorPdf);
-                    allTempFiles.Add(errorPdf);
-                }
+                Console.WriteLine($"[MSG] Depth {depth} - Recursively processing nested message {msgIndex + 1}/{nestedMessages.Count}: {nestedMsg.Subject ?? "No Subject"}");
+                ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, depth + 1, maxDepth);
             }
         }
 
