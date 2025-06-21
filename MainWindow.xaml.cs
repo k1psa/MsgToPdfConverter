@@ -470,11 +470,9 @@ namespace MsgToPdfConverter
                                 }
                                 string mergedPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
                                 Console.WriteLine($"[DEBUG] Before PDF merge: {string.Join(", ", allPdfFiles)} -> {mergedPdf}");
-                                PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf);
-                                Console.WriteLine("[DEBUG] After PDF merge");
+                                PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf); Console.WriteLine("[DEBUG] After PDF merge");
                                 GC.Collect();
                                 GC.WaitForPendingFinalizers();
-                                System.Threading.Thread.Sleep(200);
                                 foreach (var f in allTempFiles)
                                 {
                                     try
@@ -821,10 +819,11 @@ namespace MsgToPdfConverter
             {
                 Console.WriteLine($"[Interop] Waiting for Office to release PDF file: {outputPdf}");
 
-                // Wait longer and verify the PDF is not locked
-                for (int i = 0; i < 10; i++)
+                // Wait and verify the PDF is not locked (start with shorter delays)
+                int[] delays = { 100, 200, 300, 500, 500, 500, 1000, 1000, 1000, 1000 };
+                for (int i = 0; i < delays.Length; i++)
                 {
-                    System.Threading.Thread.Sleep(500);
+                    System.Threading.Thread.Sleep(delays[i]);
 
                     // Try to open the PDF file to verify it's not locked
                     try
@@ -832,15 +831,15 @@ namespace MsgToPdfConverter
                         using (var fs = new FileStream(outputPdf, FileMode.Open, FileAccess.Read, FileShare.Read))
                         {
                             // If we can open it, it's not locked
-                            Console.WriteLine($"[Interop] PDF file ready after {(i + 1) * 500}ms: {outputPdf}");
+                            Console.WriteLine($"[Interop] PDF file ready after {delays.Take(i + 1).Sum()}ms: {outputPdf}");
                             break;
                         }
                     }
                     catch (IOException)
                     {
-                        if (i == 9) // Last attempt
+                        if (i == delays.Length - 1) // Last attempt
                         {
-                            Console.WriteLine($"[Interop][WARNING] PDF file may still be locked after 5 seconds: {outputPdf}");
+                            Console.WriteLine($"[Interop][WARNING] PDF file may still be locked after {delays.Sum()}ms: {outputPdf}");
                         }
                     }
                 }
