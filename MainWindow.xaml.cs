@@ -123,10 +123,9 @@ namespace MsgToPdfConverter
                 default: return "image/png";
             }
         }
-
         private string EmbedInlineImages(Storage.Message msg)
         {
-            string html = msg.BodyHtml ?? msg.BodyText;
+            string html = GetEmailBodyWithProperEncoding(msg);
             if (string.IsNullOrEmpty(html) || msg.Attachments == null || msg.Attachments.Count == 0)
                 return html;
 
@@ -176,7 +175,19 @@ namespace MsgToPdfConverter
                     {(string.IsNullOrWhiteSpace(cc) ? "" : $"<div><b>Cc:</b> {System.Net.WebUtility.HtmlEncode(cc)}</div>")}
                     <div><b>Subject:</b> {System.Net.WebUtility.HtmlEncode(subject)}</div>
                 </div>";
-            return header + body;
+
+            // Return a complete HTML document with proper UTF-8 charset declaration
+            return $@"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset=""UTF-8"">
+    <meta http-equiv=""Content-Type"" content=""text/html; charset=utf-8"">
+    <title>Email</title>
+</head>
+<body>
+{header}{body}
+</body>
+</html>";
         }
 
         private void KillWkhtmltopdfProcesses()
@@ -360,10 +371,9 @@ namespace MsgToPdfConverter
                             Console.WriteLine($"[TASK] Output PDF path: {pdfFilePath}");
                             string htmlWithHeader = BuildEmailHtml(msg, extractOriginalOnly);
                             Console.WriteLine($"[TASK] Built HTML for: {msgFilePath}");
-                            Console.WriteLine($"[TASK] HTML length: {htmlWithHeader?.Length ?? 0}");
-                            // Write HTML to a temp file
+                            Console.WriteLine($"[TASK] HTML length: {htmlWithHeader?.Length ?? 0}");                            // Write HTML to a temp file
                             string tempHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
-                            File.WriteAllText(tempHtmlPath, htmlWithHeader);
+                            File.WriteAllText(tempHtmlPath, htmlWithHeader, System.Text.Encoding.UTF8);
                             Console.WriteLine($"[DEBUG] Written HTML to temp file: {tempHtmlPath}");
                             // Find all inline ContentIds
                             var inlineContentIds = GetInlineContentIds(htmlWithHeader);
@@ -1198,11 +1208,9 @@ namespace MsgToPdfConverter
 
                     // Create PDF for the nested MSG body
                     string nestedHtml = BuildEmailHtml(msg, extractOriginalOnly);
-                    string nestedPdf = Path.Combine(tempDir, $"depth{depth}_{Guid.NewGuid()}_nested_msg.pdf");
-
-                    // Convert HTML to PDF
+                    string nestedPdf = Path.Combine(tempDir, $"depth{depth}_{Guid.NewGuid()}_nested_msg.pdf");                    // Convert HTML to PDF
                     string nestedHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
-                    File.WriteAllText(nestedHtmlPath, nestedHtml);
+                    File.WriteAllText(nestedHtmlPath, nestedHtml, System.Text.Encoding.UTF8);
 
                     var startInfo = new ProcessStartInfo
                     {
@@ -1475,6 +1483,116 @@ namespace MsgToPdfConverter
                 allTempFiles.Add(mergedZipPdf);
                 return mergedZipPdf;
             }
+        }
+
+        /// <summary>
+        /// Gets email body with proper encoding handling for Unicode characters like Greek
+        /// </summary>
+        private string GetEmailBodyWithProperEncoding(Storage.Message msg)
+        {
+            try
+            {
+                // Try to get HTML body first
+                string htmlBody = msg.BodyHtml;
+                if (!string.IsNullOrEmpty(htmlBody))
+                {
+                    // Check if the HTML body appears to have encoding issues
+                    if (HasEncodingIssues(htmlBody))
+                    {
+                        // Try to re-interpret with different encodings
+                        string fixedHtml = TryFixEncoding(htmlBody);
+                        if (!string.IsNullOrEmpty(fixedHtml) && !HasEncodingIssues(fixedHtml))
+                        {
+                            return fixedHtml;
+                        }
+                    }
+                    return htmlBody;
+                }
+
+                // Fall back to text body
+                string textBody = msg.BodyText;
+                if (!string.IsNullOrEmpty(textBody))
+                {
+                    if (HasEncodingIssues(textBody))
+                    {
+                        string fixedText = TryFixEncoding(textBody);
+                        if (!string.IsNullOrEmpty(fixedText) && !HasEncodingIssues(fixedText))
+                        {
+                            return fixedText;
+                        }
+                    }
+                    return textBody;
+                }
+
+                return string.Empty;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ENCODING] Error getting body with proper encoding: {ex.Message}");
+                return msg.BodyHtml ?? msg.BodyText ?? string.Empty;
+            }
+        }
+
+        /// <summary>
+        /// Checks if text has encoding issues (like Greek characters showing as garbage)
+        /// </summary>
+        private bool HasEncodingIssues(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return false;
+
+            // Look for patterns that indicate encoding issues
+            return text.Contains("Ã") || text.Contains("Î") || text.Contains("Ï") ||
+                   text.Contains("â") || text.Contains("€") || text.Contains("™");
+        }
+
+        /// <summary>
+        /// Attempts to fix encoding issues by trying different encoding interpretations
+        /// </summary>
+        private string TryFixEncoding(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return text;
+
+            try
+            {
+                // Try converting from different encodings to UTF-8
+                var encodings = new[]
+                {
+                    System.Text.Encoding.GetEncoding("windows-1252"),
+                    System.Text.Encoding.GetEncoding("iso-8859-1"),
+                    System.Text.Encoding.GetEncoding("iso-8859-7"), // Greek
+                    System.Text.Encoding.UTF8
+                };
+
+                foreach (var encoding in encodings)
+                {
+                    try
+                    {
+                        // Convert string back to bytes using current encoding assumption
+                        byte[] bytes = System.Text.Encoding.GetEncoding("iso-8859-1").GetBytes(text);
+                        // Reinterpret as target encoding
+                        string result = encoding.GetString(bytes);
+
+                        // Check if this looks better (has fewer encoding issue patterns)
+                        if (!HasEncodingIssues(result) && result != text)
+                        {
+                            Console.WriteLine($"[ENCODING] Fixed encoding using {encoding.EncodingName}");
+                            return result;
+                        }
+                    }
+                    catch
+                    {
+                        // Continue to next encoding
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ENCODING] Error trying to fix encoding: {ex.Message}");
+            }
+
+            return text; // Return original if no fix found
         }
     }
 }
