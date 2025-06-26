@@ -103,9 +103,10 @@
                                    Text="(Default: Same as .msg file)"
                                    VerticalAlignment="Center"/>
                 </StackPanel>
-                <StackPanel Orientation="Horizontal"
+                <StackPanel Orientation="Vertical"
                             Grid.Row="8"
                             Margin="0,0,0,10">
+                    <StackPanel Orientation="Horizontal">
                         <Button x:Name="ConvertButton"
                                 Content="Convert to PDF"
                                 Click="ConvertButton_Click"
@@ -117,14 +118,14 @@
                                 Click="CancelButton_Click"
                                 Width="80"
                                 Visibility="Collapsed"/>
+                    </StackPanel>
+                    <TextBlock x:Name="ProcessingStatusLabel"
+                               Text=""
+                               FontWeight="Bold"
+                               Foreground="Blue"
+                               Margin="0,0,0,10"
+                               Visibility="Collapsed"/>
                 </StackPanel>
-                <TextBlock x:Name="ProcessingStatusLabel"
-                           Text=""
-                           FontWeight="Bold"
-                           Foreground="Blue"
-                           Margin="0,0,0,10"
-                           Visibility="Collapsed"
-                           Grid.Row="9"/>
                 <ProgressBar x:Name="ProgressBar"
                              Height="20"
                              Margin="0,0,0,10"
