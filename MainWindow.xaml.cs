@@ -27,11 +27,17 @@ namespace MsgToPdfConverter
         private bool isConverting = false;
         private bool cancellationRequested = false;
         private string selectedOutputFolder = null;
+        private bool deleteMsgAfterConversion = false;
 
         public MainWindow()
         {
             InitializeComponent();
             CheckDotNetRuntime();
+            // Wire up DeleteMsgAfterConversionCheckBox if it exists
+            if (DeleteMsgAfterConversionCheckBox != null)
+                DeleteMsgAfterConversionCheckBox.Checked += (s, e) => deleteMsgAfterConversion = true;
+            if (DeleteMsgAfterConversionCheckBox != null)
+                DeleteMsgAfterConversionCheckBox.Unchecked += (s, e) => deleteMsgAfterConversion = false;
         }
 
         private void CheckDotNetRuntime()
@@ -360,9 +366,10 @@ namespace MsgToPdfConverter
                             Console.WriteLine("[DEBUG] Cancellation requested, breaking loop");
                             break;
                         }
-
                         processed++;
                         Console.WriteLine($"[DEBUG] Loop index: {i}");
+                        string msgFilePath = selectedFiles[i];
+                        Storage.Message msg = null;
                         try
                         {
                             // Update status on UI thread
@@ -371,11 +378,8 @@ namespace MsgToPdfConverter
                                 ProcessingStatusLabel.Text = $"Processing file {processed}/{selectedFiles.Count}: {Path.GetFileName(selectedFiles[i])}";
                                 ProgressBar.Value = i;
                             });
-
                             Console.WriteLine($"[TASK] Processing file {i + 1} of {selectedFiles.Count}: {selectedFiles[i]}");
-                            var msgFilePath = selectedFiles[i];
-                            Console.WriteLine($"[TASK] Loading MSG: {msgFilePath}");
-                            var msg = new Storage.Message(msgFilePath);
+                            msg = new Storage.Message(msgFilePath);
                             Console.WriteLine($"[TASK] Loaded MSG: {msgFilePath}");
                             string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
                             string baseName = Path.GetFileNameWithoutExtension(msgFilePath);
@@ -542,8 +546,27 @@ namespace MsgToPdfConverter
                         }
                         finally
                         {
+                            if (msg != null && msg is IDisposable disposableMsg)
+                            {
+                                disposableMsg.Dispose();
+                                Console.WriteLine($"[DEBUG] Disposed Storage.Message for: {msgFilePath}");
+                            }
+                            msg = null;
                             GC.Collect();
                             GC.WaitForPendingFinalizers();
+                            // Delete .msg file after conversion if the checkbox is checked
+                            if (deleteMsgAfterConversion && File.Exists(msgFilePath))
+                            {
+                                try
+                                {
+                                    File.Delete(msgFilePath);
+                                    Console.WriteLine($"[DELETE] Deleted .msg file: {msgFilePath}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[DELETE] Could not delete {msgFilePath}: {ex.Message}");
+                                }
+                            }
                             KillWkhtmltopdfProcesses();
                             Dispatcher.Invoke(() => ProgressBar.Value = i + 1);
                             Console.WriteLine($"[DEBUG] Cleanup complete for file {i + 1}");
@@ -1497,7 +1520,6 @@ namespace MsgToPdfConverter
                     }
                     else
                     {
-                        finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
                         AddHeaderPdf(finalZipPdf, zipHeader + "\n(Conversion failed)");
                         allTempFiles.Add(finalZipPdf);
                     }
