@@ -373,6 +373,7 @@ namespace MsgToPdfConverter
                             // Update status on UI thread
                             Dispatcher.Invoke(() =>
                             {
+                                ProcessingStatusLabel.Foreground = System.Windows.Media.Brushes.Blue;
                                 ProcessingStatusLabel.Text = $"Processing file {processed}/{selectedFiles.Count}: {Path.GetFileName(selectedFiles[i])}";
                                 ProgressBar.Value = i;
                             });
