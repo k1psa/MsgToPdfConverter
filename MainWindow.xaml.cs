@@ -970,237 +970,269 @@ namespace MsgToPdfConverter
 
         private void FilesListBox_Drop(object sender, DragEventArgs e)
         {
+            // 1. Standard file/folder drop
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
             {
                 string[] droppedItems = (string[])e.Data.GetData(DataFormats.FileDrop);
                 var newFiles = new List<string>();
-
                 foreach (string item in droppedItems)
                 {
                     if (File.Exists(item))
                     {
-                        // It's a file
                         if (Path.GetExtension(item).ToLowerInvariant() == ".msg")
                         {
                             if (!selectedFiles.Contains(item))
-                            {
                                 newFiles.Add(item);
-                            }
                         }
                     }
                     else if (Directory.Exists(item))
                     {
-                        // It's a folder - recursively find all .msg files
                         var msgFiles = Directory.GetFiles(item, "*.msg", SearchOption.AllDirectories);
                         foreach (string msgFile in msgFiles)
                         {
                             if (!selectedFiles.Contains(msgFile))
-                            {
                                 newFiles.Add(msgFile);
-                            }
                         }
                     }
                 }
-
-                // Add new files to the collection and UI
                 foreach (string file in newFiles)
                 {
                     selectedFiles.Add(file);
                     FilesListBox.Items.Add(file);
                 }
-
                 UpdateFileCountAndButtons();
+                return;
             }
-        }
 
-        // Robust file deletion with retries and Excel-specific handling
-        private void RobustDeleteFile(string filePath, int maxRetries = 5, int delayMs = 500)
-        {
-            for (int i = 0; i < maxRetries; i++)
+            // 2. Outlook email drag-and-drop support (improved robust approach)
+            if (e.Data.GetDataPresent("FileGroupDescriptorW") || e.Data.GetDataPresent("FileGroupDescriptor"))
             {
                 try
                 {
-                    if (File.Exists(filePath))
-                    {
-                        File.Delete(filePath);
-
-                        // Wait a moment and verify the file is actually gone
-                        System.Threading.Thread.Sleep(100);
-
-                        if (!File.Exists(filePath))
-                        {
-                            Console.WriteLine($"[CLEANUP] Successfully deleted temp file: {filePath}");
-                            return;
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[CLEANUP] File.Delete() succeeded but file still exists (attempt {i + 1}): {filePath}");
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[CLEANUP] File does not exist, skipping deletion: {filePath}");
+                    string outputFolder = FileDialogHelper.OpenFolderDialog();
+                    if (string.IsNullOrEmpty(outputFolder))
                         return;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[CLEANUP] Error deleting temp file (attempt {i + 1}/{maxRetries}): {filePath} - {ex.Message}");
-                    if (i == maxRetries - 1)
+
+                    string[] fileNames = null;
+                    if (e.Data.GetDataPresent("FileGroupDescriptorW"))
                     {
-                        Console.WriteLine($"[CLEANUP] Failed to delete temp file after {maxRetries} attempts: {filePath}");
-                    }
-                    else
-                    {
-                        System.Threading.Thread.Sleep(delayMs);
-                    }
-                }
-            }
-        }
-
-        private void ResetApplication()
-        {
-            // Option 1: Restart the application programmatically
-            System.Diagnostics.Process.Start(System.Windows.Application.ResourceAssembly.Location);
-            System.Windows.Application.Current.Shutdown();
-        }
-
-        // Returns all ContentIds referenced as inline images in the HTML
-        private HashSet<string> GetInlineContentIds(string html)
-        {
-            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrEmpty(html)) return set;
-            // Match src='cid:...' or src="cid:..." and optional angle brackets
-            var regex = new Regex("<img[^>]+src=['\"]cid:<?([^'\">]+)>?['\"]", RegexOptions.IgnoreCase);
-            foreach (Match match in regex.Matches(html))
-            {
-                if (match.Groups.Count > 1)
-                    set.Add(match.Groups[1].Value.Trim('<', '>', '\"', '\'', ' '));
-            }
-            return set;
-        }
-
-        private string ExtractOriginalEmailContent(string emailBody)
-        {
-            if (string.IsNullOrEmpty(emailBody))
-                return emailBody;
-
-            // Common patterns that indicate the start of a reply or forward
-            var replyIndicators = new[]
-            {
-                // English patterns
-                @"-----Original Message-----",
-                @"From:.*Sent:.*To:.*Subject:",
-                @"On .* wrote:",
-                @"On .* at .* .* wrote:",
-                @"> .*wrote:",
-                @"<.*> wrote:",
-                @"From: .*\r?\n.*Sent: .*\r?\n.*To: .*\r?\n.*Subject:",
-                @"________________________________",
-                @"From:.*\r?\nSent:.*\r?\nTo:.*\r?\nSubject:",
-                
-                // Additional patterns for forwarded messages
-                @"Begin forwarded message:",
-                @"---------- Forwarded message ----------",
-                @"Forwarded Message",
-                @"FW:",
-                @"Fwd:",
-                
-                // HTML patterns
-                @"<div class=""gmail_quote"">",
-                @"<div class=""OutlookMessageHeader"">",
-                @"<div.*class.*quoted.*>",
-                @"<blockquote.*>",
-                
-                // Outlook Web App patterns
-                @"<hr.*>.*From:",
-                @"<div.*outlook.*>.*From:",
-                
-                // Generic separator patterns
-                @"^-{5,}.*$",
-                @"^_{5,}.*$",
-                @"^={5,}.*$"
-            };
-
-            string originalContent = emailBody;
-
-            // Try each pattern and find the earliest match
-            int earliestIndex = originalContent.Length;
-
-            foreach (var pattern in replyIndicators)
-            {
-                try
-                {
-                    var matches = Regex.Matches(originalContent, pattern, RegexOptions.IgnoreCase | RegexOptions.Multiline | RegexOptions.Singleline);
-                    if (matches.Count > 0)
-                    {
-                        var firstMatch = matches[0];
-                        if (firstMatch.Index < earliestIndex)
+                        using (var stream = (System.IO.MemoryStream)e.Data.GetData("FileGroupDescriptorW"))
                         {
-                            earliestIndex = firstMatch.Index;
+                            fileNames = GetFileNamesFromFileGroupDescriptorW(stream);
                         }
                     }
+                    else if (e.Data.GetDataPresent("FileGroupDescriptor"))
+                    {
+                        using (var stream = (System.IO.MemoryStream)e.Data.GetData("FileGroupDescriptor"))
+                        {
+                            fileNames = GetFileNamesFromFileGroupDescriptor(stream);
+                        }
+                    }
+
+                    if (fileNames == null || fileNames.Length == 0)
+                        return;
+
+                    var tempFiles = new List<string>();
+                    var skippedFiles = new List<string>();
+                    for (int i = 0; i < fileNames.Length; i++)
+                    {
+                        string fileName = fileNames[i];
+                        if (!fileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                            fileName += ".msg";
+                        string destPath = Path.Combine(outputFolder, fileName);
+
+                        // Try all possible FileContents formats
+                        string[] possibleFormats = fileNames.Length == 1
+                            ? new[] { "FileContents" }
+                            : new[] { $"FileContents{i}", "FileContents" };
+                        bool success = false;
+                        foreach (var format in possibleFormats)
+                        {
+                            if (e.Data.GetDataPresent(format))
+                            {
+                                try
+                                {
+                                    using (var fileStream = (System.IO.MemoryStream)e.Data.GetData(format))
+                                    using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
+                                    {
+                                        fileStream.WriteTo(fs);
+                                    }
+                                    tempFiles.Add(destPath);
+                                    success = true;
+                                    break;
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[DND] Error writing {fileName} from {format}: {ex.Message}");
+                                }
+                            }
+                        }
+                        if (!success)
+                        {
+                            // Try alternate Outlook formats (rare)
+                            string[] altFormats = { "RenPrivateItem", "Attachment" };
+                            foreach (var alt in altFormats)
+                            {
+                                if (e.Data.GetDataPresent(alt))
+                                {
+                                    try
+                                    {
+                                        using (var fileStream = (System.IO.MemoryStream)e.Data.GetData(alt))
+                                        using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
+                                        {
+                                            fileStream.WriteTo(fs);
+                                        }
+                                        tempFiles.Add(destPath);
+                                        success = true;
+                                        break;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[DND] Error writing {fileName} from {alt}: {ex.Message}");
+                                    }
+                                }
+                            }
+                        }
+                        // Try FileDrop as a last resort (rare, but sometimes Outlook provides it)
+                        if (!success && e.Data.GetDataPresent(DataFormats.FileDrop))
+                        {
+                            try
+                            {
+                                string[] dropped = (string[])e.Data.GetData(DataFormats.FileDrop);
+                                foreach (var path in dropped)
+                                {
+                                    if (File.Exists(path) && Path.GetExtension(path).ToLowerInvariant() == ".msg")
+                                    {
+                                        File.Copy(path, destPath, true);
+                                        tempFiles.Add(destPath);
+                                        success = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[DND] Error copying from FileDrop: {ex.Message}");
+                            }
+                        }
+                        if (!success)
+                        {
+                            // Fallback: Try to use Outlook Interop to save the selected email(s) as .msg
+                            try
+                            {
+                                var outlookApp = System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application") as Microsoft.Office.Interop.Outlook.Application;
+                                if (outlookApp != null)
+                                {
+                                    var explorer = outlookApp.ActiveExplorer();
+                                    if (explorer != null && explorer.Selection != null && explorer.Selection.Count > 0)
+                                    {
+                                        for (int selIdx = 1; selIdx <= explorer.Selection.Count; selIdx++)
+                                        {
+                                            var mailItem = explorer.Selection[selIdx] as Microsoft.Office.Interop.Outlook.MailItem;
+                                            if (mailItem != null)
+                                            {
+                                                string safeSubject = string.Join("_", mailItem.Subject.Split(Path.GetInvalidFileNameChars()));
+                                                string interopFileName = safeSubject;
+                                                if (!interopFileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                                                    interopFileName += ".msg";
+                                                string interopDestPath = Path.Combine(outputFolder, interopFileName);
+                                                mailItem.SaveAs(interopDestPath, Microsoft.Office.Interop.Outlook.OlSaveAsType.olMSG);
+                                                tempFiles.Add(interopDestPath);
+                                                success = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[DND][Interop] Could not save selected Outlook email(s): {ex.Message}");
+                            }
+                        }
+                        if (!success)
+                        {
+                            skippedFiles.Add(fileName);
+                        }
+                    }
+
+                    foreach (var file in tempFiles)
+                    {
+                        if (!selectedFiles.Contains(file))
+                        {
+                            selectedFiles.Add(file);
+                            FilesListBox.Items.Add(file);
+                        }
+                    }
+                    UpdateFileCountAndButtons();
+
+                    if (skippedFiles.Count > 0)
+                    {
+                        MessageBox.Show(
+                            $"Some emails could not be added due to missing data from Outlook.\n\nPossible reasons:\n- The email is protected or encrypted\n- Outlook security settings\n- Outlook version limitations\n- The email is a meeting request or special item\n\nTry dragging the email(s) to a folder first, then add the .msg file.\n\nSkipped:\n{string.Join("\n", skippedFiles)}",
+                            "Outlook Drag-and-Drop",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                    }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[DEBUG] Regex pattern failed: {pattern}, Error: {ex.Message}");
+                    MessageBox.Show($"Error processing Outlook email drop: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
                 }
+                return;
             }
 
-            // If we found a reply/forward indicator, extract content before it
-            if (earliestIndex < originalContent.Length)
-            {
-                originalContent = originalContent.Substring(0, earliestIndex).Trim();
-            }
-
-            // Additional cleanup for HTML content
-            if (originalContent.Contains("<") && originalContent.Contains(">"))
-            {
-                // Remove trailing empty divs, paragraphs, or line breaks that might be left
-                originalContent = Regex.Replace(originalContent, @"(<br\s*/?>|<p\s*>|<div\s*>|\s)*$", "", RegexOptions.IgnoreCase);
-
-                // Close any unclosed tags properly
-                originalContent = CloseUnmatchedHtmlTags(originalContent);
-            }
-
-            return originalContent;
+            // 3. If all else fails, inform the user
+            MessageBox.Show(
+                "Could not extract email from Outlook drag-and-drop.\n\n" +
+                "This may be due to Outlook version or security settings.\n" +
+                "Try dragging the email to a folder first, then add the .msg file.",
+                "Outlook Drag-and-Drop Not Supported",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         }
 
-        private string CloseUnmatchedHtmlTags(string html)
+        // Helper: Parse file names from FileGroupDescriptorW (Unicode)
+        private string[] GetFileNamesFromFileGroupDescriptorW(Stream stream)
         {
-            if (string.IsNullOrEmpty(html))
-                return html;
-
-            try
+            var fileNames = new List<string>();
+            using (var reader = new BinaryReader(stream, System.Text.Encoding.Unicode))
             {
-                // Simple approach: count opening and closing tags for common elements
-                var tagsToCheck = new[] { "div", "p", "span", "b", "i", "strong", "em", "table", "tr", "td", "th" };
-                var result = html;
-
-                foreach (var tag in tagsToCheck)
+                stream.Position = 0;
+                // FILEGROUPDESCRIPTORW starts with a 4-byte count
+                int count = reader.ReadInt32();
+                for (int i = 0; i < count; i++)
                 {
-                    var openPattern = $@"<{tag}(\s[^>]*)?>";
-                    var closePattern = $@"</{tag}>";
-
-                    var openMatches = Regex.Matches(result, openPattern, RegexOptions.IgnoreCase);
-                    var closeMatches = Regex.Matches(result, closePattern, RegexOptions.IgnoreCase);
-
-                    int unclosedTags = openMatches.Count - closeMatches.Count;
-
-                    // Add closing tags if needed
-                    for (int i = 0; i < unclosedTags; i++)
-                    {
-                        result += $"</{tag}>";
-                    }
+                    // Skip 76 bytes to the file name (see FILEDESCRIPTORW struct)
+                    stream.Position = 4 + i * 592 + 76;
+                    // Read up to 520 bytes (260 WCHARs)
+                    var nameBytes = reader.ReadBytes(520);
+                    string name = System.Text.Encoding.Unicode.GetString(nameBytes).TrimEnd('\0');
+                    fileNames.Add(name);
                 }
+            }
+            return fileNames.ToArray();
+        }
 
-                return result;
-            }
-            catch (Exception ex)
+        // Helper: Parse file names from FileGroupDescriptor (ANSI)
+        private string[] GetFileNamesFromFileGroupDescriptor(Stream stream)
+        {
+            var fileNames = new List<string>();
+            using (var reader = new BinaryReader(stream, System.Text.Encoding.Default))
             {
-                Console.WriteLine($"[DEBUG] Error closing HTML tags: {ex.Message}");
-                return html; // Return original if there's an error
+                stream.Position = 0;
+                // FILEGROUPDESCRIPTOR starts with a 4-byte count
+                int count = reader.ReadInt32();
+                for (int i = 0; i < count; i++)
+                {
+                    // Skip 76 bytes to the file name (see FILEDESCRIPTOR struct)
+                    stream.Position = 4 + i * 592 + 76;
+                    // Read up to 260 bytes (MAX_PATH)
+                    var nameBytes = reader.ReadBytes(260);
+                    string name = System.Text.Encoding.Default.GetString(nameBytes).TrimEnd('\0');
+                    fileNames.Add(name);
+                }
             }
+            return fileNames.ToArray();
         }
         private void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5)
         {
@@ -1610,6 +1642,122 @@ namespace MsgToPdfConverter
             }
 
             return text; // Return original if no fix found
+        }
+
+        // Returns all ContentIds referenced as inline images in the HTML
+        private HashSet<string> GetInlineContentIds(string html)
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (string.IsNullOrEmpty(html)) return set;
+            // Match src='cid:...' or src="cid:..." and optional angle brackets
+            var regex = new System.Text.RegularExpressions.Regex("<img[^>]+src=['\"]cid:<?([^'\">]+)>?['\"]", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            foreach (System.Text.RegularExpressions.Match match in regex.Matches(html))
+            {
+                if (match.Groups.Count > 1)
+                    set.Add(match.Groups[1].Value.Trim('<', '>', '\"', '\'', ' '));
+            }
+            return set;
+        }
+
+        // Extracts the original email content from a reply/forward chain
+        private string ExtractOriginalEmailContent(string emailBody)
+        {
+            if (string.IsNullOrEmpty(emailBody))
+                return emailBody;
+
+            var replyIndicators = new[]
+            {
+                @"-----Original Message-----",
+                @"From:.*Sent:.*To:.*Subject:",
+                @"On .* wrote:",
+                @"On .* at .* .* wrote:",
+                @"> .*wrote:",
+                @"<.*> wrote:",
+                @"From: .*[\r\n]+.*Sent: .*[\r\n]+.*To: .*[\r\n]+.*Subject:",
+                @"________________________________",
+                @"From:.*[\r\n]Sent:.*[\r\n]To:.*[\r\n]Subject:",
+                @"Begin forwarded message:",
+                @"---------- Forwarded message ----------",
+                @"Forwarded Message",
+                @"FW:",
+                @"Fwd:",
+                @"<div class=""gmail_quote"">",
+                @"<div class=""OutlookMessageHeader"">",
+                @"<div.*class.*quoted.*>",
+                @"<blockquote.*>",
+                @"<hr.*>.*From:",
+                @"<div.*outlook.*>.*From:",
+                @"^-{5,}.*$",
+                @"^_{5,}.*$",
+                @"^={5,}.*$"
+            };
+
+            string originalContent = emailBody;
+            int earliestIndex = originalContent.Length;
+            foreach (var pattern in replyIndicators)
+            {
+                try
+                {
+                    var matches = System.Text.RegularExpressions.Regex.Matches(originalContent, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.Singleline);
+                    if (matches.Count > 0)
+                    {
+                        var firstMatch = matches[0];
+                        if (firstMatch.Index < earliestIndex)
+                        {
+                            earliestIndex = firstMatch.Index;
+                        }
+                    }
+                }
+                catch { }
+            }
+            if (earliestIndex < originalContent.Length)
+            {
+                originalContent = originalContent.Substring(0, earliestIndex).Trim();
+            }
+            // Remove trailing empty divs, paragraphs, or line breaks
+            if (originalContent.Contains("<") && originalContent.Contains(">"))
+            {
+                originalContent = System.Text.RegularExpressions.Regex.Replace(originalContent, @"(<br\s*/?>|<p\s*>|<div\s*>|\s)*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+            return originalContent;
+        }
+
+        // Robust file deletion with retries
+        private void RobustDeleteFile(string filePath, int maxRetries = 5, int delayMs = 500)
+        {
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    if (System.IO.File.Exists(filePath))
+                    {
+                        System.IO.File.Delete(filePath);
+                        System.Threading.Thread.Sleep(100);
+                        if (!System.IO.File.Exists(filePath))
+                        {
+                            System.Console.WriteLine($"[CLEANUP] Successfully deleted temp file: {filePath}");
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        System.Console.WriteLine($"[CLEANUP] File does not exist, skipping deletion: {filePath}");
+                        return;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Console.WriteLine($"[CLEANUP] Error deleting temp file (attempt {i + 1}/{maxRetries}): {filePath} - {ex.Message}");
+                    if (i == maxRetries - 1)
+                    {
+                        System.Console.WriteLine($"[CLEANUP] Failed to delete temp file after {maxRetries} attempts: {filePath}");
+                    }
+                    else
+                    {
+                        System.Threading.Thread.Sleep(delayMs);
+                    }
+                }
+            }
         }
     }
 }

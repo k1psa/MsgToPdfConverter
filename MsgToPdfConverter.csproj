@@ -27,6 +27,7 @@
     <PackageReference Include="MsgReader" Version="3.0.0" />
     <PackageReference Include="iText7" Version="7.1.15" />
     <PackageReference Include="PdfSharp" Version="6.2.0" />
+    <PackageReference Include="Microsoft.Office.Interop.Outlook" Version="15.0.4795.1000" />
     <None Update="PdfAppendTestInput.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
