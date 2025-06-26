@@ -133,5 +133,15 @@
                              Value="0"
                              Visibility="Collapsed"
                              Grid.Row="10"/>
+                <CheckBox x:Name="AlwaysOnTopCheckBox"
+                          Content="Always on top"
+                          VerticalAlignment="Bottom"
+                          HorizontalAlignment="Right"
+                          Margin="5"
+                          FontSize="11"
+                          Opacity="0.7"
+                          ToolTip="Keep this window above others"
+                          Checked="AlwaysOnTopCheckBox_Checked"
+                          Unchecked="AlwaysOnTopCheckBox_Unchecked"/>
         </Grid>
 </Window>
