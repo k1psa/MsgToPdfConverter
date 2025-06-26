@@ -34,6 +34,11 @@
                                 Content="Clear List"
                                 Click="ClearListButton_Click"
                                 Width="80"/>
+                        <Button x:Name="OptionsButton"
+                                Content="Options..."
+                                Click="OptionsButton_Click"
+                                Width="80"
+                                Margin="5,0,0,0"/>
                 </StackPanel>
                 <TextBlock x:Name="FileCountLabel"
                            Text="Files selected: 0"
@@ -81,14 +86,6 @@
                           Content="Append attachments as PDF at the end"
                           Margin="0,0,0,10"
                           Grid.Row="4"/>
-                <CheckBox x:Name="ExtractOriginalOnlyCheckBox"
-                          Content="Extract original email only (remove replies/forwards)"
-                          Margin="0,0,0,10"
-                          Grid.Row="5"/>
-                <CheckBox x:Name="DeleteMsgAfterConversionCheckBox"
-                          Content="Delete .msg after conversion"
-                          Margin="0,0,0,10"
-                          Grid.Row="6"/>
                 <StackPanel Orientation="Horizontal"
                             Grid.Row="7"
                             Margin="0,0,0,10">

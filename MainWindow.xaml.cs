@@ -27,17 +27,13 @@ namespace MsgToPdfConverter
         private bool isConverting = false;
         private bool cancellationRequested = false;
         private string selectedOutputFolder = null;
+        private bool extractOriginalOnly = false;
         private bool deleteMsgAfterConversion = false;
 
         public MainWindow()
         {
             InitializeComponent();
             CheckDotNetRuntime();
-            // Wire up DeleteMsgAfterConversionCheckBox if it exists
-            if (DeleteMsgAfterConversionCheckBox != null)
-                DeleteMsgAfterConversionCheckBox.Checked += (s, e) => deleteMsgAfterConversion = true;
-            if (DeleteMsgAfterConversionCheckBox != null)
-                DeleteMsgAfterConversionCheckBox.Unchecked += (s, e) => deleteMsgAfterConversion = false;
         }
 
         private void CheckDotNetRuntime()
@@ -352,10 +348,11 @@ namespace MsgToPdfConverter
                 ProgressBar.Minimum = 0;
                 ProgressBar.Maximum = selectedFiles.Count;
                 ProgressBar.Value = 0; int success = 0, fail = 0, processed = 0;
+                // Use the field instead of the removed checkbox
                 bool appendAttachments = AppendAttachmentsCheckBox.IsChecked == true;
-                bool extractOriginalOnly = ExtractOriginalOnlyCheckBox.IsChecked == true;
+                // Use the field for extract original only
+                bool extractOriginalOnlyLocal = extractOriginalOnly;
                 Console.WriteLine($"[DEBUG] appendAttachments: {appendAttachments}");
-                Console.WriteLine($"[DEBUG] extractOriginalOnly: {extractOriginalOnly}");
                 await Task.Run(() =>
                 {
                     Console.WriteLine("[DEBUG] Starting batch loop");
@@ -942,7 +939,6 @@ namespace MsgToPdfConverter
             ClearListButton.IsEnabled = !processing;
             ConvertButton.IsEnabled = !processing && FilesListBox.Items.Count > 0;
             AppendAttachmentsCheckBox.IsEnabled = !processing;
-            ExtractOriginalOnlyCheckBox.IsEnabled = !processing;
             FilesListBox.IsEnabled = !processing;
 
             // Show/hide cancel button
@@ -1782,6 +1778,19 @@ namespace MsgToPdfConverter
                         System.Threading.Thread.Sleep(delayMs);
                     }
                 }
+            }
+        }
+
+        private void OptionsButton_Click(object sender, RoutedEventArgs e)
+        {
+            var optionsWindow = new OptionsWindow(extractOriginalOnly, deleteMsgAfterConversion)
+            {
+                Owner = this
+            };
+            if (optionsWindow.ShowDialog() == true)
+            {
+                extractOriginalOnly = optionsWindow.ExtractOriginalOnly;
+                deleteMsgAfterConversion = optionsWindow.DeleteMsgAfterConversion;
             }
         }
     }
