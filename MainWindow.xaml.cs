@@ -1009,7 +1009,10 @@ namespace MsgToPdfConverter
             {
                 try
                 {
-                    string outputFolder = FileDialogHelper.OpenFolderDialog();
+                    // Use selectedOutputFolder if set, otherwise prompt
+                    string outputFolder = !string.IsNullOrEmpty(selectedOutputFolder)
+                        ? selectedOutputFolder
+                        : FileDialogHelper.OpenFolderDialog();
                     if (string.IsNullOrEmpty(outputFolder))
                         return;
 
