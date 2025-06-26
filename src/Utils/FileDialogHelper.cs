@@ -65,5 +65,20 @@ namespace MsgToPdfConverter.Utils
 
             return result;
         }
+
+        public static string OpenFolderDialog()
+        {
+            using (var dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "Select Output Folder for PDF Files";
+                dialog.ShowNewFolderButton = true;
+
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    return dialog.SelectedPath;
+                }
+            }
+            return null;
+        }
     }
 }

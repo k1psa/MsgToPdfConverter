@@ -15,6 +15,7 @@
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <TextBlock FontSize="16"
                            FontWeight="Bold"
@@ -87,6 +88,23 @@
                 <StackPanel Orientation="Horizontal"
                             Grid.Row="6"
                             Margin="0,0,0,10">
+                        <Button x:Name="SelectOutputFolderButton"
+                                Content="Select Output Folder"
+                                Click="SelectOutputFolderButton_Click"
+                                Width="120"
+                                Margin="0,0,10,0"/>
+                        <Button x:Name="ClearOutputFolderButton"
+                                Content="Clear"
+                                Click="ClearOutputFolderButton_Click"
+                                Width="50"
+                                Margin="0,0,10,0"/>
+                        <TextBlock x:Name="OutputFolderLabel"
+                                   Text="(Default: Same as .msg file)"
+                                   VerticalAlignment="Center"/>
+                </StackPanel>
+                <StackPanel Orientation="Horizontal"
+                            Grid.Row="7"
+                            Margin="0,0,0,10">
                         <Button x:Name="ConvertButton"
                                 Content="Convert to PDF"
                                 Click="ConvertButton_Click"
@@ -105,7 +123,7 @@
                            Foreground="Blue"
                            Margin="0,0,0,10"
                            Visibility="Collapsed"
-                           Grid.Row="7"/>
+                           Grid.Row="8"/>
                 <ProgressBar x:Name="ProgressBar"
                              Height="20"
                              Margin="0,0,0,10"
@@ -113,6 +131,6 @@
                              Maximum="100"
                              Value="0"
                              Visibility="Collapsed"
-                             Grid.Row="8"/>
+                             Grid.Row="9"/>
         </Grid>
 </Window>

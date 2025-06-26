@@ -26,6 +26,7 @@ namespace MsgToPdfConverter
         private int convertButtonClickCount = 0;
         private bool isConverting = false;
         private bool cancellationRequested = false;
+        private string selectedOutputFolder = null;
 
         public MainWindow()
         {
@@ -104,6 +105,22 @@ namespace MsgToPdfConverter
             selectedFiles.Clear();
             FilesListBox.Items.Clear();
             UpdateFileCountAndButtons();
+        }
+
+        private void SelectOutputFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            var folder = FileDialogHelper.OpenFolderDialog();
+            if (!string.IsNullOrEmpty(folder))
+            {
+                selectedOutputFolder = folder;
+                OutputFolderLabel.Text = $"Output Folder: {selectedOutputFolder}";
+            }
+        }
+
+        private void ClearOutputFolderButton_Click(object sender, RoutedEventArgs e)
+        {
+            selectedOutputFolder = null;
+            OutputFolderLabel.Text = "(Default: Same as .msg file)";
         }
 
         private string GetMimeTypeFromFileName(string fileName)
@@ -362,7 +379,7 @@ namespace MsgToPdfConverter
                             Console.WriteLine($"[TASK] Loaded MSG: {msgFilePath}");
                             string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
                             string baseName = Path.GetFileNameWithoutExtension(msgFilePath);
-                            string dir = Path.GetDirectoryName(msgFilePath);
+                            string dir = !string.IsNullOrEmpty(selectedOutputFolder) ? selectedOutputFolder : Path.GetDirectoryName(msgFilePath);
                             string pdfFilePath = Path.Combine(dir, $"{baseName} - {datePart}.pdf");
                             if (File.Exists(pdfFilePath))
                             {
