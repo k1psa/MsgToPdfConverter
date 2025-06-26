@@ -29,6 +29,7 @@ namespace MsgToPdfConverter
         private string selectedOutputFolder = null;
         private bool extractOriginalOnly = false;
         private bool deleteMsgAfterConversion = false;
+        private bool isPinned = false;
 
         public MainWindow()
         {
@@ -1802,6 +1803,14 @@ namespace MsgToPdfConverter
         private void AlwaysOnTopCheckBox_Unchecked(object sender, RoutedEventArgs e)
         {
             this.Topmost = false;
+        }
+
+        private void PinButton_Click(object sender, RoutedEventArgs e)
+        {
+            isPinned = !isPinned;
+            this.Topmost = isPinned;
+            PinButton.Foreground = isPinned ? System.Windows.Media.Brushes.Red : System.Windows.Media.Brushes.Black;
+            PinButton.Opacity = isPinned ? 1.0 : 0.7;
         }
     }
 }
