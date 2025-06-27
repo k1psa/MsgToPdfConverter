@@ -401,7 +401,7 @@ namespace MsgToPdfConverter
                             {
                                 ProcessingStatusLabel.Foreground = System.Windows.Media.Brushes.Blue;
                                 ProcessingStatusLabel.Text = $"Processing file {processed}/{selectedFiles.Count}: {Path.GetFileName(selectedFiles[i])}";
-                                ProgressBar.Value = i;
+                                ProgressBar.Value = processed;  // Show progress immediately when starting the file
                             });
                             Console.WriteLine($"[TASK] Processing file {i + 1} of {selectedFiles.Count}: {selectedFiles[i]}");
                             msg = new Storage.Message(msgFilePath);
