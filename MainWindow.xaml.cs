@@ -947,17 +947,10 @@ namespace MsgToPdfConverter
                 {
                     itemsToRemove.Add(item as string);
                 }
-                // Confirm deletion
-                var result = MessageBox.Show($"Are you sure you want to move the selected file(s) to the Recycle Bin?\n\n{string.Join("\n", itemsToRemove)}", "Confirm Delete", MessageBoxButton.YesNo, MessageBoxImage.Question);
-                if (result != MessageBoxResult.Yes)
-                {
-                    e.Handled = true; // Suppress default behavior
-                    return;
-                }
+
+                // Remove selected files from the list (no confirmation required)
                 foreach (var item in itemsToRemove)
                 {
-                    // Only use MoveFileToRecycleBin for user files
-                    MoveFileToRecycleBin(item);
                     FilesListBox.Items.Remove(item);
                     selectedFiles.Remove(item);
                 }
