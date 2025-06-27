@@ -33,10 +33,21 @@ namespace MsgToPdfConverter
         private bool deleteMsgAfterConversion = false;
         private bool isPinned = false;
         private EmailConverterService _emailService = new EmailConverterService();
+        private AttachmentService _attachmentService;
+        private OutlookImportService _outlookImportService = new OutlookImportService();
 
         public MainWindow()
         {
             InitializeComponent();
+            
+            // Initialize AttachmentService with PDF service methods
+            _attachmentService = new AttachmentService(
+                (path, text, _) => PdfService.AddHeaderPdf(path, text), // Adapter for the different signature
+                OfficeConversionService.TryConvertOfficeToPdf,
+                PdfAppendTest.AppendPdfs,
+                _emailService
+            );
+            
             CheckDotNetRuntime();
         }
 
@@ -393,7 +404,7 @@ namespace MsgToPdfConverter
                                     {
                                         File.WriteAllBytes(attPath, att.Data);
                                         allTempFiles.Add(attPath);
-                                        string finalAttachmentPdf = ProcessSingleAttachment(att, attPath, tempDir, headerText, allTempFiles);
+                                        string finalAttachmentPdf = _attachmentService.ProcessSingleAttachment(att, attPath, tempDir, headerText, allTempFiles);
 
                                         if (finalAttachmentPdf != null)
                                             allPdfFiles.Add(finalAttachmentPdf);
@@ -402,7 +413,7 @@ namespace MsgToPdfConverter
                                     {
                                         Console.WriteLine($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
                                         string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                                        AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
+                                        PdfService.AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
                                         allPdfFiles.Add(errorPdf);
                                         allTempFiles.Add(errorPdf);
                                     }
@@ -413,7 +424,7 @@ namespace MsgToPdfConverter
                                 foreach (var nestedMsg in nestedMessages)
                                 {
                                     // This will recursively process the nested MSG and all its attachments
-                                    ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, 1);
+                                    _attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, 1);
                                 }
 
                                 string mergedPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
@@ -481,7 +492,7 @@ namespace MsgToPdfConverter
                                 try
                                 {
                                     // Move to Recycle Bin instead of permanent delete
-                                    MoveFileToRecycleBin(msgFilePath);
+                                    FileService.MoveFileToRecycleBin(msgFilePath);
                                     Console.WriteLine($"[DELETE] Moved .msg file to Recycle Bin: {msgFilePath}");
                                 }
                                 catch (Exception ex)
@@ -562,7 +573,7 @@ namespace MsgToPdfConverter
                     }
                     else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
                     {
-                        if (TryConvertOfficeToPdf(attPath, attPdf))
+                        if (OfficeConversionService.TryConvertOfficeToPdf(attPath, attPdf))
                         {
                             tempPdfFiles.Add(attPdf);
                             // Also add to cleanup list so the Office-generated PDF gets deleted
@@ -588,20 +599,20 @@ namespace MsgToPdfConverter
                             }
                             else if (zfExt == ".doc" || zfExt == ".docx" || zfExt == ".xls" || zfExt == ".xlsx")
                             {
-                                if (TryConvertOfficeToPdf(zf, zfPdf))
+                                if (OfficeConversionService.TryConvertOfficeToPdf(zf, zfPdf))
                                 {
                                     tempPdfFiles.Add(zfPdf);
                                     Console.WriteLine($"[ATTACH] ZIP Office converted: {zfPdf}");
                                 }
                                 else
                                 {
-                                    AddPlaceholderPdf(zfPdf, $"Could not convert attachment: {Path.GetFileName(zf)}");
+                                    PdfService.AddPlaceholderPdf(zfPdf, $"Could not convert attachment: {Path.GetFileName(zf)}");
                                     Console.WriteLine($"[ATTACH] ZIP Office failed to convert: {zf}");
                                 }
                             }
                             else
                             {
-                                AddPlaceholderPdf(zfPdf, $"Unsupported attachment: {Path.GetFileName(zf)}");
+                                PdfService.AddPlaceholderPdf(zfPdf, $"Unsupported attachment: {Path.GetFileName(zf)}");
                                 tempPdfFiles.Add(zfPdf);
                                 Console.WriteLine($"[ATTACH] ZIP unsupported: {zf}");
                             }
@@ -609,7 +620,7 @@ namespace MsgToPdfConverter
                     }
                     else
                     {
-                        AddPlaceholderPdf(attPdf, $"Unsupported attachment: {attName}");
+                        PdfService.AddPlaceholderPdf(attPdf, $"Unsupported attachment: {attName}");
                         tempPdfFiles.Add(attPdf);
                         Console.WriteLine($"[ATTACH] Unsupported type: {attName}");
                     }
@@ -617,7 +628,7 @@ namespace MsgToPdfConverter
                 }
                 catch (Exception ex)
                 {
-                    AddPlaceholderPdf(attPdf, $"Error processing attachment: {ex.Message}");
+                    PdfService.AddPlaceholderPdf(attPdf, $"Error processing attachment: {ex.Message}");
                     tempPdfFiles.Add(attPdf);
                     Console.WriteLine($"[ATTACH] Exception: {attName} - {ex}");
                 }
@@ -632,205 +643,6 @@ namespace MsgToPdfConverter
             {
                 // Do not delete temp files for now
             }
-        }
-
-        // Merges multiple PDFs into one using iText7, never including the output file as an input
-        private void MergePdfs(string[] pdfFiles, string outputPdf)
-        {
-            Console.WriteLine($"[MERGE] (iText7) Merging PDFs into: {outputPdf}");
-            // Filter out the output file if present in the input list
-            var inputFiles = new List<string>();
-            foreach (var f in pdfFiles)
-            {
-                if (!string.Equals(f, outputPdf, StringComparison.OrdinalIgnoreCase))
-                    inputFiles.Add(f);
-            }
-            // Filter out PDFs that are empty or invalid
-            var validInputFiles = new List<string>();
-            foreach (var pdf in inputFiles)
-            {
-                try
-                {
-                    using (var reader = new iText.Kernel.Pdf.PdfReader(pdf))
-                    using (var doc = new iText.Kernel.Pdf.PdfDocument(reader))
-                    {
-                        int n = doc.GetNumberOfPages();
-                        if (n > 0)
-                        {
-                            validInputFiles.Add(pdf);
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[MERGE] Skipping empty PDF: {pdf}");
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[MERGE] Skipping invalid PDF: {pdf} - {ex.Message}");
-                }
-            }
-            if (validInputFiles.Count == 0)
-            {
-                Console.WriteLine("[MERGE] No valid PDFs to merge. Aborting.");
-                return;
-            }
-            using (var stream = new FileStream(outputPdf, FileMode.Create, FileAccess.Write))
-            using (var pdfWriter = new iText.Kernel.Pdf.PdfWriter(stream))
-            using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(pdfWriter))
-            {
-                foreach (var pdf in validInputFiles)
-                {
-                    using (var srcPdf = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(pdf)))
-                    {
-                        int n = srcPdf.GetNumberOfPages();
-                        srcPdf.CopyPagesTo(1, n, pdfDoc);
-                    }
-                }
-            }
-            Console.WriteLine($"[MERGE] (iText7) Saved merged PDF: {outputPdf}");
-        }
-
-        // Adds a single-page PDF with a message
-        private void AddPlaceholderPdf(string pdfPath, string message, string imagePath = null)
-        {
-            using (var doc = new PdfSharp.Pdf.PdfDocument())
-            {
-                var page = doc.AddPage();
-                using (var gfx = PdfSharp.Drawing.XGraphics.FromPdfPage(page))
-                {
-                    if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
-                    {
-                        try
-                        {
-                            Console.WriteLine($"[IMG2PDF] Attempting to load image: {imagePath}");
-                            var img = PdfSharp.Drawing.XImage.FromFile(imagePath);
-                            Console.WriteLine($"[IMG2PDF] Loaded image: {imagePath}");
-                            double maxWidth = page.Width.Point - 80;
-                            double maxHeight = page.Height.Point - 300;
-                            double scale = Math.Min(maxWidth / img.PixelWidth * 72.0 / img.HorizontalResolution, maxHeight / img.PixelHeight * 72.0 / img.VerticalResolution);
-                            double imgWidth = img.PixelWidth * 72.0 / img.HorizontalResolution * scale;
-                            double imgHeight = img.PixelHeight * 72.0 / img.VerticalResolution * scale;
-                            double x = (page.Width.Point - imgWidth) / 2;
-                            double y = 100;
-                            gfx.DrawImage(img, x, y, imgWidth, imgHeight);
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[IMG2PDF] Failed to load image: {imagePath} - {ex.Message}");
-                        }
-                    }
-                    var font = new PdfSharp.Drawing.XFont("Arial", 16);
-                    gfx.DrawString(message, font, PdfSharp.Drawing.XBrushes.Black, new PdfSharp.Drawing.XRect(40, page.Height.Point - 200, page.Width.Point - 80, 100), PdfSharp.Drawing.XStringFormats.Center);
-                }
-                doc.Save(pdfPath);
-            }
-        }
-
-        // Helper to create a single-page PDF with a header text at the top center using iText
-        private void AddHeaderPdf(string pdfPath, string headerText)
-        {
-            using (var writer = new iText.Kernel.Pdf.PdfWriter(pdfPath))
-            using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
-            using (var doc = new iText.Layout.Document(pdf))
-            {
-                var p = new iText.Layout.Element.Paragraph(headerText)
-                    .SetTextAlignment(iText.Layout.Properties.TextAlignment.CENTER)
-                    .SetFontSize(18);
-                doc.Add(p);
-            }
-        }
-
-        // Attempts to convert Office files to PDF using Office Interop (requires Office installed)
-        private bool TryConvertOfficeToPdf(string inputPath, string outputPdf)
-        {
-            string ext = Path.GetExtension(inputPath).ToLowerInvariant();
-            bool result = false;
-            Exception threadEx = null;
-            var thread = new System.Threading.Thread(() =>
-            {
-                try
-                {
-                    if (ext == ".doc" || ext == ".docx")
-                    {
-                        var wordApp = new Microsoft.Office.Interop.Word.Application();
-                        var doc = wordApp.Documents.Open(inputPath);
-                        doc.ExportAsFixedFormat(outputPdf, Microsoft.Office.Interop.Word.WdExportFormat.wdExportFormatPDF);
-                        doc.Close();
-                        Marshal.ReleaseComObject(doc);
-                        wordApp.Quit();
-                        Marshal.ReleaseComObject(wordApp);
-                        GC.Collect();
-                        GC.WaitForPendingFinalizers();
-                        result = true;
-                    }
-                    else if (ext == ".xls" || ext == ".xlsx")
-                    {
-                        var excelApp = new Microsoft.Office.Interop.Excel.Application();
-                        Microsoft.Office.Interop.Excel.Workbooks workbooks = null;
-                        Microsoft.Office.Interop.Excel.Workbook wb = null;
-                        try
-                        {
-                            workbooks = excelApp.Workbooks;
-                            wb = workbooks.Open(inputPath);
-                            wb.ExportAsFixedFormat(Microsoft.Office.Interop.Excel.XlFixedFormatType.xlTypePDF, outputPdf);
-                        }
-                        finally
-                        {
-                            if (wb != null) wb.Close(false);
-                            if (wb != null) Marshal.ReleaseComObject(wb);
-                            if (workbooks != null) Marshal.ReleaseComObject(workbooks);
-                            if (excelApp != null) excelApp.Quit();
-                            if (excelApp != null) Marshal.ReleaseComObject(excelApp);
-                            GC.Collect();
-                            GC.WaitForPendingFinalizers();
-                        }
-                        result = true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    threadEx = ex;
-                }
-            }); thread.SetApartmentState(System.Threading.ApartmentState.STA);
-            thread.Start();
-            thread.Join();            // Give Office extra time to release the generated PDF file
-            if (result)
-            {
-                Console.WriteLine($"[Interop] Waiting for Office to release PDF file: {outputPdf}");
-
-                // Wait and verify the PDF is not locked (start with shorter delays)
-                int[] delays = { 100, 200, 300, 500, 500, 500, 1000, 1000, 1000, 1000 };
-                for (int i = 0; i < delays.Length; i++)
-                {
-                    System.Threading.Thread.Sleep(delays[i]);
-
-                    // Try to open the PDF file to verify it's not locked
-                    try
-                    {
-                        using (var fs = new FileStream(outputPdf, FileMode.Open, FileAccess.Read, FileShare.Read))
-                        {
-                            // If we can open it, it's not locked
-                            Console.WriteLine($"[Interop] PDF file ready after {delays.Take(i + 1).Sum()}ms: {outputPdf}");
-                            break;
-                        }
-                    }
-                    catch (IOException)
-                    {
-                        if (i == delays.Length - 1) // Last attempt
-                        {
-                            Console.WriteLine($"[Interop][WARNING] PDF file may still be locked after {delays.Sum()}ms: {outputPdf}");
-                        }
-                    }
-                }
-            }
-
-            if (threadEx != null)
-            {
-                Console.WriteLine($"[Interop] Office to PDF conversion failed: {threadEx.Message}");
-                return false;
-            }
-            return result;
         }
 
         private void FilesListBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -1031,7 +843,7 @@ namespace MsgToPdfConverter
                             fileName += ".msg";
 
                         // Sanitize filename to remove illegal characters
-                        fileName = SanitizeFileName(fileName);
+                        fileName = FileService.SanitizeFileName(fileName);
 
                         // Make filename unique if it already exists or was used in this batch
                         string destPath = Path.Combine(outputFolder, fileName);
@@ -1189,7 +1001,7 @@ namespace MsgToPdfConverter
                                         if (mailItem != null)
                                         {
                                             // Use the same filename logic as above, but ensure uniqueness
-                                            string safeSubject = SanitizeFileName(mailItem.Subject ?? "untitled");
+                                            string safeSubject = FileService.SanitizeFileName(mailItem.Subject ?? "untitled");
                                             string interopFileName = safeSubject;
                                             if (!interopFileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
                                                 interopFileName += ".msg";
@@ -1320,33 +1132,6 @@ namespace MsgToPdfConverter
             return fileNames.ToArray();
         }
 
-        // Helper: Sanitize filename to remove illegal characters
-        private string SanitizeFileName(string fileName)
-        {
-            if (string.IsNullOrEmpty(fileName))
-                return "untitled.msg";
-
-            // Remove illegal characters from filename
-            char[] invalidChars = Path.GetInvalidFileNameChars();
-            foreach (char c in invalidChars)
-            {
-                fileName = fileName.Replace(c, '_');
-            }
-
-            // Also remove some other problematic characters
-            fileName = fileName.Replace(":", "_").Replace("?", "_").Replace("*", "_");
-
-            // Ensure it's not too long (Windows has a 255 character limit for filenames)
-            if (fileName.Length > 200)
-            {
-                string extension = Path.GetExtension(fileName);
-                string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-                fileName = nameWithoutExt.Substring(0, 200 - extension.Length) + extension;
-            }
-
-            return fileName;
-        }
-
         private void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5)
         {
             // Prevent infinite recursion
@@ -1391,7 +1176,7 @@ namespace MsgToPdfConverter
                         {
                             // Add header and merge
                             string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                            AddHeaderPdf(headerPdf, headerText);
+                            PdfService.AddHeaderPdf(headerPdf, headerText);
                             string finalNestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested_merged.pdf");
                             PdfAppendTest.AppendPdfs(new List<string> { headerPdf, nestedPdf }, finalNestedPdf);
 
@@ -1414,7 +1199,7 @@ namespace MsgToPdfConverter
                 {
                     Console.WriteLine($"[MSG] Depth {depth} - Error processing nested MSG body {msgSubject}: {ex.Message}");
                     string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_msg_error.pdf");
-                    AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
+                    PdfService.AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
                     allPdfFiles.Add(errorPdf);
                     allTempFiles.Add(errorPdf);
                 }
@@ -1477,7 +1262,7 @@ namespace MsgToPdfConverter
                 {
                     Console.WriteLine($"[MSG] Depth {depth} - Error processing attachment {attName}: {ex.Message}");
                     string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                    AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
+                    PdfService.AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
                     allPdfFiles.Add(errorPdf);
                     allTempFiles.Add(errorPdf);
                 }
@@ -1504,7 +1289,7 @@ namespace MsgToPdfConverter
                 if (ext == ".pdf")
                 {
                     string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    AddHeaderPdf(headerPdf, headerText);
+                    PdfService.AddHeaderPdf(headerPdf, headerText);
                     finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
                     PdfAppendTest.AppendPdfs(new List<string> { headerPdf, attPath }, finalAttachmentPdf);
                     allTempFiles.Add(headerPdf);
@@ -1529,10 +1314,10 @@ namespace MsgToPdfConverter
                 }
                 else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
                 {
-                    if (TryConvertOfficeToPdf(attPath, attPdf))
+                    if (OfficeConversionService.TryConvertOfficeToPdf(attPath, attPdf))
                     {
                         string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                        AddHeaderPdf(headerPdf, headerText);
+                        PdfService.AddHeaderPdf(headerPdf, headerText);
                         finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
                         PdfAppendTest.AppendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
                         allTempFiles.Add(headerPdf);
@@ -1542,18 +1327,18 @@ namespace MsgToPdfConverter
                     else
                     {
                         finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                        AddHeaderPdf(finalAttachmentPdf, headerText + "\n(Conversion failed)");
+                        PdfService.AddHeaderPdf(finalAttachmentPdf, headerText + "\n(Conversion failed)");
                         allTempFiles.Add(finalAttachmentPdf);
                     }
                 }
                 else if (ext == ".zip")
                 {
-                    finalAttachmentPdf = ProcessZipAttachment(attPath, tempDir, headerText, allTempFiles);
+                    finalAttachmentPdf = _attachmentService.ProcessZipAttachment(attPath, tempDir, headerText, allTempFiles);
                 }
                 else
                 {
                     finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                    AddHeaderPdf(finalAttachmentPdf, headerText + "\n(Unsupported type)");
+                    PdfService.AddHeaderPdf(finalAttachmentPdf, headerText + "\n(Unsupported type)");
                     allTempFiles.Add(finalAttachmentPdf);
                 }
             }
@@ -1561,7 +1346,7 @@ namespace MsgToPdfConverter
             {
                 Console.WriteLine($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
                 finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                AddHeaderPdf(finalAttachmentPdf, headerText + $"\n(Error: {ex.Message})");
+                PdfService.AddHeaderPdf(finalAttachmentPdf, headerText + $"\n(Error: {ex.Message})");
                 allTempFiles.Add(finalAttachmentPdf);
             }
 
@@ -1589,7 +1374,7 @@ namespace MsgToPdfConverter
                 if (zfExt == ".pdf")
                 {
                     string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    AddHeaderPdf(headerPdf, zipHeader);
+                    PdfService.AddHeaderPdf(headerPdf, zipHeader);
                     finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
                     PdfAppendTest.AppendPdfs(new List<string> { headerPdf, zf }, finalZipPdf);
                     allTempFiles.Add(headerPdf);
@@ -1597,10 +1382,10 @@ namespace MsgToPdfConverter
                 }
                 else if (zfExt == ".doc" || zfExt == ".docx" || zfExt == ".xls" || zfExt == ".xlsx")
                 {
-                    if (TryConvertOfficeToPdf(zf, zfPdf))
+                    if (OfficeConversionService.TryConvertOfficeToPdf(zf, zfPdf))
                     {
                         string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                        AddHeaderPdf(headerPdf, zipHeader);
+                        PdfService.AddHeaderPdf(headerPdf, zipHeader);
                         finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
                         PdfAppendTest.AppendPdfs(new List<string> { headerPdf, zfPdf }, finalZipPdf);
                         allTempFiles.Add(headerPdf);
@@ -1609,14 +1394,14 @@ namespace MsgToPdfConverter
                     }
                     else
                     {
-                        AddHeaderPdf(finalZipPdf, zipHeader + "\n(Conversion failed)");
+                        PdfService.AddHeaderPdf(finalZipPdf, zipHeader + "\n(Conversion failed)");
                         allTempFiles.Add(finalZipPdf);
                     }
                 }
                 else
                 {
                     finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                    AddHeaderPdf(finalZipPdf, zipHeader + "\n(Unsupported type)");
+                    PdfService.AddHeaderPdf(finalZipPdf, zipHeader + "\n(Unsupported type)");
                     allTempFiles.Add(finalZipPdf);
                 }
                 if (finalZipPdf != null)
@@ -1628,7 +1413,7 @@ namespace MsgToPdfConverter
             {
                 // No processable files found in ZIP
                 string placeholderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_empty_zip.pdf");
-                AddHeaderPdf(placeholderPdf, headerText + "\n(Empty or no processable files in ZIP)");
+                PdfService.AddHeaderPdf(placeholderPdf, headerText + "\n(Empty or no processable files in ZIP)");
                 allTempFiles.Add(placeholderPdf);
                 return placeholderPdf;
             }
@@ -1677,25 +1462,6 @@ namespace MsgToPdfConverter
             this.Topmost = isPinned;
             PinButton.Foreground = isPinned ? System.Windows.Media.Brushes.Red : System.Windows.Media.Brushes.Black;
             PinButton.Opacity = isPinned ? 1.0 : 0.7;
-        }
-
-        /// <summary>
-        /// Moves a file to the Windows Recycle Bin using Microsoft.VisualBasic.FileIO
-        /// </summary>
-        private void MoveFileToRecycleBin(string filePath)
-        {
-            try
-            {
-                if (System.IO.File.Exists(filePath))
-                {
-                    FileSystem.DeleteFile(filePath, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[RECYCLEBIN] Failed to move file to Recycle Bin: {filePath} - {ex.Message}");
-                throw;
-            }
         }
     }
 }

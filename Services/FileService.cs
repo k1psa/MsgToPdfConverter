@@ -45,5 +45,62 @@ namespace MsgToPdfConverter.Services
                 }
             }
         }
+
+        /// <summary>
+        /// Sanitize filename to remove illegal characters
+        /// </summary>
+        public static string SanitizeFileName(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName))
+                return "untitled.msg";
+
+            // Remove illegal characters from filename
+            char[] invalidChars = Path.GetInvalidFileNameChars();
+            foreach (char c in invalidChars)
+            {
+                fileName = fileName.Replace(c, '_');
+            }
+
+            // Also remove some other problematic characters
+            fileName = fileName.Replace(":", "_").Replace("?", "_").Replace("*", "_");
+
+            // Ensure it's not too long (Windows has a 255 character limit for filenames)
+            if (fileName.Length > 200)
+            {
+                string extension = Path.GetExtension(fileName);
+                string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                fileName = nameWithoutExt.Substring(0, 200 - extension.Length) + extension;
+            }
+
+            return fileName;
+        }
+
+        /// <summary>
+        /// Moves a file to the Windows Recycle Bin using Microsoft.VisualBasic.FileIO
+        /// </summary>
+        public static void MoveFileToRecycleBin(string filePath)
+        {
+            try
+            {
+                if (File.Exists(filePath))
+                {
+                    Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(filePath, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
+                    Console.WriteLine($"[RECYCLE] Moved to recycle bin: {filePath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[RECYCLE] Error moving file to recycle bin: {filePath} - {ex.Message}");
+                Console.WriteLine($"[RECYCLE] Falling back to regular delete");
+                try
+                {
+                    File.Delete(filePath);
+                }
+                catch (Exception deleteEx)
+                {
+                    Console.WriteLine($"[RECYCLE] Error deleting file: {filePath} - {deleteEx.Message}");
+                }
+            }
+        }
     }
 }
