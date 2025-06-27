@@ -35,93 +35,35 @@ namespace MsgToPdfConverter
         private EmailConverterService _emailService = new EmailConverterService();
         private AttachmentService _attachmentService;
         private OutlookImportService _outlookImportService = new OutlookImportService();
+        private FileListService _fileListService = new FileListService();
 
         public MainWindow()
         {
             InitializeComponent();
-            
             // Initialize AttachmentService with PDF service methods
             _attachmentService = new AttachmentService(
-                (path, text, _) => PdfService.AddHeaderPdf(path, text), // Adapter for the different signature
+                (path, text, _) => PdfService.AddHeaderPdf(path, text),
                 OfficeConversionService.TryConvertOfficeToPdf,
                 PdfAppendTest.AppendPdfs,
                 _emailService
             );
-            
-            CheckDotNetRuntime();
+            EnvironmentService.CheckDotNetRuntime(this);
         }
 
-        private void CheckDotNetRuntime()
-        {
-            // Only check if not running in design mode
-            if (!System.ComponentModel.DesignerProperties.GetIsInDesignMode(this))
-            {
-                if (!IsDotNetDesktopRuntimeInstalled())
-                {
-                    var result = MessageBox.Show(
-                        ".NET Desktop Runtime 5.0 is required to run this application. Would you like to download it now?",
-                        ".NET Runtime Required",
-                        MessageBoxButton.YesNo,
-                        MessageBoxImage.Question);
-                    if (result == MessageBoxResult.Yes)
-                    {
-                        string url = "https://dotnet.microsoft.com/en-us/download/dotnet/5.0/runtime";
-                        try
-                        {
-                            Process.Start("explorer", url);
-                        }
-                        catch (Exception ex)
-                        {
-                            MessageBox.Show($"Could not open browser. Please visit this URL manually:\n{url}\nError: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-                        }
-                        Application.Current.Shutdown();
-                    }
-                    else
-                    {
-                        Application.Current.Shutdown();
-                    }
-                }
-            }
-        }
-
-        private bool IsDotNetDesktopRuntimeInstalled()
-        {
-            // Simple check: look for a known .NET 5+ runtime folder
-            string windir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
-            string dotnetDir = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet", "shared", "Microsoft.WindowsDesktop.App");
-            if (Directory.Exists(dotnetDir))
-            {
-                var versions = Directory.GetDirectories(dotnetDir);
-                foreach (var v in versions)
-                {
-                    if (v.Contains("5.0")) return true;
-                }
-            }
-            return false;
-        }
         private void SelectFilesButton_Click(object sender, RoutedEventArgs e)
         {
             var newFiles = FileDialogHelper.OpenMsgFileDialog();
             if (newFiles != null && newFiles.Count > 0)
             {
-                foreach (var file in newFiles)
-                {
-                    // Only add if not already in the list
-                    if (!selectedFiles.Contains(file))
-                    {
-                        selectedFiles.Add(file);
-                        FilesListBox.Items.Add(file);
-                    }
-                }
+                selectedFiles = _fileListService.AddFiles(selectedFiles, newFiles);
             }
-            UpdateFileCountAndButtons();
+            SyncFileListUI();
         }
 
         private void ClearListButton_Click(object sender, RoutedEventArgs e)
         {
-            selectedFiles.Clear();
-            FilesListBox.Items.Clear();
-            UpdateFileCountAndButtons();
+            selectedFiles = _fileListService.ClearFiles();
+            SyncFileListUI();
         }
 
         private void SelectOutputFolderButton_Click(object sender, RoutedEventArgs e)
@@ -465,16 +407,21 @@ namespace MsgToPdfConverter
                 {
                     itemsToRemove.Add(item as string);
                 }
-
-                // Remove selected files from the list (no confirmation required)
-                foreach (var item in itemsToRemove)
-                {
-                    FilesListBox.Items.Remove(item);
-                    selectedFiles.Remove(item);
-                }
-                UpdateFileCountAndButtons();
+                selectedFiles = _fileListService.RemoveFiles(selectedFiles, itemsToRemove);
+                SyncFileListUI();
                 e.Handled = true; // Suppress default behavior
             }
+        }
+
+        // Syncs the FilesListBox UI with the selectedFiles list
+        private void SyncFileListUI()
+        {
+            FilesListBox.Items.Clear();
+            foreach (var file in selectedFiles)
+            {
+                FilesListBox.Items.Add(file);
+            }
+            UpdateFileCountAndButtons();
         }
 
         private void UpdateFileCountAndButtons()
@@ -545,33 +492,18 @@ namespace MsgToPdfConverter
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
             {
                 string[] droppedItems = (string[])e.Data.GetData(DataFormats.FileDrop);
-                var newFiles = new List<string>();
                 foreach (string item in droppedItems)
                 {
                     if (File.Exists(item))
                     {
-                        if (Path.GetExtension(item).ToLowerInvariant() == ".msg")
-                        {
-                            if (!selectedFiles.Contains(item))
-                                newFiles.Add(item);
-                        }
+                        selectedFiles = _fileListService.AddFiles(selectedFiles, new[] { item });
                     }
                     else if (Directory.Exists(item))
                     {
-                        var msgFiles = Directory.GetFiles(item, "*.msg", System.IO.SearchOption.AllDirectories);
-                        foreach (string msgFile in msgFiles)
-                        {
-                            if (!selectedFiles.Contains(msgFile))
-                                newFiles.Add(msgFile);
-                        }
+                        selectedFiles = _fileListService.AddFilesFromDirectory(selectedFiles, item);
                     }
                 }
-                foreach (string file in newFiles)
-                {
-                    selectedFiles.Add(file);
-                    FilesListBox.Items.Add(file);
-                }
-                UpdateFileCountAndButtons();
+                SyncFileListUI();
                 return;
             }
 
@@ -580,7 +512,6 @@ namespace MsgToPdfConverter
             {
                 try
                 {
-                    // Use selectedOutputFolder if set, otherwise prompt
                     string outputFolder = !string.IsNullOrEmpty(selectedOutputFolder)
                         ? selectedOutputFolder
                         : FileDialogHelper.OpenFolderDialog();
@@ -592,15 +523,8 @@ namespace MsgToPdfConverter
                         outputFolder,
                         FileService.SanitizeFileName);
 
-                    foreach (var file in result.ExtractedFiles)
-                    {
-                        if (!selectedFiles.Contains(file))
-                        {
-                            selectedFiles.Add(file);
-                            FilesListBox.Items.Add(file);
-                        }
-                    }
-                    UpdateFileCountAndButtons();
+                    selectedFiles = _fileListService.AddFiles(selectedFiles, result.ExtractedFiles);
+                    SyncFileListUI();
 
                     if (result.SkippedFiles.Count > 0)
                     {
