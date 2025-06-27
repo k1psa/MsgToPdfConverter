@@ -82,26 +82,6 @@ namespace MsgToPdfConverter
             OutputFolderLabel.Text = "(Default: Same as .msg file)";
         }
 
-        private void KillWkhtmltopdfProcesses()
-        {
-            PdfConversionService.KillWkhtmltopdfProcesses();
-        }
-
-        private void ConfigureDinkToPdfPath(PdfTools pdfTools)
-        {
-            PdfConversionService.ConfigureDinkToPdfPath(pdfTools);
-        }
-
-        private void DirectoryCopy(string sourceDirName, string destDirName, bool copySubDirs)
-        {
-            FileService.DirectoryCopy(sourceDirName, destDirName, copySubDirs);
-        }
-
-        private void RunDinkToPdfConversion(HtmlToPdfDocument doc)
-        {
-            PdfConversionService.RunDinkToPdfConversion(doc);
-        }
-
         private async void ConvertButton_Click(object sender, RoutedEventArgs e)
         {
             Console.WriteLine("[DEBUG] Entered ConvertButton_Click");
@@ -340,7 +320,6 @@ namespace MsgToPdfConverter
                                     Console.WriteLine($"[DELETE] Could not move {msgFilePath} to Recycle Bin: {ex.Message}");
                                 }
                             }
-                            KillWkhtmltopdfProcesses();
                             Dispatcher.Invoke(() => ProgressBar.Value = i + 1);
                             Console.WriteLine($"[DEBUG] Cleanup complete for file {i + 1}");
                         }
