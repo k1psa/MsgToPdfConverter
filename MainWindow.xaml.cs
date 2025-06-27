@@ -1089,6 +1089,13 @@ namespace MsgToPdfConverter
                     if (string.IsNullOrEmpty(outputFolder))
                         return;
 
+                    // Debug: Show all available data formats
+                    Console.WriteLine("[DND] Available data formats:");
+                    foreach (string format in e.Data.GetFormats())
+                    {
+                        Console.WriteLine($"[DND]   - {format}");
+                    }
+
                     string[] fileNames = null;
                     if (e.Data.GetDataPresent("FileGroupDescriptorW"))
                     {
@@ -1106,41 +1113,118 @@ namespace MsgToPdfConverter
                     }
 
                     if (fileNames == null || fileNames.Length == 0)
+                    {
+                        Console.WriteLine("[DND] No file names found in drag data");
                         return;
+                    }
+
+                    Console.WriteLine($"[DND] Found {fileNames.Length} file(s) in drag data:");
+                    for (int idx = 0; idx < fileNames.Length; idx++)
+                    {
+                        Console.WriteLine($"[DND]   {idx}: {fileNames[idx]}");
+                    }
 
                     var tempFiles = new List<string>();
                     var skippedFiles = new List<string>();
+                    var usedFilenames = new HashSet<string>(); // Track filenames used in this batch
+
                     for (int i = 0; i < fileNames.Length; i++)
                     {
                         string fileName = fileNames[i];
                         if (!fileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
                             fileName += ".msg";
-                        string destPath = Path.Combine(outputFolder, fileName);
 
-                        // Try all possible FileContents formats
-                        string[] possibleFormats = fileNames.Length == 1
-                            ? new[] { "FileContents" }
-                            : new[] { $"FileContents{i}", "FileContents" };
-                        bool success = false;
-                        foreach (var format in possibleFormats)
+                        // Sanitize filename to remove illegal characters
+                        fileName = SanitizeFileName(fileName);
+
+                        // Make filename unique if it already exists or was used in this batch
+                        string destPath = Path.Combine(outputFolder, fileName);
+                        int counter = 1;
+                        while (File.Exists(destPath) || usedFilenames.Contains(Path.GetFileName(destPath)))
                         {
-                            if (e.Data.GetDataPresent(format))
+                            string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                            string extension = Path.GetExtension(fileName);
+                            string uniqueFileName = $"{nameWithoutExt}_{counter}{extension}";
+                            destPath = Path.Combine(outputFolder, uniqueFileName);
+                            counter++;
+                        }
+
+                        // Remember this filename for the current batch
+                        usedFilenames.Add(Path.GetFileName(destPath));
+
+                        // Try FileContents formats systematically
+                        Console.WriteLine($"[DND] Processing file {i + 1}/{fileNames.Length}: {fileName}");
+
+                        bool success = false;
+
+                        // For multiple files, try indexed format first, then fallback
+                        if (fileNames.Length > 1)
+                        {
+                            string indexedFormat = $"FileContents{i}";
+                            Console.WriteLine($"[DND] Trying indexed format: {indexedFormat}");
+
+                            if (e.Data.GetDataPresent(indexedFormat))
                             {
                                 try
                                 {
-                                    using (var fileStream = (System.IO.MemoryStream)e.Data.GetData(format))
-                                    using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
+                                    using (var fileStream = (System.IO.MemoryStream)e.Data.GetData(indexedFormat))
                                     {
-                                        fileStream.WriteTo(fs);
+                                        if (fileStream != null && fileStream.Length > 0)
+                                        {
+                                            using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
+                                            {
+                                                fileStream.Position = 0;
+                                                fileStream.WriteTo(fs);
+                                            }
+                                            tempFiles.Add(destPath);
+                                            success = true;
+                                            Console.WriteLine($"[DND] Successfully saved {fileName} using {indexedFormat}");
+                                        }
+                                        else
+                                        {
+                                            Console.WriteLine($"[DND] Empty stream for {indexedFormat}");
+                                        }
                                     }
-                                    tempFiles.Add(destPath);
-                                    success = true;
-                                    break;
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[DND] Error writing {fileName} from {format}: {ex.Message}");
+                                    Console.WriteLine($"[DND] Error writing {fileName} from {indexedFormat}: {ex.Message}");
                                 }
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[DND] Format {indexedFormat} not present");
+                            }
+                        }
+
+                        // Try non-indexed format as fallback
+                        if (!success && e.Data.GetDataPresent("FileContents"))
+                        {
+                            Console.WriteLine($"[DND] Trying non-indexed format: FileContents");
+                            try
+                            {
+                                using (var fileStream = (System.IO.MemoryStream)e.Data.GetData("FileContents"))
+                                {
+                                    if (fileStream != null && fileStream.Length > 0)
+                                    {
+                                        using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
+                                        {
+                                            fileStream.Position = 0;
+                                            fileStream.WriteTo(fs);
+                                        }
+                                        tempFiles.Add(destPath);
+                                        success = true;
+                                        Console.WriteLine($"[DND] Successfully saved {fileName} using FileContents");
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"[DND] Empty stream for FileContents");
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"[DND] Error writing {fileName} from FileContents: {ex.Message}");
                             }
                         }
                         if (!success)
@@ -1194,6 +1278,7 @@ namespace MsgToPdfConverter
                         if (!success)
                         {
                             // Fallback: Try to use Outlook Interop to save the selected email(s) as .msg
+                            Console.WriteLine($"[DND] Trying Outlook Interop fallback for file {i + 1}");
                             try
                             {
                                 var outlookApp = System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application") as Microsoft.Office.Interop.Outlook.Application;
@@ -1202,27 +1287,55 @@ namespace MsgToPdfConverter
                                     var explorer = outlookApp.ActiveExplorer();
                                     if (explorer != null && explorer.Selection != null && explorer.Selection.Count > 0)
                                     {
-                                        for (int selIdx = 1; selIdx <= explorer.Selection.Count; selIdx++)
+                                        // For multiple files, try to get the specific selection item by index
+                                        int selectionIndex = Math.Min(i + 1, explorer.Selection.Count);
+                                        var mailItem = explorer.Selection[selectionIndex] as Microsoft.Office.Interop.Outlook.MailItem;
+                                        if (mailItem != null)
                                         {
-                                            var mailItem = explorer.Selection[selIdx] as Microsoft.Office.Interop.Outlook.MailItem;
-                                            if (mailItem != null)
+                                            // Use the same filename logic as above, but ensure uniqueness
+                                            string safeSubject = SanitizeFileName(mailItem.Subject ?? "untitled");
+                                            string interopFileName = safeSubject;
+                                            if (!interopFileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                                                interopFileName += ".msg";
+
+                                            // Apply the same uniqueness logic
+                                            string interopDestPath = Path.Combine(outputFolder, interopFileName);
+                                            int interopCounter = 1;
+                                            while (File.Exists(interopDestPath) || usedFilenames.Contains(Path.GetFileName(interopDestPath)))
                                             {
-                                                string safeSubject = string.Join("_", mailItem.Subject.Split(Path.GetInvalidFileNameChars()));
-                                                string interopFileName = safeSubject;
-                                                if (!interopFileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-                                                    interopFileName += ".msg";
-                                                string interopDestPath = Path.Combine(outputFolder, interopFileName);
-                                                mailItem.SaveAs(interopDestPath, Microsoft.Office.Interop.Outlook.OlSaveAsType.olMSG);
-                                                tempFiles.Add(interopDestPath);
-                                                success = true;
+                                                string nameWithoutExt = Path.GetFileNameWithoutExtension(interopFileName);
+                                                string extension = Path.GetExtension(interopFileName);
+                                                string uniqueFileName = $"{nameWithoutExt}_{interopCounter}{extension}";
+                                                interopDestPath = Path.Combine(outputFolder, uniqueFileName);
+                                                interopCounter++;
                                             }
+
+                                            // Update the used filenames tracking
+                                            usedFilenames.Add(Path.GetFileName(interopDestPath));
+
+                                            mailItem.SaveAs(interopDestPath, Microsoft.Office.Interop.Outlook.OlSaveAsType.olMSG);
+                                            tempFiles.Add(interopDestPath);
+                                            success = true;
+                                            Console.WriteLine($"[DND] Successfully saved via Interop: {interopDestPath}");
+                                        }
+                                        else
+                                        {
+                                            Console.WriteLine($"[DND] Selection item {selectionIndex} is not a MailItem");
                                         }
                                     }
+                                    else
+                                    {
+                                        Console.WriteLine($"[DND] No active Outlook explorer or selection");
+                                    }
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[DND] Could not get Outlook application object");
                                 }
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"[DND][Interop] Could not save selected Outlook email(s): {ex.Message}");
+                                Console.WriteLine($"[DND][Interop] Could not save selected Outlook email: {ex.Message}");
                             }
                         }
                         if (!success)
@@ -1310,6 +1423,34 @@ namespace MsgToPdfConverter
             }
             return fileNames.ToArray();
         }
+
+        // Helper: Sanitize filename to remove illegal characters
+        private string SanitizeFileName(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName))
+                return "untitled.msg";
+
+            // Remove illegal characters from filename
+            char[] invalidChars = Path.GetInvalidFileNameChars();
+            foreach (char c in invalidChars)
+            {
+                fileName = fileName.Replace(c, '_');
+            }
+
+            // Also remove some other problematic characters
+            fileName = fileName.Replace(":", "_").Replace("?", "_").Replace("*", "_");
+
+            // Ensure it's not too long (Windows has a 255 character limit for filenames)
+            if (fileName.Length > 200)
+            {
+                string extension = Path.GetExtension(fileName);
+                string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                fileName = nameWithoutExt.Substring(0, 200 - extension.Length) + extension;
+            }
+
+            return fileName;
+        }
+
         private void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5)
         {
             // Prevent infinite recursion
