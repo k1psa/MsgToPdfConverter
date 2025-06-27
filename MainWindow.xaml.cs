@@ -432,115 +432,27 @@ namespace MsgToPdfConverter
             }
         }
 
-        // Appends attachments as PDFs to the main email PDF
-        private void AppendAttachmentsToPdf(string mainPdfPath, List<Storage.Attachment> attachments, SynchronizedConverter converter)
+        // Helper: Parse file names from FileGroupDescriptor (ANSI)
+        // (Moved to OutlookImportService)
+        private string[] GetFileNamesFromFileGroupDescriptor(Stream stream)
         {
-            Console.WriteLine($"Total attachments: {attachments.Count}");
-            string allNames = string.Join(", ", attachments.ConvertAll(a => a.FileName ?? "(no name)"));
-            Console.WriteLine($"Attachment names: {allNames}");
-            var tempPdfFiles = new List<string> { mainPdfPath };
-            // Use the original file directory for temp files
-            string tempDir = Path.GetDirectoryName(mainPdfPath);
-            // Directory.CreateDirectory(tempDir); // Not needed, should already exist
-
-            foreach (var att in attachments)
+            var fileNames = new List<string>();
+            using (var reader = new BinaryReader(stream, System.Text.Encoding.Default))
             {
-                string attName = att.FileName ?? "attachment";
-                string ext = Path.GetExtension(attName).ToLowerInvariant();
-                string attPath = Path.Combine(tempDir, attName);
-                string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
-                try
+                stream.Position = 0;
+                // FILEGROUPDESCRIPTOR starts with a 4-byte count
+                int count = reader.ReadInt32();
+                for (int i = 0; i < count; i++)
                 {
-                    File.WriteAllBytes(attPath, att.Data);
-                    if (ext == ".pdf")
-                    {
-                        tempPdfFiles.Add(attPath);
-                    }
-                    else if (ext == ".jpg" || ext == ".jpeg")
-                    {
-                        // Convert JPG to PDF using iText7
-                        using (var writer = new iText.Kernel.Pdf.PdfWriter(attPdf))
-                        using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
-                        using (var doc = new iText.Layout.Document(pdf))
-                        {
-                            var imgData = iText.IO.Image.ImageDataFactory.Create(attPath);
-                            var image = new iText.Layout.Element.Image(imgData);
-                            doc.Add(image);
-                        }
-                        tempPdfFiles.Add(attPdf);
-                    }
-                    else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
-                    {
-                        if (OfficeConversionService.TryConvertOfficeToPdf(attPath, attPdf))
-                        {
-                            tempPdfFiles.Add(attPdf);
-                            // Also add to cleanup list so the Office-generated PDF gets deleted
-                            Console.WriteLine($"[ATTACH] Adding Office-generated PDF to cleanup list: {attPdf}");
-                        }
-                    }
-                    else if (ext == ".zip")
-                    {
-                        Console.WriteLine($"[ATTACH] ZIP detected, extracting: {attName}");
-                        string extractDir = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName));
-                        System.IO.Compression.ZipFile.ExtractToDirectory(attPath, extractDir);
-                        var zipFiles = Directory.GetFiles(extractDir, "*.*", System.IO.SearchOption.AllDirectories);
-                        foreach (var zf in zipFiles)
-                        {
-                            string zfPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(zf) + ".pdf");
-                            string zfExt = Path.GetExtension(zf).ToLowerInvariant();
-                            if (zfExt == ".pdf")
-                            {
-                                string pdfCopy = Path.Combine(tempDir, Guid.NewGuid() + "_zipattachment.pdf");
-                                File.Copy(zf, pdfCopy, true);
-                                tempPdfFiles.Add(pdfCopy);
-                                Console.WriteLine($"[ATTACH] ZIP PDF added: {pdfCopy}");
-                            }
-                            else if (zfExt == ".doc" || zfExt == ".docx" || zfExt == ".xls" || zfExt == ".xlsx")
-                            {
-                                if (OfficeConversionService.TryConvertOfficeToPdf(zf, zfPdf))
-                                {
-                                    tempPdfFiles.Add(zfPdf);
-                                    Console.WriteLine($"[ATTACH] ZIP Office converted: {zfPdf}");
-                                }
-                                else
-                                {
-                                    PdfService.AddPlaceholderPdf(zfPdf, $"Could not convert attachment: {Path.GetFileName(zf)}");
-                                    Console.WriteLine($"[ATTACH] ZIP Office failed to convert: {zf}");
-                                }
-                            }
-                            else
-                            {
-                                PdfService.AddPlaceholderPdf(zfPdf, $"Unsupported attachment: {Path.GetFileName(zf)}");
-                                tempPdfFiles.Add(zfPdf);
-                                Console.WriteLine($"[ATTACH] ZIP unsupported: {zf}");
-                            }
-                        }
-                    }
-                    else
-                    {
-                        PdfService.AddPlaceholderPdf(attPdf, $"Unsupported attachment: {attName}");
-                        tempPdfFiles.Add(attPdf);
-                        Console.WriteLine($"[ATTACH] Unsupported type: {attName}");
-                    }
-                    Console.WriteLine($"[ATTACH] Finished: {attName}");
-                }
-                catch (Exception ex)
-                {
-                    PdfService.AddPlaceholderPdf(attPdf, $"Error processing attachment: {ex.Message}");
-                    tempPdfFiles.Add(attPdf);
-                    Console.WriteLine($"[ATTACH] Exception: {attName} - {ex}");
+                    // Skip 76 bytes to the file name (see FILEDESCRIPTOR struct)
+                    stream.Position = 4 + i * 592 + 76;
+                    // Read up to 260 bytes (MAX_PATH)
+                    var nameBytes = reader.ReadBytes(260);
+                    string name = System.Text.Encoding.Default.GetString(nameBytes).TrimEnd('\0');
+                    fileNames.Add(name);
                 }
             }
-
-            // Merge all tempPdfFiles using the robust iText7 method from PdfAppendTest
-            try
-            {
-                PdfAppendTest.AppendPdfs(tempPdfFiles, mainPdfPath);
-            }
-            finally
-            {
-                // Do not delete temp files for now
-            }
+            return fileNames.ToArray();
         }
 
         private void FilesListBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -627,7 +539,7 @@ namespace MsgToPdfConverter
             }
         }
 
-        private async void FilesListBox_Drop(object sender, DragEventArgs e)
+        private void FilesListBox_Drop(object sender, DragEventArgs e)
         {
             // 1. Standard file/folder drop
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
@@ -663,31 +575,11 @@ namespace MsgToPdfConverter
                 return;
             }
 
-            // 2. Outlook email drag-and-drop support (improved robust approach)
+            // 2. Outlook email drag-and-drop support (all logic in service)
             if (e.Data.GetDataPresent("FileGroupDescriptorW") || e.Data.GetDataPresent("FileGroupDescriptor"))
             {
                 try
                 {
-                    Console.WriteLine($"[DND] Starting Outlook email drag-and-drop processing");
-
-                    // Log all available data formats for debugging
-                    var availableFormats = e.Data.GetFormats();
-                    Console.WriteLine($"[DND] Available data formats: {string.Join(", ", availableFormats)}");
-
-                    // Ensure main window is properly activated and focused before showing dialog
-                    this.Activate();
-                    this.Focus();
-
-                    // Temporarily set topmost to ensure dialog appears in front
-                    bool wasTopmost = this.Topmost;
-                    this.Topmost = true;
-
-                    // Small delay to ensure window activation
-                    await System.Threading.Tasks.Task.Delay(50);
-
-                    // Restore original topmost state
-                    this.Topmost = wasTopmost;
-
                     // Use selectedOutputFolder if set, otherwise prompt
                     string outputFolder = !string.IsNullOrEmpty(selectedOutputFolder)
                         ? selectedOutputFolder
@@ -695,262 +587,12 @@ namespace MsgToPdfConverter
                     if (string.IsNullOrEmpty(outputFolder))
                         return;
 
-                    // Debug: Show all available data formats
-                    Console.WriteLine("[DND] Available data formats:");
-                    foreach (string format in e.Data.GetFormats())
-                    {
-                        Console.WriteLine($"[DND]   - {format}");
-                    }
+                    var result = _outlookImportService.ExtractMsgFilesFromDragDrop(
+                        e.Data,
+                        outputFolder,
+                        FileService.SanitizeFileName);
 
-                    string[] fileNames = null;
-                    if (e.Data.GetDataPresent("FileGroupDescriptorW"))
-                    {
-                        using (var stream = (System.IO.MemoryStream)e.Data.GetData("FileGroupDescriptorW"))
-                        {
-                            fileNames = GetFileNamesFromFileGroupDescriptorW(stream);
-                        }
-                    }
-                    else if (e.Data.GetDataPresent("FileGroupDescriptor"))
-                    {
-                        using (var stream = (System.IO.MemoryStream)e.Data.GetData("FileGroupDescriptor"))
-                        {
-                            fileNames = GetFileNamesFromFileGroupDescriptor(stream);
-                        }
-                    }
-
-                    if (fileNames == null || fileNames.Length == 0)
-                    {
-                        Console.WriteLine("[DND] No file names found in drag data");
-                        return;
-                    }
-
-                    Console.WriteLine($"[DND] Found {fileNames.Length} file(s) in drag data:");
-                    for (int idx = 0; idx < fileNames.Length; idx++)
-                    {
-                        Console.WriteLine($"[DND]   {idx}: {fileNames[idx]}");
-                    }
-
-                    var tempFiles = new List<string>();
-                    var skippedFiles = new List<string>();
-                    var usedFilenames = new HashSet<string>(); // Track filenames used in this batch
-
-                    for (int i = 0; i < fileNames.Length; i++)
-                    {
-                        string fileName = fileNames[i];
-                        if (!fileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-                            fileName += ".msg";
-
-                        // Sanitize filename to remove illegal characters
-                        fileName = FileService.SanitizeFileName(fileName);
-
-                        // Make filename unique if it already exists or was used in this batch
-                        string destPath = Path.Combine(outputFolder, fileName);
-                        int counter = 1;
-                        while (File.Exists(destPath) || usedFilenames.Contains(Path.GetFileName(destPath)))
-                        {
-                            string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-                            string extension = Path.GetExtension(fileName);
-                            string uniqueFileName = $"{nameWithoutExt}_{counter}{extension}";
-                            destPath = Path.Combine(outputFolder, uniqueFileName);
-                            counter++;
-                        }
-
-                        // Remember this filename for the current batch
-                        usedFilenames.Add(Path.GetFileName(destPath));
-
-                        // Try FileContents formats systematically
-                        Console.WriteLine($"[DND] Processing file {i + 1}/{fileNames.Length}: {fileName}");
-
-                        bool success = false;
-
-                        // For multiple files, try indexed format first, then fallback
-                        if (fileNames.Length > 1)
-                        {
-                            string indexedFormat = $"FileContents{i}";
-                            Console.WriteLine($"[DND] Trying indexed format: {indexedFormat}");
-
-                            if (e.Data.GetDataPresent(indexedFormat))
-                            {
-                                try
-                                {
-                                    using (var fileStream = (System.IO.MemoryStream)e.Data.GetData(indexedFormat))
-                                    {
-                                        if (fileStream != null && fileStream.Length > 0)
-                                        {
-                                            using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
-                                            {
-                                                fileStream.Position = 0;
-                                                fileStream.WriteTo(fs);
-                                            }
-                                            tempFiles.Add(destPath);
-                                            success = true;
-                                            Console.WriteLine($"[DND] Successfully saved {fileName} using {indexedFormat}");
-                                        }
-                                        else
-                                        {
-                                            Console.WriteLine($"[DND] Empty stream for {indexedFormat}");
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    Console.WriteLine($"[DND] Error writing {fileName} from {indexedFormat}: {ex.Message}");
-                                }
-                            }
-                            else
-                            {
-                                Console.WriteLine($"[DND] Format {indexedFormat} not present");
-                            }
-                        }
-
-                        // Try non-indexed format as fallback
-                        if (!success && e.Data.GetDataPresent("FileContents"))
-                        {
-                            Console.WriteLine($"[DND] Trying non-indexed format: FileContents");
-                            try
-                            {
-                                using (var fileStream = (System.IO.MemoryStream)e.Data.GetData("FileContents"))
-                                {
-                                    if (fileStream != null && fileStream.Length > 0)
-                                    {
-                                        using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
-                                        {
-                                            fileStream.Position = 0;
-                                            fileStream.WriteTo(fs);
-                                        }
-                                        tempFiles.Add(destPath);
-                                        success = true;
-                                        Console.WriteLine($"[DND] Successfully saved {fileName} using FileContents");
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine($"[DND] Empty stream for FileContents");
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[DND] Error writing {fileName} from FileContents: {ex.Message}");
-                            }
-                        }
-                        if (!success)
-                        {
-                            // Try alternate Outlook formats (rare)
-                            string[] altFormats = { "RenPrivateItem", "Attachment" };
-                            foreach (var alt in altFormats)
-                            {
-                                if (e.Data.GetDataPresent(alt))
-                                {
-                                    try
-                                    {
-                                        using (var fileStream = (System.IO.MemoryStream)e.Data.GetData(alt))
-                                        using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
-                                        {
-                                            fileStream.WriteTo(fs);
-                                        }
-                                        tempFiles.Add(destPath);
-                                        success = true;
-                                        break;
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Console.WriteLine($"[DND] Error writing {fileName} from {alt}: {ex.Message}");
-                                    }
-                                }
-                            }
-                        }
-                        // Try FileDrop as a last resort (rare, but sometimes Outlook provides it)
-                        if (!success && e.Data.GetDataPresent(DataFormats.FileDrop))
-                        {
-                            try
-                            {
-                                string[] dropped = (string[])e.Data.GetData(DataFormats.FileDrop);
-                                foreach (var path in dropped)
-                                {
-                                    if (File.Exists(path) && Path.GetExtension(path).ToLowerInvariant() == ".msg")
-                                    {
-                                        File.Copy(path, destPath, true);
-                                        tempFiles.Add(destPath);
-                                        success = true;
-                                        break;
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[DND] Error copying from FileDrop: {ex.Message}");
-                            }
-                        }
-                        if (!success)
-                        {
-                            // Fallback: Try to use Outlook Interop to save the selected email(s) as .msg
-                            Console.WriteLine($"[DND] Trying Outlook Interop fallback for file {i + 1}");
-                            try
-                            {
-                                var outlookApp = System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application") as Microsoft.Office.Interop.Outlook.Application;
-                                if (outlookApp != null)
-                                {
-                                    var explorer = outlookApp.ActiveExplorer();
-                                    if (explorer != null && explorer.Selection != null && explorer.Selection.Count > 0)
-                                    {
-                                        // For multiple files, try to get the specific selection item by index
-                                        int selectionIndex = Math.Min(i + 1, explorer.Selection.Count);
-                                        var mailItem = explorer.Selection[selectionIndex] as Microsoft.Office.Interop.Outlook.MailItem;
-                                        if (mailItem != null)
-                                        {
-                                            // Use the same filename logic as above, but ensure uniqueness
-                                            string safeSubject = FileService.SanitizeFileName(mailItem.Subject ?? "untitled");
-                                            string interopFileName = safeSubject;
-                                            if (!interopFileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-                                                interopFileName += ".msg";
-
-                                            // Apply the same uniqueness logic
-                                            string interopDestPath = Path.Combine(outputFolder, interopFileName);
-                                            int interopCounter = 1;
-                                            while (File.Exists(interopDestPath) || usedFilenames.Contains(Path.GetFileName(interopDestPath)))
-                                            {
-                                                string nameWithoutExt = Path.GetFileNameWithoutExtension(interopFileName);
-                                                string extension = Path.GetExtension(interopFileName);
-                                                string uniqueFileName = $"{nameWithoutExt}_{interopCounter}{extension}";
-                                                interopDestPath = Path.Combine(outputFolder, uniqueFileName);
-                                                interopCounter++;
-                                            }
-
-                                            // Update the used filenames tracking
-                                            usedFilenames.Add(Path.GetFileName(interopDestPath));
-
-                                            mailItem.SaveAs(interopDestPath, Microsoft.Office.Interop.Outlook.OlSaveAsType.olMSG);
-                                            tempFiles.Add(interopDestPath);
-                                            success = true;
-                                            Console.WriteLine($"[DND] Successfully saved via Interop: {interopDestPath}");
-                                        }
-                                        else
-                                        {
-                                            Console.WriteLine($"[DND] Selection item {selectionIndex} is not a MailItem");
-                                        }
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine($"[DND] No active Outlook explorer or selection");
-                                    }
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"[DND] Could not get Outlook application object");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[DND][Interop] Could not save selected Outlook email: {ex.Message}");
-                            }
-                        }
-                        if (!success)
-                        {
-                            skippedFiles.Add(fileName);
-                        }
-                    }
-
-                    foreach (var file in tempFiles)
+                    foreach (var file in result.ExtractedFiles)
                     {
                         if (!selectedFiles.Contains(file))
                         {
@@ -960,10 +602,10 @@ namespace MsgToPdfConverter
                     }
                     UpdateFileCountAndButtons();
 
-                    if (skippedFiles.Count > 0)
+                    if (result.SkippedFiles.Count > 0)
                     {
                         MessageBox.Show(
-                            $"Some emails could not be added due to missing data from Outlook.\n\nPossible reasons:\n- The email is protected or encrypted\n- Outlook security settings\n- Outlook version limitations\n- The email is a meeting request or special item\n\nTry dragging the email(s) to a folder first, then add the .msg file.\n\nSkipped:\n{string.Join("\n", skippedFiles)}",
+                            $"Some emails could not be added due to missing data from Outlook.\n\nPossible reasons:\n- The email is protected or encrypted\n- Outlook security settings\n- Outlook version limitations\n- The email is a meeting request or special item\n\nTry dragging the email(s) to a folder first, then add the .msg file.\n\nSkipped:\n{string.Join("\n", result.SkippedFiles)}",
                             "Outlook Drag-and-Drop",
                             MessageBoxButton.OK,
                             MessageBoxImage.Warning);
@@ -986,351 +628,6 @@ namespace MsgToPdfConverter
                 MessageBoxImage.Warning);
         }
 
-        // Helper: Parse file names from FileGroupDescriptorW (Unicode)
-        private string[] GetFileNamesFromFileGroupDescriptorW(Stream stream)
-        {
-            var fileNames = new List<string>();
-            using (var reader = new BinaryReader(stream, System.Text.Encoding.Unicode))
-            {
-                stream.Position = 0;
-                // FILEGROUPDESCRIPTORW starts with a 4-byte count
-                int count = reader.ReadInt32();
-                for (int i = 0; i < count; i++)
-                {
-                    // Skip 76 bytes to the file name (see FILEDESCRIPTORW struct)
-                    stream.Position = 4 + i * 592 + 76;
-                    // Read up to 520 bytes (260 WCHARs)
-                    var nameBytes = reader.ReadBytes(520);
-                    string name = System.Text.Encoding.Unicode.GetString(nameBytes).TrimEnd('\0');
-                    fileNames.Add(name);
-                }
-            }
-            return fileNames.ToArray();
-        }
-
-        // Helper: Parse file names from FileGroupDescriptor (ANSI)
-        private string[] GetFileNamesFromFileGroupDescriptor(Stream stream)
-        {
-            var fileNames = new List<string>();
-            using (var reader = new BinaryReader(stream, System.Text.Encoding.Default))
-            {
-                stream.Position = 0;
-                // FILEGROUPDESCRIPTOR starts with a 4-byte count
-                int count = reader.ReadInt32();
-                for (int i = 0; i < count; i++)
-                {
-                    // Skip 76 bytes to the file name (see FILEDESCRIPTOR struct)
-                    stream.Position = 4 + i * 592 + 76;
-                    // Read up to 260 bytes (MAX_PATH)
-                    var nameBytes = reader.ReadBytes(260);
-                    string name = System.Text.Encoding.Default.GetString(nameBytes).TrimEnd('\0');
-                    fileNames.Add(name);
-                }
-            }
-            return fileNames.ToArray();
-        }
-
-        private void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5)
-        {
-            // Prevent infinite recursion
-            if (depth > maxDepth)
-            {
-                Console.WriteLine($"[MSG] Stopping recursion at depth {depth} - max depth reached");
-                return;
-            }
-
-            Console.WriteLine($"[MSG] Processing message recursively at depth {depth}: {msg.Subject ?? "No Subject"}");
-
-            // First, create PDF for the nested MSG body content (if we're processing a nested message)
-            if (depth > 0)
-            {
-                string msgSubject = msg.Subject ?? $"nested_msg_depth_{depth}";
-                string headerText = $"Nested Email (Depth {depth}): {msgSubject}";
-
-                try
-                {
-                    Console.WriteLine($"[MSG] Depth {depth} - Creating PDF for nested message body: {msgSubject}");
-
-                    // Use new inline image logic for nested emails
-                    var (nestedHtml, tempFiles) = _emailService.BuildEmailHtmlWithInlineImages(msg, extractOriginalOnly);
-                    allTempFiles.AddRange(tempFiles); // Track temp image files for cleanup
-
-                    string nestedPdf = Path.Combine(tempDir, $"depth{depth}_{Guid.NewGuid()}_nested_msg.pdf");
-                    string nestedHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
-                    File.WriteAllText(nestedHtmlPath, nestedHtml, System.Text.Encoding.UTF8);
-
-                    var startInfo = new ProcessStartInfo
-                    {
-                        FileName = System.Reflection.Assembly.GetExecutingAssembly().Location,
-                        Arguments = $"--html2pdf \"{nestedHtmlPath}\" \"{nestedPdf}\"",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-
-                    using (var process = Process.Start(startInfo))
-                    {
-                        process.WaitForExit();
-                        if (process.ExitCode == 0)
-                        {
-                            // Add header and merge
-                            string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                            PdfService.AddHeaderPdf(headerPdf, headerText);
-                            string finalNestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested_merged.pdf");
-                            PdfAppendTest.AppendPdfs(new List<string> { headerPdf, nestedPdf }, finalNestedPdf);
-
-                            allPdfFiles.Add(finalNestedPdf);
-                            allTempFiles.Add(headerPdf);
-                            allTempFiles.Add(nestedPdf);
-                            allTempFiles.Add(finalNestedPdf);
-
-                            Console.WriteLine($"[MSG] Depth {depth} - Successfully created PDF for nested MSG body: {msgSubject}");
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[MSG] Depth {depth} - Failed to convert nested MSG body to PDF: {msgSubject}");
-                        }
-                    }
-
-                    File.Delete(nestedHtmlPath);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[MSG] Depth {depth} - Error processing nested MSG body {msgSubject}: {ex.Message}");
-                    string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_msg_error.pdf");
-                    PdfService.AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
-                    allPdfFiles.Add(errorPdf);
-                    allTempFiles.Add(errorPdf);
-                }
-            }
-
-            // Now process attachments if they exist
-            if (msg.Attachments == null || msg.Attachments.Count == 0)
-            {
-                Console.WriteLine($"[MSG] Depth {depth} - No attachments to process");
-                return;
-            }
-
-            Console.WriteLine($"[MSG] Processing attachments at depth {depth}, found {msg.Attachments.Count} attachments");
-
-            var inlineContentIds = _emailService.GetInlineContentIds(msg.BodyHtml ?? "");
-            var typedAttachments = new List<Storage.Attachment>();
-            var nestedMessages = new List<Storage.Message>();
-
-            // Separate attachments and nested messages
-            foreach (var att in msg.Attachments)
-            {
-                if (att is Storage.Attachment a)
-                {
-                    Console.WriteLine($"[MSG] Depth {depth} - Examining attachment: {a.FileName} (IsInline: {a.IsInline}, ContentId: {a.ContentId})");
-
-                    if ((a.IsInline == true) || (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '\"', '\'', ' '))))
-                    {
-                        Console.WriteLine($"[MSG] Depth {depth} - Skipping inline attachment: {a.FileName}");
-                        continue;
-                    }
-
-                    typedAttachments.Add(a);
-                }
-                else if (att is Storage.Message nestedMsg)
-                {
-                    Console.WriteLine($"[MSG] Depth {depth} - Found nested MSG: {nestedMsg.Subject ?? "No Subject"}");
-                    nestedMessages.Add(nestedMsg);
-                }
-            }
-
-            // Process regular attachments
-            int totalAttachments = typedAttachments.Count;
-            for (int attIndex = 0; attIndex < typedAttachments.Count; attIndex++)
-            {
-                var att = typedAttachments[attIndex];
-                string attName = att.FileName ?? "attachment";
-                string attPath = Path.Combine(tempDir, $"depth{depth}_{attName}");
-                string headerText = $"Attachment (Depth {depth}): {attIndex + 1}/{totalAttachments} - {attName}";
-
-                try
-                {
-                    File.WriteAllBytes(attPath, att.Data);
-                    allTempFiles.Add(attPath);
-                    string finalAttachmentPdf = ProcessSingleAttachment(att, attPath, tempDir, headerText, allTempFiles);
-
-                    if (finalAttachmentPdf != null)
-                        allPdfFiles.Add(finalAttachmentPdf);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[MSG] Depth {depth} - Error processing attachment {attName}: {ex.Message}");
-                    string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                    PdfService.AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
-                    allPdfFiles.Add(errorPdf);
-                    allTempFiles.Add(errorPdf);
-                }
-            }
-
-            // Process nested MSG files recursively (this will handle both their body content and attachments)
-            for (int msgIndex = 0; msgIndex < nestedMessages.Count; msgIndex++)
-            {
-                var nestedMsg = nestedMessages[msgIndex];
-                Console.WriteLine($"[MSG] Depth {depth} - Recursively processing nested message {msgIndex + 1}/{nestedMessages.Count}: {nestedMsg.Subject ?? "No Subject"}");
-                ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, depth + 1, maxDepth);
-            }
-        }
-
-        private string ProcessSingleAttachment(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles)
-        {
-            string attName = att.FileName ?? "attachment";
-            string ext = Path.GetExtension(attName).ToLowerInvariant();
-            string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
-            string finalAttachmentPdf = null;
-
-            try
-            {
-                if (ext == ".pdf")
-                {
-                    string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    PdfService.AddHeaderPdf(headerPdf, headerText);
-                    finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    PdfAppendTest.AppendPdfs(new List<string> { headerPdf, attPath }, finalAttachmentPdf);
-                    allTempFiles.Add(headerPdf);
-                    allTempFiles.Add(finalAttachmentPdf);
-                }
-                else if (ext == ".jpg" || ext == ".jpeg")
-                {
-                    using (var writer = new iText.Kernel.Pdf.PdfWriter(attPdf))
-                    using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
-                    using (var docImg = new iText.Layout.Document(pdf))
-                    {
-                        var p = new iText.Layout.Element.Paragraph(headerText)
-                            .SetTextAlignment(iText.Layout.Properties.TextAlignment.CENTER)
-                            .SetFontSize(16);
-                        docImg.Add(p);
-                        var imgData = iText.IO.Image.ImageDataFactory.Create(attPath);
-                        var image = new iText.Layout.Element.Image(imgData);
-                        docImg.Add(image);
-                    }
-                    finalAttachmentPdf = attPdf;
-                    allTempFiles.Add(attPdf);
-                }
-                else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
-                {
-                    if (OfficeConversionService.TryConvertOfficeToPdf(attPath, attPdf))
-                    {
-                        string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                        PdfService.AddHeaderPdf(headerPdf, headerText);
-                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                        PdfAppendTest.AppendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
-                        allTempFiles.Add(headerPdf);
-                        allTempFiles.Add(attPdf);
-                        allTempFiles.Add(finalAttachmentPdf);
-                    }
-                    else
-                    {
-                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                        PdfService.AddHeaderPdf(finalAttachmentPdf, headerText + "\n(Conversion failed)");
-                        allTempFiles.Add(finalAttachmentPdf);
-                    }
-                }
-                else if (ext == ".zip")
-                {
-                    finalAttachmentPdf = _attachmentService.ProcessZipAttachment(attPath, tempDir, headerText, allTempFiles);
-                }
-                else
-                {
-                    finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                    PdfService.AddHeaderPdf(finalAttachmentPdf, headerText + "\n(Unsupported type)");
-                    allTempFiles.Add(finalAttachmentPdf);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
-                finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                PdfService.AddHeaderPdf(finalAttachmentPdf, headerText + $"\n(Error: {ex.Message})");
-                allTempFiles.Add(finalAttachmentPdf);
-            }
-
-            return finalAttachmentPdf;
-        }
-
-        private string ProcessZipAttachment(string attPath, string tempDir, string headerText, List<string> allTempFiles)
-        {
-            string extractDir = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attPath));
-            System.IO.Compression.ZipFile.ExtractToDirectory(attPath, extractDir);
-            allTempFiles.Add(extractDir);
-
-            var zipFiles = Directory.GetFiles(extractDir, "*.*", System.IO.SearchOption.AllDirectories);
-            var zipPdfFiles = new List<string>();
-            int zipFileIndex = 0;
-
-            foreach (var zf in zipFiles)
-            {
-                zipFileIndex++;
-                string zfPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(zf) + ".pdf");
-                string zfExt = Path.GetExtension(zf).ToLowerInvariant();
-                string zipHeader = $"{headerText} (ZIP {zipFileIndex}/{zipFiles.Length})";
-                string finalZipPdf = null;
-
-                if (zfExt == ".pdf")
-                {
-                    string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    PdfService.AddHeaderPdf(headerPdf, zipHeader);
-                    finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    PdfAppendTest.AppendPdfs(new List<string> { headerPdf, zf }, finalZipPdf);
-                    allTempFiles.Add(headerPdf);
-                    allTempFiles.Add(finalZipPdf);
-                }
-                else if (zfExt == ".doc" || zfExt == ".docx" || zfExt == ".xls" || zfExt == ".xlsx")
-                {
-                    if (OfficeConversionService.TryConvertOfficeToPdf(zf, zfPdf))
-                    {
-                        string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                        PdfService.AddHeaderPdf(headerPdf, zipHeader);
-                        finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                        PdfAppendTest.AppendPdfs(new List<string> { headerPdf, zfPdf }, finalZipPdf);
-                        allTempFiles.Add(headerPdf);
-                        allTempFiles.Add(zfPdf);
-                        allTempFiles.Add(finalZipPdf);
-                    }
-                    else
-                    {
-                        PdfService.AddHeaderPdf(finalZipPdf, zipHeader + "\n(Conversion failed)");
-                        allTempFiles.Add(finalZipPdf);
-                    }
-                }
-                else
-                {
-                    finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                    PdfService.AddHeaderPdf(finalZipPdf, zipHeader + "\n(Unsupported type)");
-                    allTempFiles.Add(finalZipPdf);
-                }
-                if (finalZipPdf != null)
-                    zipPdfFiles.Add(finalZipPdf);
-            }
-
-            // Merge all files from the ZIP into a single PDF
-            if (zipPdfFiles.Count == 0)
-            {
-                // No processable files found in ZIP
-                string placeholderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_empty_zip.pdf");
-                PdfService.AddHeaderPdf(placeholderPdf, headerText + "\n(Empty or no processable files in ZIP)");
-                allTempFiles.Add(placeholderPdf);
-                return placeholderPdf;
-            }
-            else if (zipPdfFiles.Count == 1)
-            {
-                // Only one file, return it directly
-                return zipPdfFiles[0];
-            }
-            else
-            {
-                // Multiple files - merge them all into one comprehensive PDF
-                string mergedZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_merged.pdf");
-                Console.WriteLine($"[ZIP] Merging {zipPdfFiles.Count} files from ZIP into single PDF: {mergedZipPdf}");
-                PdfAppendTest.AppendPdfs(zipPdfFiles, mergedZipPdf);
-                allTempFiles.Add(mergedZipPdf);
-                return mergedZipPdf;
-            }
-        }
-
         private void OptionsButton_Click(object sender, RoutedEventArgs e)
         {
             var optionsWindow = new OptionsWindow(extractOriginalOnly, deleteMsgAfterConversion)
@@ -1342,16 +639,6 @@ namespace MsgToPdfConverter
                 extractOriginalOnly = optionsWindow.ExtractOriginalOnly;
                 deleteMsgAfterConversion = optionsWindow.DeleteMsgAfterConversion;
             }
-        }
-
-        private void AlwaysOnTopCheckBox_Checked(object sender, RoutedEventArgs e)
-        {
-            this.Topmost = true;
-        }
-
-        private void AlwaysOnTopCheckBox_Unchecked(object sender, RoutedEventArgs e)
-        {
-            this.Topmost = false;
         }
 
         private void PinButton_Click(object sender, RoutedEventArgs e)

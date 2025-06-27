@@ -5,13 +5,17 @@ using System.Windows;
 
 namespace MsgToPdfConverter.Services
 {
+    public class OutlookImportResult
+    {
+        public List<string> ExtractedFiles { get; set; } = new List<string>();
+        public List<string> SkippedFiles { get; set; } = new List<string>();
+    }
+
     public class OutlookImportService
     {
-        public List<string> ExtractMsgFilesFromDragEvent(IDataObject data, string outputFolder, Func<string, string> sanitizeFileName)
+        public OutlookImportResult ExtractMsgFilesFromDragDrop(IDataObject data, string outputFolder, Func<string, string> sanitizeFileName)
         {
-            var tempFiles = new List<string>();
-            var skippedFiles = new List<string>();
-            var usedFilenames = new HashSet<string>();
+            var result = new OutlookImportResult();
             string[] fileNames = null;
             if (data.GetDataPresent("FileGroupDescriptorW"))
             {
@@ -28,7 +32,8 @@ namespace MsgToPdfConverter.Services
                 }
             }
             if (fileNames == null || fileNames.Length == 0)
-                return tempFiles;
+                return result;
+            var usedFilenames = new HashSet<string>();
             for (int i = 0; i < fileNames.Length; i++)
             {
                 string fileName = fileNames[i];
@@ -47,12 +52,37 @@ namespace MsgToPdfConverter.Services
                 }
                 usedFilenames.Add(Path.GetFileName(destPath));
                 bool success = false;
+                // Try indexed format first for multiple files
                 if (fileNames.Length > 1)
                 {
                     string indexedFormat = $"FileContents{i}";
                     if (data.GetDataPresent(indexedFormat))
                     {
-                        using (var fileStream = (MemoryStream)data.GetData(indexedFormat))
+                        try
+                        {
+                            using (var fileStream = (MemoryStream)data.GetData(indexedFormat))
+                            {
+                                if (fileStream != null && fileStream.Length > 0)
+                                {
+                                    using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
+                                    {
+                                        fileStream.Position = 0;
+                                        fileStream.WriteTo(fs);
+                                    }
+                                    result.ExtractedFiles.Add(destPath);
+                                    success = true;
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                }
+                // Try non-indexed format as fallback
+                if (!success && data.GetDataPresent("FileContents"))
+                {
+                    try
+                    {
+                        using (var fileStream = (MemoryStream)data.GetData("FileContents"))
                         {
                             if (fileStream != null && fileStream.Length > 0)
                             {
@@ -61,34 +91,100 @@ namespace MsgToPdfConverter.Services
                                     fileStream.Position = 0;
                                     fileStream.WriteTo(fs);
                                 }
-                                tempFiles.Add(destPath);
+                                result.ExtractedFiles.Add(destPath);
                                 success = true;
                             }
                         }
                     }
+                    catch { }
                 }
-                if (!success && data.GetDataPresent("FileContents"))
+                // Try alternate Outlook formats (rare)
+                if (!success)
                 {
-                    using (var fileStream = (MemoryStream)data.GetData("FileContents"))
+                    string[] altFormats = { "RenPrivateItem", "Attachment" };
+                    foreach (var alt in altFormats)
                     {
-                        if (fileStream != null && fileStream.Length > 0)
+                        if (data.GetDataPresent(alt))
                         {
-                            using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
+                            try
                             {
-                                fileStream.Position = 0;
-                                fileStream.WriteTo(fs);
+                                using (var fileStream = (MemoryStream)data.GetData(alt))
+                                using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
+                                {
+                                    fileStream.WriteTo(fs);
+                                }
+                                result.ExtractedFiles.Add(destPath);
+                                success = true;
+                                break;
                             }
-                            tempFiles.Add(destPath);
-                            success = true;
+                            catch { }
                         }
                     }
                 }
+                // Try FileDrop as a last resort
+                if (!success && data.GetDataPresent(DataFormats.FileDrop))
+                {
+                    try
+                    {
+                        string[] dropped = (string[])data.GetData(DataFormats.FileDrop);
+                        foreach (var path in dropped)
+                        {
+                            if (File.Exists(path) && Path.GetExtension(path).ToLowerInvariant() == ".msg")
+                            {
+                                File.Copy(path, destPath, true);
+                                result.ExtractedFiles.Add(destPath);
+                                success = true;
+                                break;
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                // Try Outlook Interop fallback
                 if (!success)
                 {
-                    skippedFiles.Add(fileName);
+                    try
+                    {
+                        var outlookApp = System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application") as Microsoft.Office.Interop.Outlook.Application;
+                        if (outlookApp != null)
+                        {
+                            var explorer = outlookApp.ActiveExplorer();
+                            if (explorer != null && explorer.Selection != null && explorer.Selection.Count > 0)
+                            {
+                                int selectionIndex = Math.Min(i + 1, explorer.Selection.Count);
+                                var mailItem = explorer.Selection[selectionIndex] as Microsoft.Office.Interop.Outlook.MailItem;
+                                if (mailItem != null)
+                                {
+                                    string safeSubject = sanitizeFileName(mailItem.Subject ?? "untitled");
+                                    string interopFileName = safeSubject;
+                                    if (!interopFileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                                        interopFileName += ".msg";
+                                    string interopDestPath = Path.Combine(outputFolder, interopFileName);
+                                    int interopCounter = 1;
+                                    while (File.Exists(interopDestPath) || usedFilenames.Contains(Path.GetFileName(interopDestPath)))
+                                    {
+                                        string nameWithoutExt = Path.GetFileNameWithoutExtension(interopFileName);
+                                        string extension = Path.GetExtension(interopFileName);
+                                        string uniqueFileName = $"{nameWithoutExt}_{interopCounter}{extension}";
+                                        interopDestPath = Path.Combine(outputFolder, uniqueFileName);
+                                        interopCounter++;
+                                    }
+                                    usedFilenames.Add(Path.GetFileName(interopDestPath));
+                                    mailItem.SaveAs(interopDestPath, Microsoft.Office.Interop.Outlook.OlSaveAsType.olMSG);
+                                    result.ExtractedFiles.Add(interopDestPath);
+                                    success = true;
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                if (!success)
+                {
+                    result.SkippedFiles.Add(fileName);
                 }
             }
-            return tempFiles;
+            return result;
         }
 
         private string[] GetFileNamesFromFileGroupDescriptorW(Stream stream)
@@ -108,7 +204,6 @@ namespace MsgToPdfConverter.Services
             }
             return fileNames.ToArray();
         }
-
         private string[] GetFileNamesFromFileGroupDescriptor(Stream stream)
         {
             var fileNames = new List<string>();
