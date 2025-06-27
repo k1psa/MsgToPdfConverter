@@ -18,6 +18,7 @@ using System.Threading.Tasks;
 using System.Linq;
 using System.Runtime.InteropServices;
 using Microsoft.VisualBasic.FileIO; // Add this at the top for FileSystem.DeleteFile
+using MsgToPdfConverter.Services;
 
 namespace MsgToPdfConverter
 {
@@ -31,6 +32,7 @@ namespace MsgToPdfConverter
         private bool extractOriginalOnly = false;
         private bool deleteMsgAfterConversion = false;
         private bool isPinned = false;
+        private EmailConverterService _emailService = new EmailConverterService();
 
         public MainWindow()
         {
@@ -125,123 +127,6 @@ namespace MsgToPdfConverter
         {
             selectedOutputFolder = null;
             OutputFolderLabel.Text = "(Default: Same as .msg file)";
-        }
-
-        private string GetMimeTypeFromFileName(string fileName)
-        {
-            if (string.IsNullOrEmpty(fileName)) return "image/png";
-            string ext = System.IO.Path.GetExtension(fileName).ToLowerInvariant();
-            switch (ext)
-            {
-                case ".jpg":
-                case ".jpeg": return "image/jpeg";
-                case ".png": return "image/png";
-                case ".gif": return "image/gif";
-                case ".bmp": return "image/bmp";
-                case ".tif":
-                case ".tiff": return "image/tiff";
-                case ".svg": return "image/svg+xml";
-                default: return "image/png";
-            }
-        }
-        private string EmbedInlineImages(Storage.Message msg)
-        {
-            string html = GetEmailBodyWithProperEncoding(msg);
-            if (string.IsNullOrEmpty(html) || msg.Attachments == null || msg.Attachments.Count == 0)
-                return html;
-
-            var regex = new Regex("<img[^>]+src=\"cid:([^\"]+)\"", RegexOptions.IgnoreCase);
-            return regex.Replace(html, match =>
-            {
-                string cid = match.Groups[1].Value;
-                Storage.Attachment found = null;
-                foreach (var att in msg.Attachments)
-                {
-                    if (att is Storage.Attachment attachment && attachment.ContentId != null && attachment.ContentId.Trim('<', '>') == cid.Trim('<', '>'))
-                    {
-                        found = attachment;
-                        break;
-                    }
-                }
-                if (found != null)
-                {
-                    string mimeType = GetMimeTypeFromFileName(found.FileName);
-                    string base64 = Convert.ToBase64String(found.Data);
-                    return match.Value.Replace($"cid:{cid}", $"data:{mimeType};base64,{base64}");
-                }
-                return match.Value;
-            });
-        }
-        private string BuildEmailHtml(Storage.Message msg, bool extractOriginalOnly = false)
-        {
-            string from = msg.Sender?.DisplayName ?? msg.Sender?.Email ?? "";
-            string sent = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("f") : "";
-            string to = string.Join(", ", msg.Recipients?.FindAll(r => r.Type == Storage.Recipient.RecipientType.To)?.ConvertAll(r => r.DisplayName + (string.IsNullOrEmpty(r.Email) ? "" : $" <{r.Email}>")) ?? new List<string>());
-            string cc = string.Join(", ", msg.Recipients?.FindAll(r => r.Type == Storage.Recipient.RecipientType.Cc)?.ConvertAll(r => r.DisplayName + (string.IsNullOrEmpty(r.Email) ? "" : $" <{r.Email}>")) ?? new List<string>());
-            string subject = msg.Subject ?? "";
-            string body = EmbedInlineImages(msg) ?? "";
-
-            // Extract original content if requested
-            if (extractOriginalOnly)
-            {
-                body = ExtractOriginalEmailContent(body);
-                Console.WriteLine($"[DEBUG] Original content extraction applied. Body length: {body?.Length ?? 0}");
-            }
-
-            // Attachments line
-            string attachmentsLine = "";
-            if (msg.Attachments != null && msg.Attachments.Count > 0)
-            {
-                // Only show attachments that are appended to the PDF (not inline, not signature)
-                var inlineContentIds = GetInlineContentIds(msg.BodyHtml ?? "");
-                var attachmentNames = new List<string>();
-
-                // Add regular attachments
-                attachmentNames.AddRange(msg.Attachments
-                    .OfType<Storage.Attachment>()
-                    .Where(a =>
-                        !string.IsNullOrEmpty(a.FileName) &&
-                        // Exclude inline attachments
-                        (a.IsInline != true) &&
-                        (string.IsNullOrEmpty(a.ContentId) || !inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' '))) &&
-                        // Exclude signature files (common extensions: .p7s, .p7m, .smime, .asc, .sig)
-                        !new[] { ".p7s", ".p7m", ".smime", ".asc", ".sig" }.Contains(System.IO.Path.GetExtension(a.FileName).ToLowerInvariant())
-                    )
-                    .Select(a => System.Net.WebUtility.HtmlEncode(a.FileName)));
-
-                // Add nested email attachments (Storage.Message objects)
-                attachmentNames.AddRange(msg.Attachments
-                    .OfType<Storage.Message>()
-                    .Select(nestedMsg => System.Net.WebUtility.HtmlEncode(nestedMsg.Subject ?? "[Attached Email]")));
-
-                if (attachmentNames.Count > 0)
-                {
-                    attachmentsLine = $"<div><b>Attachments:</b> {string.Join(", ", attachmentNames)}</div>";
-                }
-            }
-
-            string header =
-                "<div style='font-family:Segoe UI,Arial,sans-serif;font-size:12pt;margin-bottom:16px;'>" +
-                $"<div><b>From:</b> {System.Net.WebUtility.HtmlEncode(from)}</div>" +
-                $"<div><b>Sent:</b> {System.Net.WebUtility.HtmlEncode(sent)}</div>" +
-                $"<div><b>To:</b> {System.Net.WebUtility.HtmlEncode(to)}</div>" +
-                (string.IsNullOrWhiteSpace(cc) ? "" : $"<div><b>Cc:</b> {System.Net.WebUtility.HtmlEncode(cc)}</div>") +
-                $"<div><b>Subject:</b> {System.Net.WebUtility.HtmlEncode(subject)}</div>" +
-                attachmentsLine +
-                "</div>";
-
-            // Return a complete HTML document with proper UTF-8 charset declaration
-            return "<!DOCTYPE html>" +
-                   "<html>" +
-                   "<head>" +
-                   "<meta charset=\"UTF-8\">" +
-                   "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">" +
-                   "<title>Email</title>" +
-                   "</head>" +
-                   "<body>" +
-                   header + body +
-                   "</body>" +
-                   "</html>";
         }
 
         private void KillWkhtmltopdfProcesses()
@@ -423,14 +308,17 @@ namespace MsgToPdfConverter
                                 try { File.Delete(pdfFilePath); Console.WriteLine($"[DEBUG] Deleted old PDF: {pdfFilePath}"); } catch (Exception ex) { Console.WriteLine($"[DEBUG] Could not delete old PDF: {ex.Message}"); }
                             }
                             Console.WriteLine($"[TASK] Output PDF path: {pdfFilePath}");
-                            string htmlWithHeader = BuildEmailHtml(msg, extractOriginalOnly);
+                            // Replace direct BuildEmailHtml call with service
+                            var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(msg, extractOriginalOnly);
+                            string htmlWithHeader = htmlResult.Html;
+                            List<string> tempInlineFiles = htmlResult.TempFiles;
                             Console.WriteLine($"[TASK] Built HTML for: {msgFilePath}");
                             Console.WriteLine($"[TASK] HTML length: {htmlWithHeader?.Length ?? 0}");                            // Write HTML to a temp file
                             string tempHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
                             File.WriteAllText(tempHtmlPath, htmlWithHeader, System.Text.Encoding.UTF8);
                             Console.WriteLine($"[DEBUG] Written HTML to temp file: {tempHtmlPath}");
                             // Find all inline ContentIds
-                            var inlineContentIds = GetInlineContentIds(htmlWithHeader);
+                            var inlineContentIds = _emailService.GetInlineContentIds(htmlWithHeader);
                             // Launch a new process for each conversion
                             var psi = new System.Diagnostics.ProcessStartInfo
                             {
@@ -539,7 +427,7 @@ namespace MsgToPdfConverter
                                     {
                                         if (File.Exists(f) && !string.Equals(f, mergedPdf, StringComparison.OrdinalIgnoreCase) && !string.Equals(f, pdfFilePath, StringComparison.OrdinalIgnoreCase))
                                         {
-                                            RobustDeleteFile(f);
+                                            FileService.RobustDeleteFile(f);
                                         }
                                         else if (Directory.Exists(f))
                                         {
@@ -1480,9 +1368,11 @@ namespace MsgToPdfConverter
                 {
                     Console.WriteLine($"[MSG] Depth {depth} - Creating PDF for nested message body: {msgSubject}");
 
-                    // Create PDF for the nested MSG body
-                    string nestedHtml = BuildEmailHtml(msg, extractOriginalOnly);
-                    string nestedPdf = Path.Combine(tempDir, $"depth{depth}_{Guid.NewGuid()}_nested_msg.pdf");                    // Convert HTML to PDF
+                    // Use new inline image logic for nested emails
+                    var (nestedHtml, tempFiles) = _emailService.BuildEmailHtmlWithInlineImages(msg, extractOriginalOnly);
+                    allTempFiles.AddRange(tempFiles); // Track temp image files for cleanup
+
+                    string nestedPdf = Path.Combine(tempDir, $"depth{depth}_{Guid.NewGuid()}_nested_msg.pdf");
                     string nestedHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
                     File.WriteAllText(nestedHtmlPath, nestedHtml, System.Text.Encoding.UTF8);
 
@@ -1539,7 +1429,7 @@ namespace MsgToPdfConverter
 
             Console.WriteLine($"[MSG] Processing attachments at depth {depth}, found {msg.Attachments.Count} attachments");
 
-            var inlineContentIds = GetInlineContentIds(msg.BodyHtml ?? "");
+            var inlineContentIds = _emailService.GetInlineContentIds(msg.BodyHtml ?? "");
             var typedAttachments = new List<Storage.Attachment>();
             var nestedMessages = new List<Storage.Message>();
 
@@ -1755,233 +1645,6 @@ namespace MsgToPdfConverter
                 PdfAppendTest.AppendPdfs(zipPdfFiles, mergedZipPdf);
                 allTempFiles.Add(mergedZipPdf);
                 return mergedZipPdf;
-            }
-        }
-
-        /// <summary>
-        /// Gets email body with proper encoding handling for Unicode characters like Greek
-        /// </summary>
-        private string GetEmailBodyWithProperEncoding(Storage.Message msg)
-        {
-            try
-            {
-                // Try to get HTML body first
-                string htmlBody = msg.BodyHtml;
-                if (!string.IsNullOrEmpty(htmlBody))
-                {
-                    // Check if the HTML body appears to have encoding issues
-                    if (HasEncodingIssues(htmlBody))
-                    {
-                        // Try to re-interpret with different encodings
-                        string fixedHtml = TryFixEncoding(htmlBody);
-                        if (!string.IsNullOrEmpty(fixedHtml) && !HasEncodingIssues(fixedHtml))
-                        {
-                            return fixedHtml;
-                        }
-                    }
-                    return htmlBody;
-                }
-
-                // Fall back to text body
-                string textBody = msg.BodyText;
-                if (!string.IsNullOrEmpty(textBody))
-                {
-                    if (HasEncodingIssues(textBody))
-                    {
-                        string fixedText = TryFixEncoding(textBody);
-                        if (!string.IsNullOrEmpty(fixedText) && !HasEncodingIssues(fixedText))
-                        {
-                            return fixedText;
-                        }
-                    }
-                    return textBody;
-                }
-
-                return string.Empty;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ENCODING] Error getting body with proper encoding: {ex.Message}");
-                return msg.BodyHtml ?? msg.BodyText ?? string.Empty;
-            }
-        }
-
-        /// <summary>
-        /// Checks if text has encoding issues (like Greek characters showing as garbage)
-        /// </summary>
-        private bool HasEncodingIssues(string text)
-        {
-            if (string.IsNullOrEmpty(text))
-                return false;
-
-            // Look for patterns that indicate encoding issues
-            return text.Contains("Ã") || text.Contains("Î") || text.Contains("Ï") ||
-                   text.Contains("â") || text.Contains("€") || text.Contains("™");
-        }
-
-        /// <summary>
-        /// Attempts to fix encoding issues by trying different encoding interpretations
-        /// </summary>
-        private string TryFixEncoding(string text)
-        {
-            if (string.IsNullOrEmpty(text))
-                return text;
-
-            try
-            {
-                // Try converting from different encodings to UTF-8
-                var encodings = new[]
-                {
-                    System.Text.Encoding.GetEncoding("windows-1252"),
-                    System.Text.Encoding.GetEncoding("iso-8859-1"),
-                    System.Text.Encoding.GetEncoding("iso-8859-7"), // Greek
-                    System.Text.Encoding.UTF8
-                };
-
-                foreach (var encoding in encodings)
-                {
-                    try
-                    {
-                        // Convert string back to bytes using current encoding assumption
-                        byte[] bytes = System.Text.Encoding.GetEncoding("iso-8859-1").GetBytes(text);
-                        // Reinterpret as target encoding
-                        string result = encoding.GetString(bytes);
-
-                        // Check if this looks better (has fewer encoding issue patterns)
-                        if (!HasEncodingIssues(result) && result != text)
-                        {
-                            Console.WriteLine($"[ENCODING] Fixed encoding using {encoding.EncodingName}");
-                            return result;
-                        }
-                    }
-                    catch
-                    {
-                        // Continue to next encoding
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[ENCODING] Error trying to fix encoding: {ex.Message}");
-            }
-
-            return text; // Return original if no fix found
-        }
-
-        // Returns all ContentIds referenced as inline images in the HTML
-        private HashSet<string> GetInlineContentIds(string html)
-        {
-            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            if (string.IsNullOrEmpty(html)) return set;
-            // Match src='cid:...' or src="cid:..." and optional angle brackets
-            var regex = new System.Text.RegularExpressions.Regex("<img[^>]+src=['\"]cid:<?([^'\">]+)>?['\"]", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            foreach (System.Text.RegularExpressions.Match match in regex.Matches(html))
-            {
-                if (match.Groups.Count > 1)
-                    set.Add(match.Groups[1].Value.Trim('<', '>', '\"', '\'', ' '));
-            }
-            return set;
-        }
-
-        // Extracts the original email content from a reply/forward chain
-        private string ExtractOriginalEmailContent(string emailBody)
-        {
-            if (string.IsNullOrEmpty(emailBody))
-                return emailBody;
-
-            var replyIndicators = new[]
-            {
-                @"-----Original Message-----",
-                @"From:.*Sent:.*To:.*Subject:",
-                @"On .* wrote:",
-                @"On .* at .* .* wrote:",
-                @"> .*wrote:",
-                @"<.*> wrote:",
-                @"From: .*[\r\n]+.*Sent: .*[\r\n]+.*To: .*[\r\n]+.*Subject:",
-                @"________________________________",
-                @"From:.*[\r\n]Sent:.*[\r\n]To:.*[\r\n]Subject:",
-                @"Begin forwarded message:",
-                @"---------- Forwarded message ----------",
-                @"Forwarded Message",
-                @"FW:",
-                @"Fwd:",
-                @"<div class=""gmail_quote"">",
-                @"<div class=""OutlookMessageHeader"">",
-                @"<div.*class.*quoted.*>",
-                @"<blockquote.*>",
-                @"<hr.*>.*From:",
-                @"<div.*outlook.*>.*From:",
-                @"^-{5,}.*$",
-                @"^_{5,}.*$",
-                @"^={5,}.*$"
-            };
-
-            string originalContent = emailBody;
-            int earliestIndex = originalContent.Length;
-            foreach (var pattern in replyIndicators)
-            {
-                try
-                {
-                    var matches = System.Text.RegularExpressions.Regex.Matches(originalContent, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline | System.Text.RegularExpressions.RegexOptions.Singleline);
-                    if (matches.Count > 0)
-                    {
-                        var firstMatch = matches[0];
-                        if (firstMatch.Index < earliestIndex)
-                        {
-                            earliestIndex = firstMatch.Index;
-                        }
-                    }
-                }
-                catch { }
-            }
-            if (earliestIndex < originalContent.Length)
-            {
-                originalContent = originalContent.Substring(0, earliestIndex).Trim();
-            }
-            // Remove trailing empty divs, paragraphs, or line breaks
-            if (originalContent.Contains("<") && originalContent.Contains(">"))
-            {
-                originalContent = System.Text.RegularExpressions.Regex.Replace(originalContent, @"(<br\s*/?>|<p\s*>|<div\s*>|\s)*$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            }
-            return originalContent;
-        }
-
-        // Robust file deletion with retries (for temp files, not user files)
-        private void RobustDeleteFile(string filePath, int maxRetries = 5, int delayMs = 500)
-        {
-            for (int i = 0; i < maxRetries; i++)
-            {
-                try
-                {
-                    if (System.IO.File.Exists(filePath))
-                    {
-                        // For temp files, still use permanent delete
-                        System.IO.File.Delete(filePath);
-                        System.Threading.Thread.Sleep(100);
-                        if (!System.IO.File.Exists(filePath))
-                        {
-                            System.Console.WriteLine($"[CLEANUP] Successfully deleted temp file: {filePath}");
-                            return;
-                        }
-                    }
-                    else
-                    {
-                        System.Console.WriteLine($"[CLEANUP] File does not exist, skipping deletion: {filePath}");
-                        return;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    System.Console.WriteLine($"[CLEANUP] Error deleting temp file (attempt {i + 1}/{maxRetries}): {filePath} - {ex.Message}");
-                    if (i == maxRetries - 1)
-                    {
-                        System.Console.WriteLine($"[CLEANUP] Failed to delete temp file after {maxRetries} attempts: {filePath}");
-                    }
-                    else
-                    {
-                        System.Threading.Thread.Sleep(delayMs);
-                    }
-                }
             }
         }
 
