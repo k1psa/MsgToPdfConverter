@@ -194,7 +194,10 @@ namespace MsgToPdfConverter
             {
                 // Only show attachments that are appended to the PDF (not inline, not signature)
                 var inlineContentIds = GetInlineContentIds(msg.BodyHtml ?? "");
-                var attachmentNames = msg.Attachments
+                var attachmentNames = new List<string>();
+
+                // Add regular attachments
+                attachmentNames.AddRange(msg.Attachments
                     .OfType<Storage.Attachment>()
                     .Where(a =>
                         !string.IsNullOrEmpty(a.FileName) &&
@@ -204,8 +207,13 @@ namespace MsgToPdfConverter
                         // Exclude signature files (common extensions: .p7s, .p7m, .smime, .asc, .sig)
                         !new[] { ".p7s", ".p7m", ".smime", ".asc", ".sig" }.Contains(System.IO.Path.GetExtension(a.FileName).ToLowerInvariant())
                     )
-                    .Select(a => System.Net.WebUtility.HtmlEncode(a.FileName))
-                    .ToList();
+                    .Select(a => System.Net.WebUtility.HtmlEncode(a.FileName)));
+
+                // Add nested email attachments (Storage.Message objects)
+                attachmentNames.AddRange(msg.Attachments
+                    .OfType<Storage.Message>()
+                    .Select(nestedMsg => System.Net.WebUtility.HtmlEncode(nestedMsg.Subject ?? "[Attached Email]")));
+
                 if (attachmentNames.Count > 0)
                 {
                     attachmentsLine = $"<div><b>Attachments:</b> {string.Join(", ", attachmentNames)}</div>";
