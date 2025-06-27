@@ -1028,7 +1028,7 @@ namespace MsgToPdfConverter
             }
         }
 
-        private void FilesListBox_Drop(object sender, DragEventArgs e)
+        private async void FilesListBox_Drop(object sender, DragEventArgs e)
         {
             // 1. Standard file/folder drop
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
@@ -1069,6 +1069,26 @@ namespace MsgToPdfConverter
             {
                 try
                 {
+                    Console.WriteLine($"[DND] Starting Outlook email drag-and-drop processing");
+
+                    // Log all available data formats for debugging
+                    var availableFormats = e.Data.GetFormats();
+                    Console.WriteLine($"[DND] Available data formats: {string.Join(", ", availableFormats)}");
+
+                    // Ensure main window is properly activated and focused before showing dialog
+                    this.Activate();
+                    this.Focus();
+
+                    // Temporarily set topmost to ensure dialog appears in front
+                    bool wasTopmost = this.Topmost;
+                    this.Topmost = true;
+
+                    // Small delay to ensure window activation
+                    await System.Threading.Tasks.Task.Delay(50);
+
+                    // Restore original topmost state
+                    this.Topmost = wasTopmost;
+
                     // Use selectedOutputFolder if set, otherwise prompt
                     string outputFolder = !string.IsNullOrEmpty(selectedOutputFolder)
                         ? selectedOutputFolder
