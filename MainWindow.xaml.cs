@@ -466,7 +466,7 @@ namespace MsgToPdfConverter
                                     var att = typedAttachments[attIndex];
                                     string attName = att.FileName ?? "attachment";
                                     string attPath = Path.Combine(tempDir, attName);
-                                    string headerText = $"Attachment: {attIndex + 1}/{totalAttachments}";
+                                    string headerText = $"Attachment {attIndex + 1}/{totalAttachments} - {attName}";
                                     try
                                     {
                                         File.WriteAllBytes(attPath, att.Data);
