@@ -68,7 +68,10 @@ namespace MsgToPdfConverter
 
         private void SelectOutputFolderButton_Click(object sender, RoutedEventArgs e)
         {
+            bool wasTopmost = this.Topmost;
+            this.Topmost = false;
             var folder = FileDialogHelper.OpenFolderDialog();
+            this.Topmost = wasTopmost;
             if (!string.IsNullOrEmpty(folder))
             {
                 selectedOutputFolder = folder;
@@ -493,7 +496,14 @@ namespace MsgToPdfConverter
                 {
                     string outputFolder = !string.IsNullOrEmpty(selectedOutputFolder)
                         ? selectedOutputFolder
-                        : FileDialogHelper.OpenFolderDialog();
+                        : null;
+                    if (string.IsNullOrEmpty(outputFolder))
+                    {
+                        bool wasTopmost = this.Topmost;
+                        this.Topmost = false;
+                        outputFolder = FileDialogHelper.OpenFolderDialog();
+                        this.Topmost = wasTopmost;
+                    }
                     if (string.IsNullOrEmpty(outputFolder))
                         return;
 
