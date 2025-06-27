@@ -192,14 +192,23 @@ namespace MsgToPdfConverter
             string attachmentsLine = "";
             if (msg.Attachments != null && msg.Attachments.Count > 0)
             {
+                // Only show attachments that are appended to the PDF (not inline, not signature)
+                var inlineContentIds = GetInlineContentIds(msg.BodyHtml ?? "");
                 var attachmentNames = msg.Attachments
                     .OfType<Storage.Attachment>()
-                    .Where(a => !string.IsNullOrEmpty(a.FileName))
+                    .Where(a =>
+                        !string.IsNullOrEmpty(a.FileName) &&
+                        // Exclude inline attachments
+                        (a.IsInline != true) &&
+                        (string.IsNullOrEmpty(a.ContentId) || !inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' '))) &&
+                        // Exclude signature files (common extensions: .p7s, .p7m, .smime, .asc, .sig)
+                        !new[] { ".p7s", ".p7m", ".smime", ".asc", ".sig" }.Contains(System.IO.Path.GetExtension(a.FileName).ToLowerInvariant())
+                    )
                     .Select(a => System.Net.WebUtility.HtmlEncode(a.FileName))
                     .ToList();
                 if (attachmentNames.Count > 0)
                 {
-                    attachmentsLine = $"<div><b>Attachments:</b> {string.Join(" ", attachmentNames)}</div>";
+                    attachmentsLine = $"<div><b>Attachments:</b> {string.Join(", ", attachmentNames)}</div>";
                 }
             }
 
