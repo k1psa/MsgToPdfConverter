@@ -68,14 +68,31 @@ namespace MsgToPdfConverter.Utils
 
         public static string OpenFolderDialog()
         {
-            using (var dialog = new FolderBrowserDialog())
+            using (var dialog = new System.Windows.Forms.OpenFileDialog())
             {
-                dialog.Description = "Select Output Folder for PDF Files";
-                dialog.ShowNewFolderButton = true;
+                dialog.Title = "Select Output Folder";
+                dialog.Filter = "Folders|*.*";
+                dialog.CheckFileExists = false;
+                dialog.CheckPathExists = false;
+                dialog.ValidateNames = false;
+                dialog.DereferenceLinks = false;
+                dialog.FileName = "Select this folder";
 
                 if (dialog.ShowDialog() == DialogResult.OK)
                 {
-                    return dialog.SelectedPath;
+                    string selectedPath = dialog.FileName;
+                    if (selectedPath.EndsWith("Select this folder") || selectedPath.EndsWith("Select this folder".Replace(" ", "")))
+                    {
+                        return System.IO.Path.GetDirectoryName(selectedPath);
+                    }
+                    else if (System.IO.Directory.Exists(selectedPath))
+                    {
+                        return selectedPath;
+                    }
+                    else if (System.IO.Directory.Exists(System.IO.Path.GetDirectoryName(selectedPath)))
+                    {
+                        return System.IO.Path.GetDirectoryName(selectedPath);
+                    }
                 }
             }
             return null;
