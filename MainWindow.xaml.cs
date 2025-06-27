@@ -17,6 +17,7 @@ using iText.Layout.Element;
 using System.Threading.Tasks;
 using System.Linq;
 using System.Runtime.InteropServices;
+using Microsoft.VisualBasic.FileIO; // Add this at the top for FileSystem.DeleteFile
 
 namespace MsgToPdfConverter
 {
@@ -558,12 +559,13 @@ namespace MsgToPdfConverter
                             {
                                 try
                                 {
-                                    File.Delete(msgFilePath);
-                                    Console.WriteLine($"[DELETE] Deleted .msg file: {msgFilePath}");
+                                    // Move to Recycle Bin instead of permanent delete
+                                    MoveFileToRecycleBin(msgFilePath);
+                                    Console.WriteLine($"[DELETE] Moved .msg file to Recycle Bin: {msgFilePath}");
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[DELETE] Could not delete {msgFilePath}: {ex.Message}");
+                                    Console.WriteLine($"[DELETE] Could not move {msgFilePath} to Recycle Bin: {ex.Message}");
                                 }
                             }
                             KillWkhtmltopdfProcesses();
@@ -651,7 +653,7 @@ namespace MsgToPdfConverter
                         Console.WriteLine($"[ATTACH] ZIP detected, extracting: {attName}");
                         string extractDir = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName));
                         System.IO.Compression.ZipFile.ExtractToDirectory(attPath, extractDir);
-                        var zipFiles = Directory.GetFiles(extractDir, "*.*", SearchOption.AllDirectories);
+                        var zipFiles = Directory.GetFiles(extractDir, "*.*", System.IO.SearchOption.AllDirectories);
                         foreach (var zf in zipFiles)
                         {
                             string zfPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(zf) + ".pdf");
@@ -912,6 +914,7 @@ namespace MsgToPdfConverter
 
         private void FilesListBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
         {
+            System.Diagnostics.Debug.WriteLine($"[DEBUG] FilesListBox_KeyDown triggered. Key: {e.Key}, SelectedItems: {FilesListBox.SelectedItems.Count}");
             if (e.Key == System.Windows.Input.Key.Delete && FilesListBox.SelectedItems.Count > 0)
             {
                 var itemsToRemove = new List<string>();
@@ -919,14 +922,25 @@ namespace MsgToPdfConverter
                 {
                     itemsToRemove.Add(item as string);
                 }
+                // Confirm deletion
+                var result = MessageBox.Show($"Are you sure you want to move the selected file(s) to the Recycle Bin?\n\n{string.Join("\n", itemsToRemove)}", "Confirm Delete", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (result != MessageBoxResult.Yes)
+                {
+                    e.Handled = true; // Suppress default behavior
+                    return;
+                }
                 foreach (var item in itemsToRemove)
                 {
+                    // Only use MoveFileToRecycleBin for user files
+                    MoveFileToRecycleBin(item);
                     FilesListBox.Items.Remove(item);
                     selectedFiles.Remove(item);
                 }
                 UpdateFileCountAndButtons();
+                e.Handled = true; // Suppress default behavior
             }
         }
+
         private void UpdateFileCountAndButtons()
         {
             int fileCount = FilesListBox.Items.Count;
@@ -1008,7 +1022,7 @@ namespace MsgToPdfConverter
                     }
                     else if (Directory.Exists(item))
                     {
-                        var msgFiles = Directory.GetFiles(item, "*.msg", SearchOption.AllDirectories);
+                        var msgFiles = Directory.GetFiles(item, "*.msg", System.IO.SearchOption.AllDirectories);
                         foreach (string msgFile in msgFiles)
                         {
                             if (!selectedFiles.Contains(msgFile))
@@ -1483,7 +1497,7 @@ namespace MsgToPdfConverter
             System.IO.Compression.ZipFile.ExtractToDirectory(attPath, extractDir);
             allTempFiles.Add(extractDir);
 
-            var zipFiles = Directory.GetFiles(extractDir, "*.*", SearchOption.AllDirectories);
+            var zipFiles = Directory.GetFiles(extractDir, "*.*", System.IO.SearchOption.AllDirectories);
             var zipPdfFiles = new List<string>();
             int zipFileIndex = 0;
 
@@ -1745,7 +1759,7 @@ namespace MsgToPdfConverter
             return originalContent;
         }
 
-        // Robust file deletion with retries
+        // Robust file deletion with retries (for temp files, not user files)
         private void RobustDeleteFile(string filePath, int maxRetries = 5, int delayMs = 500)
         {
             for (int i = 0; i < maxRetries; i++)
@@ -1754,6 +1768,7 @@ namespace MsgToPdfConverter
                 {
                     if (System.IO.File.Exists(filePath))
                     {
+                        // For temp files, still use permanent delete
                         System.IO.File.Delete(filePath);
                         System.Threading.Thread.Sleep(100);
                         if (!System.IO.File.Exists(filePath))
@@ -1812,6 +1827,25 @@ namespace MsgToPdfConverter
             this.Topmost = isPinned;
             PinButton.Foreground = isPinned ? System.Windows.Media.Brushes.Red : System.Windows.Media.Brushes.Black;
             PinButton.Opacity = isPinned ? 1.0 : 0.7;
+        }
+
+        /// <summary>
+        /// Moves a file to the Windows Recycle Bin using Microsoft.VisualBasic.FileIO
+        /// </summary>
+        private void MoveFileToRecycleBin(string filePath)
+        {
+            try
+            {
+                if (System.IO.File.Exists(filePath))
+                {
+                    FileSystem.DeleteFile(filePath, UIOption.OnlyErrorDialogs, RecycleOption.SendToRecycleBin);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[RECYCLEBIN] Failed to move file to Recycle Bin: {filePath} - {ex.Message}");
+                throw;
+            }
         }
     }
 }
