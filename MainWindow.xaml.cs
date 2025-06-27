@@ -188,27 +188,43 @@ namespace MsgToPdfConverter
                 Console.WriteLine($"[DEBUG] Original content extraction applied. Body length: {body?.Length ?? 0}");
             }
 
-            string header = $@"
-                <div style='font-family:Segoe UI,Arial,sans-serif;font-size:12pt;margin-bottom:16px;'>
-                    <div><b>From:</b> {System.Net.WebUtility.HtmlEncode(from)}</div>
-                    <div><b>Sent:</b> {System.Net.WebUtility.HtmlEncode(sent)}</div>
-                    <div><b>To:</b> {System.Net.WebUtility.HtmlEncode(to)}</div>
-                    {(string.IsNullOrWhiteSpace(cc) ? "" : $"<div><b>Cc:</b> {System.Net.WebUtility.HtmlEncode(cc)}</div>")}
-                    <div><b>Subject:</b> {System.Net.WebUtility.HtmlEncode(subject)}</div>
-                </div>";
+            // Attachments line
+            string attachmentsLine = "";
+            if (msg.Attachments != null && msg.Attachments.Count > 0)
+            {
+                var attachmentNames = msg.Attachments
+                    .OfType<Storage.Attachment>()
+                    .Where(a => !string.IsNullOrEmpty(a.FileName))
+                    .Select(a => System.Net.WebUtility.HtmlEncode(a.FileName))
+                    .ToList();
+                if (attachmentNames.Count > 0)
+                {
+                    attachmentsLine = $"<div><b>Attachments:</b> {string.Join(" ", attachmentNames)}</div>";
+                }
+            }
+
+            string header =
+                "<div style='font-family:Segoe UI,Arial,sans-serif;font-size:12pt;margin-bottom:16px;'>" +
+                $"<div><b>From:</b> {System.Net.WebUtility.HtmlEncode(from)}</div>" +
+                $"<div><b>Sent:</b> {System.Net.WebUtility.HtmlEncode(sent)}</div>" +
+                $"<div><b>To:</b> {System.Net.WebUtility.HtmlEncode(to)}</div>" +
+                (string.IsNullOrWhiteSpace(cc) ? "" : $"<div><b>Cc:</b> {System.Net.WebUtility.HtmlEncode(cc)}</div>") +
+                $"<div><b>Subject:</b> {System.Net.WebUtility.HtmlEncode(subject)}</div>" +
+                attachmentsLine +
+                "</div>";
 
             // Return a complete HTML document with proper UTF-8 charset declaration
-            return $@"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset=""UTF-8"">
-    <meta http-equiv=""Content-Type"" content=""text/html; charset=utf-8"">
-    <title>Email</title>
-</head>
-<body>
-{header}{body}
-</body>
-</html>";
+            return "<!DOCTYPE html>" +
+                   "<html>" +
+                   "<head>" +
+                   "<meta charset=\"UTF-8\">" +
+                   "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">" +
+                   "<title>Email</title>" +
+                   "</head>" +
+                   "<body>" +
+                   header + body +
+                   "</body>" +
+                   "</html>";
         }
 
         private void KillWkhtmltopdfProcesses()
