@@ -218,7 +218,7 @@ namespace MsgToPdfConverter.Services
             if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^[A-Z0-9\-_]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase) && text.Length < 15)
                 return true;
                 
-            return false; // Default to attachment
+            return true; // Default to email if no file extension (most hierarchy items are emails)
         }
 
         private string AddFileExtension(string fileName, bool isEmail)
@@ -232,14 +232,10 @@ namespace MsgToPdfConverter.Services
                 return fileName;
             }
 
-            // If it's an email, add .msg extension only if it doesn't look like a complete subject
+            // If it's an email, add .msg extension
             if (isEmail)
             {
-                // For long subjects that look complete, keep them as-is
-                if (fileName.Length > 30 && (fileName.Contains("-") || fileName.Contains(":")))
-                    return fileName;
-                else
-                    return fileName + ".msg";
+                return fileName + ".msg";
             }
 
             // For attachments without extensions, try to guess based on content

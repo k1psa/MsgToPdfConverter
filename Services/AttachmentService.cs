@@ -96,7 +96,7 @@ namespace MsgToPdfConverter.Services
                 string treeHeader = TreeHeaderHelper.BuildTreeHeader(parentChain, currentItem);
                 
                 // Combine original header with tree structure
-                return $"{originalHeaderText}\n\nHierarchy:\n{treeHeader}";
+                return $"{originalHeaderText}\n\n{treeHeader}";
             }
             catch (Exception ex)
             {
@@ -371,7 +371,7 @@ namespace MsgToPdfConverter.Services
                     
                     // Create header PDF for the ZIP file itself
                     string zipHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_header.pdf");
-                    CreateHierarchyHeaderPdf(parentChain, currentItem, enhancedHeaderText + $"\n\nZIP Archive ({archive.Entries.Count} files):", zipHeaderPdf);
+                    CreateHierarchyHeaderPdf(parentChain, currentItem, enhancedHeaderText + $"\n\nZIP Archive Contents ({archive.Entries.Count} files):", zipHeaderPdf);
                     zipPdfFiles.Add(zipHeaderPdf);
                     allTempFiles.Add(zipHeaderPdf);
                     
