@@ -87,283 +87,54 @@ namespace MsgToPdfConverter
 
         private async void ConvertButton_Click(object sender, RoutedEventArgs e)
         {
-            Console.WriteLine("[DEBUG] Entered ConvertButton_Click");
             if (isConverting)
-            {
-                Console.WriteLine("[DEBUG] Conversion already in progress, ignoring click.");
                 return;
-            }
             isConverting = true;
-            convertButtonClickCount++;
-            Console.WriteLine($"[DEBUG] Convert button pressed {convertButtonClickCount} time(s)"); try
+            SetProcessingState(true);
+            ProgressBar.Minimum = 0;
+            ProgressBar.Maximum = selectedFiles.Count;
+            ProgressBar.Value = 0;
+            var conversionService = new ConversionService();
+            try
             {
-                Console.WriteLine("[DEBUG] Disabling UI and showing progress");
-                SetProcessingState(true);
-                ProgressBar.Minimum = 0;
-                ProgressBar.Maximum = selectedFiles.Count;
-                ProgressBar.Value = 0; int success = 0, fail = 0, processed = 0;
                 // Use the field instead of the removed checkbox
                 bool appendAttachments = AppendAttachmentsCheckBox.IsChecked == true;
-                // Use the field for extract original only
                 bool extractOriginalOnlyLocal = extractOriginalOnly;
-                Console.WriteLine($"[DEBUG] appendAttachments: {appendAttachments}");
-                await Task.Run(() =>
-                {
-                    Console.WriteLine("[DEBUG] Starting batch loop");
-                    for (int i = 0; i < selectedFiles.Count; i++)
-                    {
-                        if (cancellationRequested)
+                var result = await Task.Run(() =>
+                    conversionService.ConvertMsgFilesWithAttachments(
+                        selectedFiles,
+                        selectedOutputFolder,
+                        appendAttachments,
+                        extractOriginalOnlyLocal,
+                        deleteMsgAfterConversion,
+                        _emailService,
+                        _attachmentService,
+                        (processed, total, progress, statusText) =>
                         {
-                            Console.WriteLine("[DEBUG] Cancellation requested, breaking loop");
-                            break;
-                        }
-                        processed++;
-                        Console.WriteLine($"[DEBUG] Loop index: {i}");
-                        string msgFilePath = selectedFiles[i];
-                        Storage.Message msg = null;
-                        try
-                        {
-                            // Update status on UI thread
                             Dispatcher.Invoke(() =>
                             {
                                 ProcessingStatusLabel.Foreground = System.Windows.Media.Brushes.Blue;
-                                ProcessingStatusLabel.Text = $"Processing file {processed}/{selectedFiles.Count}: {Path.GetFileName(selectedFiles[i])}";
-                                // Progress bar will be updated when file is completed
+                                ProcessingStatusLabel.Text = statusText;
+                                ProgressBar.Value = processed;
                             });
-                            Console.WriteLine($"[TASK] Processing file {i + 1} of {selectedFiles.Count}: {selectedFiles[i]}");
-                            msg = new Storage.Message(msgFilePath);
-                            Console.WriteLine($"[TASK] Loaded MSG: {msgFilePath}");
-                            string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
-                            string baseName = Path.GetFileNameWithoutExtension(msgFilePath);
-                            string dir = !string.IsNullOrEmpty(selectedOutputFolder) ? selectedOutputFolder : Path.GetDirectoryName(msgFilePath);
-                            string pdfFilePath = Path.Combine(dir, $"{baseName} - {datePart}.pdf");
-                            if (File.Exists(pdfFilePath))
-                            {
-                                try { File.Delete(pdfFilePath); Console.WriteLine($"[DEBUG] Deleted old PDF: {pdfFilePath}"); } catch (Exception ex) { Console.WriteLine($"[DEBUG] Could not delete old PDF: {ex.Message}"); }
-                            }
-                            Console.WriteLine($"[TASK] Output PDF path: {pdfFilePath}");
-                            // Replace direct BuildEmailHtml call with service
-                            var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(msg, extractOriginalOnly);
-                            string htmlWithHeader = htmlResult.Html;
-                            List<string> tempInlineFiles = htmlResult.TempFiles;
-                            Console.WriteLine($"[TASK] Built HTML for: {msgFilePath}");
-                            Console.WriteLine($"[TASK] HTML length: {htmlWithHeader?.Length ?? 0}");                            // Write HTML to a temp file
-                            string tempHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
-                            File.WriteAllText(tempHtmlPath, htmlWithHeader, System.Text.Encoding.UTF8);
-                            Console.WriteLine($"[DEBUG] Written HTML to temp file: {tempHtmlPath}");
-                            // Find all inline ContentIds
-                            var inlineContentIds = _emailService.GetInlineContentIds(htmlWithHeader);
-                            // Launch a new process for each conversion
-                            var psi = new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
-                                Arguments = $"--html2pdf \"{tempHtmlPath}\" \"{pdfFilePath}\"",
-                                UseShellExecute = false,
-                                CreateNoWindow = true,
-                                RedirectStandardOutput = true,
-                                RedirectStandardError = true
-                            };
-                            Console.WriteLine($"[DEBUG] Starting HtmlToPdfWorker process: {psi.FileName} {psi.Arguments}");
-                            var proc = System.Diagnostics.Process.Start(psi);
-                            string stdOut = proc.StandardOutput.ReadToEnd();
-                            string stdErr = proc.StandardError.ReadToEnd();
-                            proc.WaitForExit();
-                            Console.WriteLine($"[DEBUG] HtmlToPdfWorker exit code: {proc.ExitCode}");
-                            if (proc.ExitCode != 0)
-                            {
-                                Console.WriteLine($"[DEBUG] HtmlToPdfWorker failed. StdOut: {stdOut} StdErr: {stdErr}");
-                                throw new Exception($"HtmlToPdfWorker failed: {stdErr}");
-                            }
-                            File.Delete(tempHtmlPath);
-                            Console.WriteLine($"[TASK] Email PDF created: {pdfFilePath}");
-                            GC.Collect();
-                            GC.WaitForPendingFinalizers(); if (appendAttachments && msg.Attachments != null && msg.Attachments.Count > 0)
-                            {
-                                Console.WriteLine($"[DEBUG] Processing attachments for {pdfFilePath}");
-                                Console.WriteLine($"[DEBUG] Total attachments found: {msg.Attachments.Count}"); var typedAttachments = new List<Storage.Attachment>();
-                                var nestedMessages = new List<Storage.Message>();
-
-                                foreach (var att in msg.Attachments)
-                                {
-                                    if (att is Storage.Attachment a)
-                                    {
-                                        Console.WriteLine($"[DEBUG] Examining attachment: {a.FileName} (IsInline: {a.IsInline}, ContentId: {a.ContentId})");
-
-                                        if ((a.IsInline == true) || (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '\"', '\'', ' '))))
-                                        {
-                                            Console.WriteLine($"[DEBUG] Skipping inline attachment: {a.FileName} (ContentId: {a.ContentId}, IsInline: {a.IsInline})");
-                                            continue;
-                                        }
-
-                                        Console.WriteLine($"[DEBUG] Adding to processing list: {a.FileName}");
-                                        typedAttachments.Add(a);
-                                    }
-                                    else if (att is Storage.Message nestedMsg)
-                                    {
-                                        Console.WriteLine($"[DEBUG] Found nested MSG: {nestedMsg.Subject ?? "No Subject"}");
-                                        Console.WriteLine($"[DEBUG] Adding nested MSG to processing list");
-                                        nestedMessages.Add(nestedMsg);
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine($"[DEBUG] Unknown attachment type: {att?.GetType().Name}");
-                                    }
-                                }
-                                Console.WriteLine($"[DEBUG] Attachments to process: {typedAttachments.Count}");
-                                Console.WriteLine($"[DEBUG] Nested MSG files to process: {nestedMessages.Count}");
-                                var allPdfFiles = new List<string> { pdfFilePath };
-                                var allTempFiles = new List<string>();
-                                string tempDir = Path.GetDirectoryName(pdfFilePath);
-
-                                // Process regular attachments using the hierarchy-aware method
-                                int totalAttachments = typedAttachments.Count;
-                                for (int attIndex = 0; attIndex < typedAttachments.Count; attIndex++)
-                                {
-                                    var att = typedAttachments[attIndex];
-                                    string attName = att.FileName ?? "attachment";
-                                    string attPath = Path.Combine(tempDir, attName);
-                                    string headerText = $"Attachment {attIndex + 1}/{totalAttachments} - {attName}";
-                                    try
-                                    {
-                                        File.WriteAllBytes(attPath, att.Data);
-                                        allTempFiles.Add(attPath);
-                                        
-                                        // Create parent chain for top-level attachments
-                                        var attachmentParentChain = new List<string> { msg.Subject ?? Path.GetFileName(msgFilePath) };
-                                        
-                                        string finalAttachmentPdf = _attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, attachmentParentChain, attName);
-
-                                        if (finalAttachmentPdf != null)
-                                            allPdfFiles.Add(finalAttachmentPdf);
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Console.WriteLine($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
-                                        string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                                        var errorParentChain = new List<string> { msg.Subject ?? Path.GetFileName(msgFilePath) };
-                                        string enhancedErrorText = MsgToPdfConverter.Utils.TreeHeaderHelper.BuildTreeHeader(errorParentChain, attName) + "\n\n" + headerText + $"\n(Error: {ex.Message})";
-                                        PdfService.AddHeaderPdf(errorPdf, enhancedErrorText);
-                                        allPdfFiles.Add(errorPdf);
-                                        allTempFiles.Add(errorPdf);
-                                    }
-                                }
-
-                                // Process nested MSG files recursively (including their attachments)
-                                Console.WriteLine($"[MSG] Processing {nestedMessages.Count} nested MSG files recursively");
-                                for (int nestedIndex = 0; nestedIndex < nestedMessages.Count; nestedIndex++)
-                                {
-                                    var nestedMsg = nestedMessages[nestedIndex];
-                                    string nestedSubject = nestedMsg.Subject ?? $"nested_msg_depth_1";
-                                    string nestedHeaderText = $"Attachment (Depth 1): {nestedIndex + 1}/{nestedMessages.Count} - Nested Email: {nestedSubject}";
-                                    // Create initial parent chain for root email
-                                    var initialParentChain = new List<string> { msg.Subject ?? Path.GetFileName(msgFilePath) };
-                                    // This will recursively process the nested MSG and all its attachments
-                                    _attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, 1, 5, nestedHeaderText, initialParentChain);
-                                }
-
-                                string mergedPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
-                                Console.WriteLine($"[DEBUG] Before PDF merge: {string.Join(", ", allPdfFiles)} -> {mergedPdf}");
-                                PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf); Console.WriteLine("[DEBUG] After PDF merge");
-                                GC.Collect();
-                                GC.WaitForPendingFinalizers();
-                                foreach (var f in allTempFiles)
-                                {
-                                    try
-                                    {
-                                        if (File.Exists(f) && !string.Equals(f, mergedPdf, StringComparison.OrdinalIgnoreCase) && !string.Equals(f, pdfFilePath, StringComparison.OrdinalIgnoreCase))
-                                        {
-                                            FileService.RobustDeleteFile(f);
-                                        }
-                                        else if (Directory.Exists(f))
-                                        {
-                                            try
-                                            {
-                                                Directory.Delete(f, true);
-                                                Console.WriteLine($"[CLEANUP] Deleted temp directory: {f}");
-                                            }
-                                            catch (Exception ex)
-                                            {
-                                                Console.WriteLine($"[CLEANUP] Failed to delete temp directory: {f} - {ex.Message}");
-                                            }
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        Console.WriteLine($"[CLEANUP] Unexpected error deleting temp file or directory: {f} - {ex.Message}");
-                                    }
-                                }
-                                Console.WriteLine("[DEBUG] Finished temp file deletion");
-
-                                if (File.Exists(mergedPdf))
-                                {
-                                    if (File.Exists(pdfFilePath))
-                                        File.Delete(pdfFilePath);
-                                    File.Move(mergedPdf, pdfFilePath);
-                                }
-                                Console.WriteLine($"Merged and replaced {pdfFilePath}");
-                            }
-                            success++;
-                            Console.WriteLine($"[DEBUG] Success count: {success}");
-                        }
-                        catch (Exception ex)
-                        {
-                            fail++;
-                            Console.WriteLine($"[ERROR] Failed to convert: {selectedFiles[i]}\nError: {ex}");
-                        }
-                        finally
-                        {
-                            if (msg != null && msg is IDisposable disposableMsg)
-                            {
-                                disposableMsg.Dispose();
-                                Console.WriteLine($"[DEBUG] Disposed Storage.Message for: {msgFilePath}");
-                            }
-                            msg = null;
-                            GC.Collect();
-                            GC.WaitForPendingFinalizers();
-                            // Delete .msg file after conversion if the checkbox is checked
-                            if (deleteMsgAfterConversion && File.Exists(msgFilePath))
-                            {
-                                try
-                                {
-                                    // Move to Recycle Bin instead of permanent delete
-                                    FileService.MoveFileToRecycleBin(msgFilePath);
-                                    Console.WriteLine($"[DELETE] Moved .msg file to Recycle Bin: {msgFilePath}");
-                                }
-                                catch (Exception ex)
-                                {
-                                    Console.WriteLine($"[DELETE] Could not move {msgFilePath} to Recycle Bin: {ex.Message}");
-                                }
-                            }
-                            Dispatcher.Invoke(() => ProgressBar.Value = i + 1);
-                            Console.WriteLine($"[DEBUG] Cleanup complete for file {i + 1}");
-                        }
-                    }
-                    Console.WriteLine($"[DEBUG] Batch loop finished. Success: {success}, Fail: {fail}, Processed: {processed}");
-                });
-
-                // Show final results
-                string statusMessage;
-                if (cancellationRequested)
-                {
-                    statusMessage = $"Processing cancelled. Processed {processed} files. Success: {success}, Failed: {fail}";
-                }
-                else
-                {
-                    statusMessage = $"Processing completed. Total files: {selectedFiles.Count}, Success: {success}, Failed: {fail}";
-                }
-
+                        },
+                        () => cancellationRequested,
+                        (msg) => Dispatcher.Invoke(() => MessageBox.Show(msg, "Processing Results", MessageBoxButton.OK, MessageBoxImage.Information))
+                    )
+                );
+                string statusMessage = result.Cancelled
+                    ? $"Processing cancelled. Processed {result.Processed} files. Success: {result.Success}, Failed: {result.Fail}"
+                    : $"Processing completed. Total files: {selectedFiles.Count}, Success: {result.Success}, Failed: {result.Fail}";
                 MessageBox.Show(statusMessage, "Processing Results", MessageBoxButton.OK,
-                    fail > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+                    result.Fail > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DEBUG] Exception in ConvertButton_Click outer: {ex}");
                 MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
                 SetProcessingState(false);
-                Console.WriteLine("[DEBUG] ConvertButton_Click finished");
             }
         }
 
