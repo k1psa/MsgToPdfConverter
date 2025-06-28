@@ -376,32 +376,71 @@ namespace MsgToPdfConverter.Services
                     allTempFiles.Add(zipHeaderPdf);
                     
                     int entryIndex = 0;
-                    int totalEntries = archive.Entries.Where(e => e.Length > 0).Count(); // Count non-directory entries
+                    int totalEntries = archive.Entries.Count; // Count all entries including directories
                     
                     foreach (var entry in archive.Entries)
                     {
-                        if (entry.Length == 0) continue; // Skip directories
-                        
                         entryIndex++;
-                        Console.WriteLine($"[ZIP] Processing entry {entryIndex}/{totalEntries}: {entry.Name}");
+                        Console.WriteLine($"[ZIP] Processing entry {entryIndex}/{totalEntries}: {entry.FullName}");
                         
-                        string entryPath = Path.Combine(tempDir, $"zip_{Guid.NewGuid()}_{entry.Name}");
+                        // Build comprehensive parent chain for ZIP entries including folder structure
+                        var zipEntryParentChain = new List<string>(parentChain);
+                        zipEntryParentChain.Add(currentItem);
+                        
+                        // For nested folder structures, add each folder level to the parent chain
+                        var pathParts = entry.FullName.Split('/', '\\');
+                        for (int i = 0; i < pathParts.Length - 1; i++) // Exclude the filename itself
+                        {
+                            if (!string.IsNullOrEmpty(pathParts[i]))
+                            {
+                                zipEntryParentChain.Add(pathParts[i] + "/");
+                            }
+                        }
+                        
+                        if (entry.Length == 0) 
+                        {
+                            // This is a directory - show it in hierarchy but don't process as file
+                            Console.WriteLine($"[ZIP] Found directory: {entry.FullName}");
+                            string folderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_folder.pdf");
+                            
+                            // For directories, use the directory name as the current item (not the full path)
+                            string dirName = entry.FullName.TrimEnd('/', '\\');
+                            string[] dirParts = dirName.Split('/', '\\');
+                            string currentDirName = dirParts.LastOrDefault() + "/";
+                            
+                            // Build parent chain without the current directory
+                            var dirParentChain = new List<string>(parentChain);
+                            dirParentChain.Add(currentItem);
+                            for (int i = 0; i < dirParts.Length - 1; i++)
+                            {
+                                if (!string.IsNullOrEmpty(dirParts[i]))
+                                {
+                                    dirParentChain.Add(dirParts[i] + "/");
+                                }
+                            }
+                            
+                            CreateHierarchyHeaderPdf(dirParentChain, currentDirName, $"Folder {entryIndex}/{totalEntries} - {currentDirName}", folderPdf);
+                            zipPdfFiles.Add(folderPdf);
+                            allTempFiles.Add(folderPdf);
+                            continue; 
+                        }
+                        
+                        string entryPath = Path.Combine(tempDir, $"zip_{Guid.NewGuid()}_{Path.GetFileName(entry.Name)}");
                         entry.ExtractToFile(entryPath, true);
                         allTempFiles.Add(entryPath);
                         
                         string entryExt = Path.GetExtension(entry.Name).ToLowerInvariant();
                         string entryPdf = null;
                         
-                        // Build parent chain for ZIP entries
-                        var zipEntryParentChain = new List<string>(parentChain);
-                        zipEntryParentChain.Add(currentItem);
+                        // Get the final filename for the current item in hierarchy
+                        string currentFileName = Path.GetFileName(entry.FullName);
                         
                         try
                         {
                             if (entryExt == ".pdf")
                             {
                                 string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_header.pdf");
-                                CreateHierarchyHeaderPdf(zipEntryParentChain, entry.Name, $"Attachment {entryIndex}/{totalEntries} - {entry.Name}", entryHeaderPdf);
+                                CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - {currentFileName}", entryHeaderPdf);
                                 entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
                                 _appendPdfs(new List<string> { entryHeaderPdf, entryPath }, entryPdf);
                                 allTempFiles.Add(entryHeaderPdf);
@@ -413,7 +452,7 @@ namespace MsgToPdfConverter.Services
                                 if (_tryConvertOfficeToPdf(entryPath, convertedPdf))
                                 {
                                     string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_header.pdf");
-                                    CreateHierarchyHeaderPdf(zipEntryParentChain, entry.Name, $"Attachment {entryIndex}/{totalEntries} - {entry.Name}", entryHeaderPdf);
+                                    CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - {currentFileName}", entryHeaderPdf);
                                     entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
                                     _appendPdfs(new List<string> { entryHeaderPdf, convertedPdf }, entryPdf);
                                     allTempFiles.Add(entryHeaderPdf);
@@ -423,7 +462,7 @@ namespace MsgToPdfConverter.Services
                                 else
                                 {
                                     entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_placeholder.pdf");
-                                    CreateHierarchyHeaderPdf(zipEntryParentChain, entry.Name, $"Attachment {entryIndex}/{totalEntries} - {entry.Name}\n(Conversion failed)", entryPdf);
+                                    CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - {currentFileName}\n(Conversion failed)", entryPdf);
                                     allTempFiles.Add(entryPdf);
                                 }
                             }
@@ -434,12 +473,12 @@ namespace MsgToPdfConverter.Services
                                 {
                                     using (var nestedMsg = new Storage.Message(entryPath))
                                     {
-                                        string nestedSubject = nestedMsg.Subject ?? entry.Name;
+                                        string nestedSubject = nestedMsg.Subject ?? currentFileName;
                                         string nestedHeaderText = $"Attachment {entryIndex}/{totalEntries} - Nested Email: {nestedSubject}";
                                         
                                         // Create header for nested MSG
                                         string nestedHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_nested_header.pdf");
-                                        CreateHierarchyHeaderPdf(zipEntryParentChain, entry.Name, nestedHeaderText, nestedHeaderPdf);
+                                        CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, nestedHeaderText, nestedHeaderPdf);
                                         allTempFiles.Add(nestedHeaderPdf);
                                         
                                         // Convert nested MSG to HTML and then PDF
@@ -481,7 +520,7 @@ namespace MsgToPdfConverter.Services
                                 {
                                     Console.WriteLine($"[ZIP] Failed to process nested MSG {entry.Name}: {msgEx.Message}");
                                     entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_msg_error.pdf");
-                                    CreateHierarchyHeaderPdf(zipEntryParentChain, entry.Name, $"Attachment {entryIndex}/{totalEntries} - MSG: {entry.Name}\n(Error: {msgEx.Message})", entryPdf);
+                                    CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - MSG: {currentFileName}\n(Error: {msgEx.Message})", entryPdf);
                                     allTempFiles.Add(entryPdf);
                                 }
                             }
@@ -489,7 +528,7 @@ namespace MsgToPdfConverter.Services
                             {
                                 // Create placeholder for other file types
                                 entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_placeholder.pdf");
-                                CreateHierarchyHeaderPdf(zipEntryParentChain, entry.Name, $"Attachment {entryIndex}/{totalEntries} - {entry.Name}\n(File type: {entryExt})", entryPdf);
+                                CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - {currentFileName}\n(File type: {entryExt})", entryPdf);
                                 allTempFiles.Add(entryPdf);
                             }
                             
@@ -500,7 +539,8 @@ namespace MsgToPdfConverter.Services
                         {
                             Console.WriteLine($"[ZIP] Error processing entry {entry.Name}: {entryEx.Message}");
                             entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_error.pdf");
-                            CreateHierarchyHeaderPdf(zipEntryParentChain, entry.Name, $"Attachment {entryIndex}/{totalEntries} - {entry.Name}\n(Error: {entryEx.Message})", entryPdf);
+                            string errorFileName = Path.GetFileName(entry.FullName);
+                            CreateHierarchyHeaderPdf(zipEntryParentChain, errorFileName, $"Attachment {entryIndex}/{totalEntries} - {errorFileName}\n(Error: {entryEx.Message})", entryPdf);
                             zipPdfFiles.Add(entryPdf);
                             allTempFiles.Add(entryPdf);
                         }

@@ -31,10 +31,16 @@ namespace MsgToPdfConverter.Services
                 {
                     string item = hierarchyChain[i];
                     bool isEmail;
+                    bool isFolder = item.EndsWith("/") || item.EndsWith("\\");
                     
-                    if (i < hierarchyChain.Count - 1)
+                    if (isFolder)
                     {
-                        // All items except the last are definitely emails
+                        // Folders should not get email extensions
+                        isEmail = false;
+                    }
+                    else if (i < hierarchyChain.Count - 1)
+                    {
+                        // All non-folder items except the last are likely emails
                         isEmail = true;
                     }
                     else
@@ -43,7 +49,7 @@ namespace MsgToPdfConverter.Services
                         isEmail = IsLikelyEmailSubject(item);
                     }
                     
-                    string processedItem = AddFileExtension(item, isEmail);
+                    string processedItem = AddFileExtension(item, isEmail, isFolder);
                     processedChain.Add(processedItem);
                     
                     // Check if this item matches the current attachment we should highlight
@@ -221,10 +227,17 @@ namespace MsgToPdfConverter.Services
             return true; // Default to email if no file extension (most hierarchy items are emails)
         }
 
-        private string AddFileExtension(string fileName, bool isEmail)
+        private string AddFileExtension(string fileName, bool isEmail, bool isFolder = false)
         {
             if (string.IsNullOrEmpty(fileName))
                 return "Unknown";
+
+            // If it's a folder, keep the folder indicator
+            if (isFolder)
+            {
+                // Remove trailing slashes and add proper folder indicator
+                return fileName.TrimEnd('/', '\\') + "/";
+            }
 
             // If it already has an extension, keep it as-is
             if (Path.HasExtension(fileName))
