@@ -23,21 +23,27 @@ namespace MsgToPdfConverter.Services
                 if (hierarchyChain == null || hierarchyChain.Count == 0)
                     return null;
 
-                // Add proper file extensions - all emails should have .msg
+                // The hierarchyChain already includes the currentAttachment as the last item
+                // All items except the last are emails (.msg), but we need to check if the last item
+                // is actually also an email (nested message) or a real attachment
                 var processedChain = new List<string>();
                 for (int i = 0; i < hierarchyChain.Count; i++)
                 {
                     string item = hierarchyChain[i];
-                    // For the chain, all items except the last are emails (.msg)
-                    // The last item is the current attachment
+                    bool isEmail;
+                    
                     if (i < hierarchyChain.Count - 1)
                     {
-                        processedChain.Add(AddFileExtension(item, true)); // Email
+                        // All items except the last are definitely emails
+                        isEmail = true;
                     }
                     else
                     {
-                        processedChain.Add(AddFileExtension(item, false)); // Attachment
+                        // For the last item, check if it looks like an email subject
+                        isEmail = IsLikelyEmailSubject(item);
                     }
+                    
+                    processedChain.Add(AddFileExtension(item, isEmail));
                 }
 
                 // Calculate box widths based on text content
@@ -167,6 +173,36 @@ namespace MsgToPdfConverter.Services
             }
         }
 
+        private bool IsLikelyEmailSubject(string text)
+        {
+            if (string.IsNullOrEmpty(text))
+                return false;
+
+            string lowerText = text.ToLower();
+            
+            // Check for common email subject patterns
+            if (lowerText.StartsWith("re:") || lowerText.StartsWith("fw:") || lowerText.StartsWith("fwd:"))
+                return true;
+                
+            // Check for common email-related words
+            if (lowerText.Contains("request") || lowerText.Contains("approval") || 
+                lowerText.Contains("meeting") || lowerText.Contains("notification") ||
+                lowerText.Contains("response") || lowerText.Contains("inquiry") ||
+                lowerText.Contains("follow") || lowerText.Contains("update"))
+                return true;
+                
+            // Check if it contains typical email subject indicators (colons, dashes in business context)
+            if ((lowerText.Contains(" - ") || lowerText.Contains(": ")) && 
+                (lowerText.Length > 20)) // Longer subjects are more likely emails
+                return true;
+                
+            // If it has a file extension, it's probably a real attachment
+            if (Path.HasExtension(text))
+                return false;
+                
+            return false; // Default to attachment
+        }
+
         private string AddFileExtension(string fileName, bool isEmail)
         {
             if (string.IsNullOrEmpty(fileName))
@@ -182,23 +218,48 @@ namespace MsgToPdfConverter.Services
                 return nameWithoutExt + ".msg";
             }
 
-            // For attachments, ensure they have an extension
+            // For attachments, ensure they have an appropriate extension
             if (!Path.HasExtension(fileName))
             {
-                // Try to guess extension based on name patterns
+                // Try to guess extension based on name patterns or content hints
                 string lowerName = fileName.ToLower();
-                if (lowerName.Contains("word") || lowerName.Contains("doc"))
+                
+                // Check for common document types
+                if (lowerName.Contains("word") || lowerName.Contains("doc") || lowerName.EndsWith("docx"))
                     return fileName + ".docx";
-                else if (lowerName.Contains("excel") || lowerName.Contains("sheet"))
+                else if (lowerName.Contains("excel") || lowerName.Contains("sheet") || lowerName.Contains("xls"))
                     return fileName + ".xlsx";
+                else if (lowerName.Contains("powerpoint") || lowerName.Contains("ppt"))
+                    return fileName + ".pptx";
                 else if (lowerName.Contains("pdf"))
                     return fileName + ".pdf";
-                else if (lowerName.Contains("zip") || lowerName.Contains("archive"))
+                    
+                // Check for archive/compression
+                else if (lowerName.Contains("zip") || lowerName.Contains("archive") || lowerName.Contains("rar"))
                     return fileName + ".zip";
-                else if (lowerName.Contains("image") || lowerName.Contains("picture"))
+                    
+                // Check for images
+                else if (lowerName.Contains("image") || lowerName.Contains("picture") || lowerName.Contains("photo"))
                     return fileName + ".png";
+                    
+                // Check for text files
+                else if (lowerName.Contains("text") || lowerName.Contains("note"))
+                    return fileName + ".txt";
+                    
+                // Check for data/email files by common patterns
+                else if (lowerName.Contains("data") || lowerName.Contains("export") || lowerName.Contains("backup"))
+                    return fileName + ".dat";
+                    
+                // Check for email-like patterns (RE:, FW:, etc.)
+                else if (lowerName.StartsWith("re:") || lowerName.StartsWith("fw:") || lowerName.StartsWith("fwd:") || 
+                         lowerName.Contains("request") || lowerName.Contains("approval") || lowerName.Contains("email"))
+                    return fileName + ".msg";
+                    
+                // If it looks like a filename with numbers/letters pattern, it might be an email
+                else if (System.Text.RegularExpressions.Regex.IsMatch(fileName, @"^[A-Z0-9]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                    return fileName + ".msg"; // Likely an email identifier
                 else
-                    return fileName + ".file"; // Generic extension
+                    return fileName + ".file"; // Generic fallback
             }
 
             return fileName; // Already has extension
