@@ -323,6 +323,10 @@ namespace MsgToPdfConverter.Services
             if (string.IsNullOrEmpty(text))
                 return false;
 
+            // If it already has a file extension, it's definitely an attachment
+            if (Path.HasExtension(text))
+                return false;
+                
             string lowerText = text.ToLower();
             
             // Check for common email subject patterns
@@ -341,9 +345,9 @@ namespace MsgToPdfConverter.Services
                 (lowerText.Length > 20)) // Longer subjects are more likely emails
                 return true;
                 
-            // If it has a file extension, it's probably a real attachment
-            if (Path.HasExtension(text))
-                return false;
+            // If it looks like a short code or identifier, it might be an email
+            if (System.Text.RegularExpressions.Regex.IsMatch(text, @"^[A-Z0-9\-_]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase) && text.Length < 15)
+                return true;
                 
             return false; // Default to attachment
         }
@@ -359,10 +363,14 @@ namespace MsgToPdfConverter.Services
                 return fileName;
             }
 
-            // If it's an email, add .msg extension
+            // If it's an email, add .msg extension only if it doesn't look like a complete subject
             if (isEmail)
             {
-                return fileName + ".msg";
+                // For long subjects that look complete, keep them as-is
+                if (fileName.Length > 30 && (fileName.Contains("-") || fileName.Contains(":")))
+                    return fileName;
+                else
+                    return fileName + ".msg";
             }
 
             // For attachments without extensions, try to guess based on content
