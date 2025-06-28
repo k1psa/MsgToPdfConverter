@@ -23,10 +23,10 @@ namespace MsgToPdfConverter.Services
                 if (hierarchyChain == null || hierarchyChain.Count == 0)
                     return null;
 
-                // The hierarchyChain already includes the currentAttachment as the last item
-                // All items except the last are emails (.msg), but we need to check if the last item
-                // is actually also an email (nested message) or a real attachment
+                // Process the complete hierarchy chain to determine file types and extensions
                 var processedChain = new List<string>();
+                int currentIndex = -1; // Track which item should be highlighted
+                
                 for (int i = 0; i < hierarchyChain.Count; i++)
                 {
                     string item = hierarchyChain[i];
@@ -43,7 +43,21 @@ namespace MsgToPdfConverter.Services
                         isEmail = IsLikelyEmailSubject(item);
                     }
                     
-                    processedChain.Add(AddFileExtension(item, isEmail));
+                    string processedItem = AddFileExtension(item, isEmail);
+                    processedChain.Add(processedItem);
+                    
+                    // Check if this item matches the current attachment we should highlight
+                    if (string.Equals(item, currentAttachment, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(processedItem, currentAttachment, StringComparison.OrdinalIgnoreCase))
+                    {
+                        currentIndex = i;
+                    }
+                }
+                
+                // If we couldn't find a match, highlight the last item as fallback
+                if (currentIndex == -1)
+                {
+                    currentIndex = processedChain.Count - 1;
                 }
 
                 // Calculate box widths based on text content
@@ -102,7 +116,7 @@ namespace MsgToPdfConverter.Services
                         for (int i = 0; i < processedChain.Count; i++)
                         {
                             string item = processedChain[i];
-                            bool isCurrent = i == processedChain.Count - 1; // Last item is current
+                            bool isCurrent = i == currentIndex; // Highlight the item that matches currentAttachment
                             int boxWidth = boxWidths[i];
                             
                             // Center the box horizontally
@@ -208,61 +222,38 @@ namespace MsgToPdfConverter.Services
             if (string.IsNullOrEmpty(fileName))
                 return "Unknown";
 
-            // If it's an email, always add .msg extension
+            // If it already has an extension, keep it as-is
+            if (Path.HasExtension(fileName))
+            {
+                return fileName;
+            }
+
+            // If it's an email, add .msg extension
             if (isEmail)
             {
-                // Remove any existing extension and add .msg
-                string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-                if (string.IsNullOrEmpty(nameWithoutExt))
-                    nameWithoutExt = fileName;
-                return nameWithoutExt + ".msg";
+                return fileName + ".msg";
             }
 
-            // For attachments, ensure they have an appropriate extension
-            if (!Path.HasExtension(fileName))
-            {
-                // Try to guess extension based on name patterns or content hints
-                string lowerName = fileName.ToLower();
-                
-                // Check for common document types
-                if (lowerName.Contains("word") || lowerName.Contains("doc") || lowerName.EndsWith("docx"))
-                    return fileName + ".docx";
-                else if (lowerName.Contains("excel") || lowerName.Contains("sheet") || lowerName.Contains("xls"))
-                    return fileName + ".xlsx";
-                else if (lowerName.Contains("powerpoint") || lowerName.Contains("ppt"))
-                    return fileName + ".pptx";
-                else if (lowerName.Contains("pdf"))
-                    return fileName + ".pdf";
-                    
-                // Check for archive/compression
-                else if (lowerName.Contains("zip") || lowerName.Contains("archive") || lowerName.Contains("rar"))
-                    return fileName + ".zip";
-                    
-                // Check for images
-                else if (lowerName.Contains("image") || lowerName.Contains("picture") || lowerName.Contains("photo"))
-                    return fileName + ".png";
-                    
-                // Check for text files
-                else if (lowerName.Contains("text") || lowerName.Contains("note"))
-                    return fileName + ".txt";
-                    
-                // Check for data/email files by common patterns
-                else if (lowerName.Contains("data") || lowerName.Contains("export") || lowerName.Contains("backup"))
-                    return fileName + ".dat";
-                    
-                // Check for email-like patterns (RE:, FW:, etc.)
-                else if (lowerName.StartsWith("re:") || lowerName.StartsWith("fw:") || lowerName.StartsWith("fwd:") || 
-                         lowerName.Contains("request") || lowerName.Contains("approval") || lowerName.Contains("email"))
-                    return fileName + ".msg";
-                    
-                // If it looks like a filename with numbers/letters pattern, it might be an email
-                else if (System.Text.RegularExpressions.Regex.IsMatch(fileName, @"^[A-Z0-9]+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
-                    return fileName + ".msg"; // Likely an email identifier
-                else
-                    return fileName + ".file"; // Generic fallback
-            }
-
-            return fileName; // Already has extension
+            // For attachments without extensions, try to guess based on content
+            string lowerName = fileName.ToLower();
+            
+            // Check for common document types
+            if (lowerName.Contains("word") || lowerName.Contains("doc"))
+                return fileName + ".docx";
+            else if (lowerName.Contains("excel") || lowerName.Contains("sheet") || lowerName.Contains("xls"))
+                return fileName + ".xlsx";
+            else if (lowerName.Contains("powerpoint") || lowerName.Contains("ppt"))
+                return fileName + ".pptx";
+            else if (lowerName.Contains("pdf"))
+                return fileName + ".pdf";
+            else if (lowerName.Contains("zip") || lowerName.Contains("archive"))
+                return fileName + ".zip";
+            else if (lowerName.Contains("image") || lowerName.Contains("picture") || lowerName.Contains("photo"))
+                return fileName + ".png";
+            else if (lowerName.Contains("text") || lowerName.Contains("note"))
+                return fileName + ".txt";
+            else
+                return fileName + ".file"; // Generic fallback
         }
     }
 }
