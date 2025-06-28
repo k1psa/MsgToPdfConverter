@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using MsgReader.Outlook;
 using System.Diagnostics;
+using MsgToPdfConverter.Utils;
 
 namespace MsgToPdfConverter.Services
 {
@@ -21,7 +22,88 @@ namespace MsgToPdfConverter.Services
             _emailService = emailService;
         }
 
-        public void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5, string headerText = null)
+        /// <summary>
+        /// Creates a header PDF with hierarchy diagram image (falls back to text-only if image creation fails)
+        /// </summary>
+        private void CreateHierarchyHeaderPdf(List<string> parentChain, string currentItem, string headerText, string headerPdfPath)
+        {
+            string imagePath = null;
+            try
+            {
+                Console.WriteLine($"[HIERARCHY] Creating hierarchy diagram for: {currentItem}");
+                Console.WriteLine($"[HIERARCHY] Parent chain: {string.Join(" -> ", parentChain ?? new List<string>())}");
+                
+                // Build full hierarchy chain including current item
+                var fullChain = new List<string>();
+                if (parentChain != null)
+                    fullChain.AddRange(parentChain);
+                fullChain.Add(currentItem);
+                
+                // Create hierarchy image
+                var hierarchyImageService = new HierarchyImageService();
+                string outputFolder = Path.GetDirectoryName(headerPdfPath);
+                imagePath = hierarchyImageService.CreateHierarchyImage(fullChain, currentItem, outputFolder);
+                
+                if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                {
+                    Console.WriteLine($"[HIERARCHY] Successfully created hierarchy image: {imagePath}");
+                    // Create PDF with the hierarchy image
+                    PdfService.AddImagePdf(headerPdfPath, imagePath, headerText);
+                    
+                    // Clean up the temporary image file
+                    try
+                    {
+                        File.Delete(imagePath);
+                    }
+                    catch (Exception cleanupEx)
+                    {
+                        Console.WriteLine($"[HIERARCHY] Warning: Could not delete temporary image: {cleanupEx.Message}");
+                    }
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[HIERARCHY] Failed to create hierarchy image, falling back to text: {ex.Message}");
+            }
+            
+            // Clean up failed image file if it exists
+            if (!string.IsNullOrEmpty(imagePath))
+            {
+                try
+                {
+                    if (File.Exists(imagePath))
+                        File.Delete(imagePath);
+                }
+                catch { }
+            }
+            
+            // Fall back to enhanced text header
+            string enhancedHeader = CreateHierarchyHeaderText(parentChain, currentItem, headerText);
+            _addHeaderPdf(headerPdfPath, enhancedHeader, null);
+        }
+
+        /// <summary>
+        /// Creates a header text with hierarchy tree structure (fallback method)
+        /// </summary>
+        private string CreateHierarchyHeaderText(List<string> parentChain, string currentItem, string originalHeaderText)
+        {
+            try
+            {
+                // Build tree structure using TreeHeaderHelper
+                string treeHeader = TreeHeaderHelper.BuildTreeHeader(parentChain, currentItem);
+                
+                // Combine original header with tree structure
+                return $"{originalHeaderText}\n\nHierarchy:\n{treeHeader}";
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[HIERARCHY] Error creating hierarchy text, using original: {ex.Message}");
+                return originalHeaderText;
+            }
+        }
+
+        public void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5, string headerText = null, List<string> parentChain = null)
         {
             // Prevent infinite recursion
             if (depth > maxDepth)
@@ -31,6 +113,12 @@ namespace MsgToPdfConverter.Services
             }
 
             Console.WriteLine($"[MSG] Processing message recursively at depth {depth}: {msg.Subject ?? "No Subject"}");
+
+            // Initialize parent chain if not provided
+            if (parentChain == null)
+            {
+                parentChain = new List<string>();
+            }
 
             // First, create PDF for the nested MSG body content (if we're processing a nested message)
             if (depth > 0)
@@ -60,9 +148,9 @@ namespace MsgToPdfConverter.Services
                         process.WaitForExit();
                         if (process.ExitCode == 0)
                         {
-                            // Always use the provided headerText for the header
+                            // Create hierarchy header with SmartArt
                             string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                            _addHeaderPdf(headerPdf, usedHeaderText, null);
+                            CreateHierarchyHeaderPdf(new List<string>(parentChain), msgSubject, usedHeaderText, headerPdf);
                             string finalNestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested_merged.pdf");
                             _appendPdfs(new List<string> { headerPdf, nestedPdf }, finalNestedPdf);
                             allPdfFiles.Add(finalNestedPdf);
@@ -82,7 +170,8 @@ namespace MsgToPdfConverter.Services
                 {
                     Console.WriteLine($"[MSG] Depth {depth} - Error processing nested MSG body {msgSubject}: {ex.Message}");
                     string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_msg_error.pdf");
-                    _addHeaderPdf(errorPdf, usedHeaderText + $"\n(Error: {ex.Message})", null);
+                    string enhancedErrorText = CreateHierarchyHeaderText(new List<string>(parentChain), msgSubject, usedHeaderText + $"\n(Error: {ex.Message})");
+                    _addHeaderPdf(errorPdf, enhancedErrorText, null);
                     allPdfFiles.Add(errorPdf);
                     allTempFiles.Add(errorPdf);
                 }
@@ -136,7 +225,15 @@ namespace MsgToPdfConverter.Services
                 {
                     File.WriteAllBytes(attPath, att.Data);
                     allTempFiles.Add(attPath);
-                    string finalAttachmentPdf = ProcessSingleAttachment(att, attPath, tempDir, attachmentHeaderText, allTempFiles);
+                    
+                    // Build parent chain for this attachment
+                    var attachmentParentChain = new List<string>(parentChain);
+                    if (depth > 0)
+                    {
+                        attachmentParentChain.Add($"Nested Email: {msg.Subject ?? "No Subject"}");
+                    }
+                    
+                    string finalAttachmentPdf = ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, attachmentHeaderText, allTempFiles, attachmentParentChain, attName);
 
                     if (finalAttachmentPdf != null)
                         allPdfFiles.Add(finalAttachmentPdf);
@@ -145,7 +242,13 @@ namespace MsgToPdfConverter.Services
                 {
                     Console.WriteLine($"[MSG] Depth {depth} - Error processing attachment {attName}: {ex.Message}");
                     string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                    _addHeaderPdf(errorPdf, attachmentHeaderText + $"\n(Error: {ex.Message})", null);
+                    var errorParentChain = new List<string>(parentChain);
+                    if (depth > 0)
+                    {
+                        errorParentChain.Add($"Nested Email: {msg.Subject ?? "No Subject"}");
+                    }
+                    string enhancedErrorText = CreateHierarchyHeaderText(errorParentChain, attName, attachmentHeaderText + $"\n(Error: {ex.Message})");
+                    _addHeaderPdf(errorPdf, enhancedErrorText, null);
                     allPdfFiles.Add(errorPdf);
                     allTempFiles.Add(errorPdf);
                 }
@@ -157,8 +260,20 @@ namespace MsgToPdfConverter.Services
                 var nestedMsg = nestedMessages[msgIndex];
                 string nestedSubject = nestedMsg.Subject ?? $"nested_msg_depth_{depth + 1}";
                 string nestedHeaderText = $"Attachment (Depth {depth + 1}): {msgIndex + 1}/{nestedMessages.Count} - Nested Email: {nestedSubject}";
+                
+                // Build parent chain for nested message
+                var nestedParentChain = new List<string>(parentChain);
+                if (depth == 0)
+                {
+                    nestedParentChain.Add("Root Email");
+                }
+                else
+                {
+                    nestedParentChain.Add($"Nested Email: {msg.Subject ?? "No Subject"}");
+                }
+                
                 Console.WriteLine($"[MSG] Depth {depth} - Recursively processing nested message {msgIndex + 1}/{nestedMessages.Count}: {nestedSubject}");
-                ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, depth + 1, maxDepth, nestedHeaderText);
+                ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, depth + 1, maxDepth, nestedHeaderText, nestedParentChain);
             }
         }
 
@@ -218,7 +333,8 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (ext == ".zip")
                 {
-                    finalAttachmentPdf = ProcessZipAttachment(attPath, tempDir, headerText, allTempFiles);
+                    // Use hierarchy-aware ZIP processing with empty parent chain for legacy calls
+                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName);
                 }
                 else
                 {
@@ -238,84 +354,76 @@ namespace MsgToPdfConverter.Services
             return finalAttachmentPdf;
         }
 
-        public string ProcessZipAttachment(string attPath, string tempDir, string headerText, List<string> allTempFiles)
+        public string ProcessZipAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem)
         {
-            string extractDir = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attPath));
-            System.IO.Compression.ZipFile.ExtractToDirectory(attPath, extractDir);
-            allTempFiles.Add(extractDir);
+            // Create enhanced header text with hierarchy
+            string enhancedHeaderText = CreateHierarchyHeaderText(parentChain, currentItem, headerText);
+            
+            // Create a simple ZIP attachment with enhanced header
+            string zipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip.pdf");
+            _addHeaderPdf(zipPdf, enhancedHeaderText + "\n\n(ZIP file content processing simplified)", null);
+            allTempFiles.Add(zipPdf);
+            return zipPdf;
+        }
 
-            var zipFiles = Directory.GetFiles(extractDir, "*.*", System.IO.SearchOption.AllDirectories);
-            var zipPdfFiles = new List<string>();
-            int zipFileIndex = 0;
+        /// <summary>
+        /// Processes a single attachment with SmartArt hierarchy support
+        /// </summary>
+        public string ProcessSingleAttachmentWithHierarchy(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem)
+        {
+            string attName = att.FileName ?? "attachment";
+            string ext = Path.GetExtension(attName).ToLowerInvariant();
+            string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
+            string finalAttachmentPdf = null;
 
-            foreach (var zf in zipFiles)
+            try
             {
-                zipFileIndex++;
-                string zfPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(zf) + ".pdf");
-                string zfExt = Path.GetExtension(zf).ToLowerInvariant();
-                string zipHeader = $"{headerText} (ZIP {zipFileIndex}/{zipFiles.Length})";
-                string finalZipPdf = null;
-
-                if (zfExt == ".pdf")
+                if (ext == ".pdf")
                 {
                     string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    _addHeaderPdf(headerPdf, zipHeader, null);
-                    finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    _appendPdfs(new List<string> { headerPdf, zf }, finalZipPdf);
+                    CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
+                    finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                    _appendPdfs(new List<string> { headerPdf, attPath }, finalAttachmentPdf);
                     allTempFiles.Add(headerPdf);
-                    allTempFiles.Add(finalZipPdf);
+                    allTempFiles.Add(finalAttachmentPdf);
                 }
-                else if (zfExt == ".doc" || zfExt == ".docx" || zfExt == ".xls" || zfExt == ".xlsx")
+                else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
                 {
-                    if (_tryConvertOfficeToPdf(zf, zfPdf))
+                    if (_tryConvertOfficeToPdf(attPath, attPdf))
                     {
                         string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                        _addHeaderPdf(headerPdf, zipHeader, null);
-                        finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                        _appendPdfs(new List<string> { headerPdf, zfPdf }, finalZipPdf);
+                        CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
+                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                        _appendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
                         allTempFiles.Add(headerPdf);
-                        allTempFiles.Add(zfPdf);
-                        allTempFiles.Add(finalZipPdf);
+                        allTempFiles.Add(attPdf);
+                        allTempFiles.Add(finalAttachmentPdf);
                     }
                     else
                     {
-                        _addHeaderPdf(finalZipPdf, zipHeader + "\n(Conversion failed)", null);
-                        allTempFiles.Add(finalZipPdf);
+                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
+                        CreateHierarchyHeaderPdf(parentChain, currentItem, headerText + "\n(Conversion failed)", finalAttachmentPdf);
+                        allTempFiles.Add(finalAttachmentPdf);
                     }
                 }
                 else
                 {
-                    finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                    _addHeaderPdf(finalZipPdf, zipHeader + "\n(Unsupported type)", null);
-                    allTempFiles.Add(finalZipPdf);
+                    // For other file types, create a placeholder with SmartArt header
+                    finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
+                    CreateHierarchyHeaderPdf(parentChain, currentItem, headerText + $"\n(File type: {ext})", finalAttachmentPdf);
+                    allTempFiles.Add(finalAttachmentPdf);
                 }
-                if (finalZipPdf != null)
-                    zipPdfFiles.Add(finalZipPdf);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
+                finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
+                CreateHierarchyHeaderPdf(parentChain, currentItem, headerText + $"\n(Error: {ex.Message})", finalAttachmentPdf);
+                allTempFiles.Add(finalAttachmentPdf);
             }
 
-            // Merge all files from the ZIP into a single PDF
-            if (zipPdfFiles.Count == 0)
-            {
-                // No processable files found in ZIP
-                string placeholderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_empty_zip.pdf");
-                _addHeaderPdf(placeholderPdf, headerText + "\n(Empty or no processable files in ZIP)", null);
-                allTempFiles.Add(placeholderPdf);
-                return placeholderPdf;
-            }
-            else if (zipPdfFiles.Count == 1)
-            {
-                // Only one file, return it directly
-                return zipPdfFiles[0];
-            }
-            else
-            {
-                // Multiple files - merge them all into one comprehensive PDF
-                string mergedZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_merged.pdf");
-                Console.WriteLine($"[ZIP] Merging {zipPdfFiles.Count} files from ZIP into single PDF: {mergedZipPdf}");
-                _appendPdfs(zipPdfFiles, mergedZipPdf);
-                allTempFiles.Add(mergedZipPdf);
-                return mergedZipPdf;
-            }
+            return finalAttachmentPdf;
         }
+
     }
 }

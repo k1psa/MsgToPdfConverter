@@ -93,5 +93,47 @@ namespace MsgToPdfConverter.Services
                 }
             }
         }
+
+        public static void AddImagePdf(string pdfPath, string imagePath, string headerText = null)
+        {
+            try
+            {
+                using (var writer = new iText.Kernel.Pdf.PdfWriter(pdfPath))
+                using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
+                using (var doc = new iText.Layout.Document(pdf))
+                {
+                    // Add header text if provided
+                    if (!string.IsNullOrEmpty(headerText))
+                    {
+                        var header = new iText.Layout.Element.Paragraph(headerText)
+                            .SetTextAlignment(iText.Layout.Properties.TextAlignment.CENTER)
+                            .SetFontSize(16)
+                            .SetBold()
+                            .SetMarginBottom(20);
+                        doc.Add(header);
+                    }
+
+                    // Add image if it exists
+                    if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
+                    {
+                        var imageData = iText.IO.Image.ImageDataFactory.Create(imagePath);
+                        var image = new iText.Layout.Element.Image(imageData);
+                        
+                        // Center the image and scale it appropriately
+                        image.SetHorizontalAlignment(iText.Layout.Properties.HorizontalAlignment.CENTER);
+                        image.SetMaxWidth(doc.GetPdfDocument().GetDefaultPageSize().GetWidth() - 80);
+                        image.SetMaxHeight(200); // Limit height to keep it compact
+                        
+                        doc.Add(image);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error creating image PDF: {ex.Message}");
+                // Fallback to text-only PDF
+                AddHeaderPdf(pdfPath, headerText ?? "Attachment Hierarchy");
+            }
+        }
     }
 }

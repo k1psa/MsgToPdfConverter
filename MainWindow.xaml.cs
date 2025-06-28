@@ -215,7 +215,7 @@ namespace MsgToPdfConverter
                                 var allTempFiles = new List<string>();
                                 string tempDir = Path.GetDirectoryName(pdfFilePath);
 
-                                // Process regular attachments using the new helper method
+                                // Process regular attachments using the hierarchy-aware method
                                 int totalAttachments = typedAttachments.Count;
                                 for (int attIndex = 0; attIndex < typedAttachments.Count; attIndex++)
                                 {
@@ -227,7 +227,11 @@ namespace MsgToPdfConverter
                                     {
                                         File.WriteAllBytes(attPath, att.Data);
                                         allTempFiles.Add(attPath);
-                                        string finalAttachmentPdf = _attachmentService.ProcessSingleAttachment(att, attPath, tempDir, headerText, allTempFiles);
+                                        
+                                        // Create parent chain for top-level attachments
+                                        var attachmentParentChain = new List<string> { msg.Subject ?? Path.GetFileName(msgFilePath) };
+                                        
+                                        string finalAttachmentPdf = _attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, attachmentParentChain, attName);
 
                                         if (finalAttachmentPdf != null)
                                             allPdfFiles.Add(finalAttachmentPdf);
@@ -236,7 +240,9 @@ namespace MsgToPdfConverter
                                     {
                                         Console.WriteLine($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
                                         string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                                        PdfService.AddHeaderPdf(errorPdf, headerText + $"\n(Error: {ex.Message})");
+                                        var errorParentChain = new List<string> { msg.Subject ?? Path.GetFileName(msgFilePath) };
+                                        string enhancedErrorText = MsgToPdfConverter.Utils.TreeHeaderHelper.BuildTreeHeader(errorParentChain, attName) + "\n\n" + headerText + $"\n(Error: {ex.Message})";
+                                        PdfService.AddHeaderPdf(errorPdf, enhancedErrorText);
                                         allPdfFiles.Add(errorPdf);
                                         allTempFiles.Add(errorPdf);
                                     }
@@ -249,8 +255,10 @@ namespace MsgToPdfConverter
                                     var nestedMsg = nestedMessages[nestedIndex];
                                     string nestedSubject = nestedMsg.Subject ?? $"nested_msg_depth_1";
                                     string nestedHeaderText = $"Attachment (Depth 1): {nestedIndex + 1}/{nestedMessages.Count} - Nested Email: {nestedSubject}";
+                                    // Create initial parent chain for root email
+                                    var initialParentChain = new List<string> { msg.Subject ?? Path.GetFileName(msgFilePath) };
                                     // This will recursively process the nested MSG and all its attachments
-                                    _attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, 1, 5, nestedHeaderText);
+                                    _attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, 1, 5, nestedHeaderText, initialParentChain);
                                 }
 
                                 string mergedPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
