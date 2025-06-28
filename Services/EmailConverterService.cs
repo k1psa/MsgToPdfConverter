@@ -207,6 +207,14 @@ namespace MsgToPdfConverter.Services
             if (string.IsNullOrEmpty(emailBody))
                 return emailBody;
 
+            // Special case: Outlook/Word HTML reply block
+            var specialMarker = "<div id=\"mail-editor-reference-message-container\"";
+            int specialIdx = emailBody.IndexOf(specialMarker, StringComparison.OrdinalIgnoreCase);
+            if (specialIdx > 0)
+            {
+                return emailBody.Substring(0, specialIdx).Trim();
+            }
+
             var replyIndicators = new[]
             {
                 @"-----Original Message-----",
