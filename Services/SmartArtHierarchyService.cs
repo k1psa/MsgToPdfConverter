@@ -32,23 +32,35 @@ namespace MsgToPdfConverter.Services
                 // Calculate positions for hierarchical tree layout
                 float startX = 50;
                 float startY = 50;
-                float boxWidth = 140;
-                float boxHeight = 40;
-                float verticalSpacing = 60;
-                float horizontalSpacing = 160;
+                float boxWidth = 250; // Much wider for longer text
+                float boxHeight = 60; // Taller for better readability
+                float verticalSpacing = 80;
+                float horizontalSpacing = 280; // More spacing between boxes
                 
                 // Build complete hierarchy structure
                 var allItems = new List<string>();
-                if (parentChain != null) allItems.AddRange(parentChain);
-                allItems.Add(currentItem);
+                if (parentChain != null) 
+                {
+                    foreach (var item in parentChain)
+                    {
+                        allItems.Add(item + ".msg"); // Add .msg for emails in chain
+                    }
+                }
+                // Add proper extension for current item
+                string currentWithExt = currentItem;
+                if (!Path.HasExtension(currentItem))
+                {
+                    currentWithExt = AddFileExtension(currentItem, false);
+                }
+                allItems.Add(currentWithExt);
                 
                 // Create root email box at top
                 if (allItems.Count > 0)
                 {
                     float rootX = startX + (horizontalSpacing * 2); // Center the root
                     var rootShape = shapes.AddShape(1, rootX, startY, boxWidth, boxHeight);
-                    rootShape.TextFrame.TextRange.Text = TruncateText(allItems[0], 20);
-                    rootShape.TextFrame.TextRange.Font.Size = 10;
+                    rootShape.TextFrame.TextRange.Text = TruncateText(allItems[0], 45); // Much longer text
+                    rootShape.TextFrame.TextRange.Font.Size = 12; // Larger font
                     rootShape.TextFrame.TextRange.Font.Bold = 1;
                     rootShape.TextFrame.TextRange.ParagraphFormat.Alignment = WdParagraphAlignment.wdAlignParagraphCenter;
                     rootShape.Fill.ForeColor.RGB = 15724527; // Light blue for email
@@ -68,8 +80,8 @@ namespace MsgToPdfConverter.Services
                             float attY = startY + verticalSpacing;
                             
                             var attShape = shapes.AddShape(1, attX, attY, boxWidth, boxHeight);
-                            attShape.TextFrame.TextRange.Text = TruncateText(allItems[i], 20);
-                            attShape.TextFrame.TextRange.Font.Size = 9;
+                            attShape.TextFrame.TextRange.Text = TruncateText(allItems[i], 40); // Much longer text
+                            attShape.TextFrame.TextRange.Font.Size = 11; // Larger font
                             attShape.TextFrame.TextRange.ParagraphFormat.Alignment = WdParagraphAlignment.wdAlignParagraphCenter;
                             
                             // Highlight current attachment in red, others in light gray
@@ -106,8 +118,8 @@ namespace MsgToPdfConverter.Services
                                     float nestedY = attY + (verticalSpacing * (j - i));
                                     
                                     var nestedShape = shapes.AddShape(1, nestedX, nestedY, boxWidth, boxHeight);
-                                    nestedShape.TextFrame.TextRange.Text = TruncateText(allItems[j], 20);
-                                    nestedShape.TextFrame.TextRange.Font.Size = 8;
+                                    nestedShape.TextFrame.TextRange.Text = TruncateText(allItems[j], 40); // Much longer text
+                                    nestedShape.TextFrame.TextRange.Font.Size = 10; // Readable font size
                                     nestedShape.TextFrame.TextRange.ParagraphFormat.Alignment = WdParagraphAlignment.wdAlignParagraphCenter;
                                     
                                     if (j == allItems.Count - 1)
@@ -174,14 +186,15 @@ namespace MsgToPdfConverter.Services
                 // Export as PDF instead of PNG (Word doesn't support PNG export directly)
                 try
                 {
-                    // Export the document as PDF
+                    // Export the document as PDF with high quality settings
                     imageDoc.ExportAsFixedFormat(
                         OutputFileName: outputImagePath,
                         ExportFormat: WdExportFormat.wdExportFormatPDF,
                         BitmapMissingFonts: true,
                         DocStructureTags: false,
                         CreateBookmarks: WdExportCreateBookmarks.wdExportCreateNoBookmarks,
-                        OptimizeFor: WdExportOptimizeFor.wdExportOptimizeForPrint);
+                        OptimizeFor: WdExportOptimizeFor.wdExportOptimizeForPrint,
+                        Range: WdExportRange.wdExportAllDocument);
                     
                     Console.WriteLine($"[SMARTART] Successfully exported hierarchy as PDF: {outputImagePath}");
                 }
@@ -351,6 +364,42 @@ namespace MsgToPdfConverter.Services
             }
         }
         
+        /// <summary>
+        /// Adds appropriate file extension to display text
+        /// </summary>
+        private static string AddFileExtension(string fileName, bool isEmail)
+        {
+            if (string.IsNullOrEmpty(fileName))
+                return "Unknown";
+
+            // If it's an email, add .msg extension
+            if (isEmail)
+            {
+                return fileName + ".msg";
+            }
+
+            // For attachments, ensure they have an extension
+            if (!Path.HasExtension(fileName))
+            {
+                // Try to guess extension based on name patterns
+                string lowerName = fileName.ToLower();
+                if (lowerName.Contains("word") || lowerName.Contains("doc"))
+                    return fileName + ".docx";
+                else if (lowerName.Contains("excel") || lowerName.Contains("sheet"))
+                    return fileName + ".xlsx";
+                else if (lowerName.Contains("pdf"))
+                    return fileName + ".pdf";
+                else if (lowerName.Contains("zip") || lowerName.Contains("archive"))
+                    return fileName + ".zip";
+                else if (lowerName.Contains("image") || lowerName.Contains("picture"))
+                    return fileName + ".png";
+                else
+                    return fileName + ".file"; // Generic extension
+            }
+
+            return fileName; // Already has extension
+        }
+
         /// <summary>
         /// Truncates text to a specified length for better display
         /// </summary>

@@ -10,11 +10,12 @@ namespace MsgToPdfConverter.Services
 {
     public class HierarchyImageService
     {
-        private const int BOX_WIDTH = 150;
-        private const int BOX_HEIGHT = 40;
-        private const int VERTICAL_SPACING = 60;
+        private const int MIN_BOX_WIDTH = 120;
+        private const int BOX_HEIGHT = 50;
+        private const int VERTICAL_SPACING = 70;
         private const int HORIZONTAL_SPACING = 30;
         private const int MARGIN = 20;
+        private const int TEXT_PADDING = 10;
 
         public string CreateHierarchyImage(List<string> hierarchyChain, string currentAttachment, string outputFolder)
         {
@@ -23,26 +24,63 @@ namespace MsgToPdfConverter.Services
                 if (hierarchyChain == null || hierarchyChain.Count == 0)
                     return null;
 
-                // Calculate image dimensions
-                int maxLevel = hierarchyChain.Count;
-                int imageWidth = (maxLevel * (BOX_WIDTH + HORIZONTAL_SPACING)) + (2 * MARGIN);
+                // Add proper file extensions
+                var processedChain = new List<string>();
+                for (int i = 0; i < hierarchyChain.Count; i++)
+                {
+                    string item = hierarchyChain[i];
+                    if (i == 0) // First item is always the email
+                    {
+                        processedChain.Add(AddFileExtension(item, true));
+                    }
+                    else
+                    {
+                        processedChain.Add(AddFileExtension(item, false));
+                    }
+                }
+
+                // Calculate box widths based on text content
+                var boxWidths = new List<int>();
+                using (var tempBitmap = new Bitmap(1, 1))
+                using (var tempGraphics = Graphics.FromImage(tempBitmap))
+                using (var font = new Font("Arial", 10, FontStyle.Regular))
+                {
+                    foreach (string item in processedChain)
+                    {
+                        var textSize = tempGraphics.MeasureString(item, font);
+                        int width = Math.Max(MIN_BOX_WIDTH, (int)textSize.Width + (TEXT_PADDING * 2));
+                        boxWidths.Add(width);
+                    }
+                }
+
+                // Calculate total image dimensions
+                int totalWidth = boxWidths.Sum() + (HORIZONTAL_SPACING * (boxWidths.Count - 1)) + (2 * MARGIN);
                 int imageHeight = BOX_HEIGHT + (2 * MARGIN);
 
-                // Create bitmap and graphics
-                using (var bitmap = new Bitmap(imageWidth, imageHeight))
+                // Create high-resolution bitmap for vector-like quality
+                int scale = 4; // 4x scaling for high quality
+                int scaledWidth = totalWidth * scale;
+                int scaledHeight = imageHeight * scale;
+
+                using (var bitmap = new Bitmap(scaledWidth, scaledHeight))
                 using (var graphics = Graphics.FromImage(bitmap))
                 {
-                    // Set high quality rendering
-                    graphics.SmoothingMode = SmoothingMode.AntiAlias;
-                    graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+                    // Set highest quality rendering
+                    graphics.SmoothingMode = SmoothingMode.HighQuality;
+                    graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
                     graphics.CompositingQuality = CompositingQuality.HighQuality;
+                    graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+                    // Scale everything
+                    graphics.ScaleTransform(scale, scale);
 
                     // Fill background
                     graphics.Clear(Color.White);
 
-                    // Define fonts and brushes
-                    using (var normalFont = new Font("Arial", 9, FontStyle.Regular))
-                    using (var boldFont = new Font("Arial", 9, FontStyle.Bold))
+                    // Define fonts and brushes (scaled)
+                    using (var normalFont = new Font("Arial", 10, FontStyle.Regular))
+                    using (var boldFont = new Font("Arial", 10, FontStyle.Bold))
                     using (var normalBrush = new SolidBrush(Color.Black))
                     using (var currentBrush = new SolidBrush(Color.White))
                     using (var normalPen = new Pen(Color.DarkBlue, 2))
@@ -52,21 +90,19 @@ namespace MsgToPdfConverter.Services
                     using (var linePen = new Pen(Color.DarkGray, 2))
                     {
                         // Draw hierarchy boxes and connections
-                        for (int i = 0; i < hierarchyChain.Count; i++)
+                        int currentX = MARGIN;
+                        for (int i = 0; i < processedChain.Count; i++)
                         {
-                            string item = hierarchyChain[i];
-                            bool isCurrent = item.Equals(currentAttachment, StringComparison.OrdinalIgnoreCase);
-
-                            // Calculate box position
-                            int x = MARGIN + (i * (BOX_WIDTH + HORIZONTAL_SPACING));
-                            int y = MARGIN;
+                            string item = processedChain[i];
+                            bool isCurrent = i == processedChain.Count - 1; // Last item is current
+                            int boxWidth = boxWidths[i];
 
                             // Draw connection line to next box (if not last)
-                            if (i < hierarchyChain.Count - 1)
+                            if (i < processedChain.Count - 1)
                             {
-                                int lineStartX = x + BOX_WIDTH;
-                                int lineEndX = x + BOX_WIDTH + HORIZONTAL_SPACING;
-                                int lineY = y + (BOX_HEIGHT / 2);
+                                int lineStartX = currentX + boxWidth;
+                                int lineEndX = lineStartX + HORIZONTAL_SPACING;
+                                int lineY = MARGIN + (BOX_HEIGHT / 2);
                                 
                                 graphics.DrawLine(linePen, lineStartX, lineY, lineEndX, lineY);
                                 
@@ -80,7 +116,7 @@ namespace MsgToPdfConverter.Services
                             }
 
                             // Draw box
-                            Rectangle boxRect = new Rectangle(x, y, BOX_WIDTH, BOX_HEIGHT);
+                            Rectangle boxRect = new Rectangle(currentX, MARGIN, boxWidth, BOX_HEIGHT);
                             
                             if (isCurrent)
                             {
@@ -93,24 +129,27 @@ namespace MsgToPdfConverter.Services
                                 graphics.DrawRectangle(normalPen, boxRect);
                             }
 
-                            // Draw text
-                            string displayText = TruncateText(item, normalFont, graphics, BOX_WIDTH - 10);
+                            // Draw text with word wrapping if needed
                             var textBrush = isCurrent ? currentBrush : normalBrush;
                             var font = isCurrent ? boldFont : normalFont;
                             
-                            var textRect = new Rectangle(x + 5, y + 5, BOX_WIDTH - 10, BOX_HEIGHT - 10);
+                            var textRect = new Rectangle(currentX + TEXT_PADDING/2, MARGIN + TEXT_PADDING/2, 
+                                                       boxWidth - TEXT_PADDING, BOX_HEIGHT - TEXT_PADDING);
                             var stringFormat = new StringFormat
                             {
                                 Alignment = StringAlignment.Center,
                                 LineAlignment = StringAlignment.Center,
-                                Trimming = StringTrimming.EllipsisCharacter
+                                Trimming = StringTrimming.EllipsisWord,
+                                FormatFlags = StringFormatFlags.LineLimit
                             };
                             
-                            graphics.DrawString(displayText, font, textBrush, textRect, stringFormat);
+                            graphics.DrawString(item, font, textBrush, textRect, stringFormat);
+
+                            currentX += boxWidth + HORIZONTAL_SPACING;
                         }
                     }
 
-                    // Save the image
+                    // Save the high-quality image
                     string imagePath = Path.Combine(outputFolder, $"hierarchy_{Guid.NewGuid()}.png");
                     bitmap.Save(imagePath, ImageFormat.Png);
                     return imagePath;
@@ -123,30 +162,37 @@ namespace MsgToPdfConverter.Services
             }
         }
 
-        private string TruncateText(string text, Font font, Graphics graphics, int maxWidth)
+        private string AddFileExtension(string fileName, bool isEmail)
         {
-            if (string.IsNullOrEmpty(text))
-                return text;
+            if (string.IsNullOrEmpty(fileName))
+                return "Unknown";
 
-            // Remove file extension for cleaner display
-            string displayText = Path.GetFileNameWithoutExtension(text);
-            if (string.IsNullOrEmpty(displayText))
-                displayText = text;
-
-            var textSize = graphics.MeasureString(displayText, font);
-            if (textSize.Width <= maxWidth)
-                return displayText;
-
-            // Truncate with ellipsis
-            for (int i = displayText.Length - 1; i > 0; i--)
+            // If it's an email, add .msg extension
+            if (isEmail)
             {
-                string truncated = displayText.Substring(0, i) + "...";
-                textSize = graphics.MeasureString(truncated, font);
-                if (textSize.Width <= maxWidth)
-                    return truncated;
+                return fileName + ".msg";
             }
 
-            return "...";
+            // For attachments, ensure they have an extension
+            if (!Path.HasExtension(fileName))
+            {
+                // Try to guess extension based on name patterns
+                string lowerName = fileName.ToLower();
+                if (lowerName.Contains("word") || lowerName.Contains("doc"))
+                    return fileName + ".docx";
+                else if (lowerName.Contains("excel") || lowerName.Contains("sheet"))
+                    return fileName + ".xlsx";
+                else if (lowerName.Contains("pdf"))
+                    return fileName + ".pdf";
+                else if (lowerName.Contains("zip") || lowerName.Contains("archive"))
+                    return fileName + ".zip";
+                else if (lowerName.Contains("image") || lowerName.Contains("picture"))
+                    return fileName + ".png";
+                else
+                    return fileName + ".file"; // Generic extension
+            }
+
+            return fileName; // Already has extension
         }
     }
 }
