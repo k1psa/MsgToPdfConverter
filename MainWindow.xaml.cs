@@ -25,7 +25,6 @@ namespace MsgToPdfConverter
     public partial class MainWindow : Window
     {
         private List<string> selectedFiles = new List<string>();
-        private int convertButtonClickCount = 0;
         private bool isConverting = false;
         private bool cancellationRequested = false;
         private string selectedOutputFolder = null;
