@@ -244,10 +244,13 @@ namespace MsgToPdfConverter
 
                                 // Process nested MSG files recursively (including their attachments)
                                 Console.WriteLine($"[MSG] Processing {nestedMessages.Count} nested MSG files recursively");
-                                foreach (var nestedMsg in nestedMessages)
+                                for (int nestedIndex = 0; nestedIndex < nestedMessages.Count; nestedIndex++)
                                 {
+                                    var nestedMsg = nestedMessages[nestedIndex];
+                                    string nestedSubject = nestedMsg.Subject ?? $"nested_msg_depth_1";
+                                    string nestedHeaderText = $"Attachment (Depth 1): {nestedIndex + 1}/{nestedMessages.Count} - Nested Email: {nestedSubject}";
                                     // This will recursively process the nested MSG and all its attachments
-                                    _attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, 1);
+                                    _attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, 1, 5, nestedHeaderText);
                                 }
 
                                 string mergedPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
