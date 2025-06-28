@@ -10,10 +10,9 @@ namespace MsgToPdfConverter.Services
 {
     public class HierarchyImageService
     {
-        private const int MIN_BOX_WIDTH = 120;
+        private const int MIN_BOX_WIDTH = 180;
         private const int BOX_HEIGHT = 50;
-        private const int VERTICAL_SPACING = 70;
-        private const int HORIZONTAL_SPACING = 30;
+        private const int VERTICAL_SPACING = 60;
         private const int MARGIN = 20;
         private const int TEXT_PADDING = 10;
 
@@ -24,18 +23,20 @@ namespace MsgToPdfConverter.Services
                 if (hierarchyChain == null || hierarchyChain.Count == 0)
                     return null;
 
-                // Add proper file extensions
+                // Add proper file extensions - all emails should have .msg
                 var processedChain = new List<string>();
                 for (int i = 0; i < hierarchyChain.Count; i++)
                 {
                     string item = hierarchyChain[i];
-                    if (i == 0) // First item is always the email
+                    // For the chain, all items except the last are emails (.msg)
+                    // The last item is the current attachment
+                    if (i < hierarchyChain.Count - 1)
                     {
-                        processedChain.Add(AddFileExtension(item, true));
+                        processedChain.Add(AddFileExtension(item, true)); // Email
                     }
                     else
                     {
-                        processedChain.Add(AddFileExtension(item, false));
+                        processedChain.Add(AddFileExtension(item, false)); // Attachment
                     }
                 }
 
@@ -53,14 +54,15 @@ namespace MsgToPdfConverter.Services
                     }
                 }
 
-                // Calculate total image dimensions
-                int totalWidth = boxWidths.Sum() + (HORIZONTAL_SPACING * (boxWidths.Count - 1)) + (2 * MARGIN);
-                int imageHeight = BOX_HEIGHT + (2 * MARGIN);
+                // Calculate image dimensions for vertical layout
+                int maxWidth = boxWidths.Max();
+                int totalWidth = maxWidth + (2 * MARGIN);
+                int totalHeight = (processedChain.Count * BOX_HEIGHT) + ((processedChain.Count - 1) * VERTICAL_SPACING) + (2 * MARGIN);
 
                 // Create high-resolution bitmap for vector-like quality
                 int scale = 4; // 4x scaling for high quality
                 int scaledWidth = totalWidth * scale;
-                int scaledHeight = imageHeight * scale;
+                int scaledHeight = totalHeight * scale;
 
                 using (var bitmap = new Bitmap(scaledWidth, scaledHeight))
                 using (var graphics = Graphics.FromImage(bitmap))
@@ -89,34 +91,37 @@ namespace MsgToPdfConverter.Services
                     using (var currentBoxBrush = new SolidBrush(Color.Red))
                     using (var linePen = new Pen(Color.DarkGray, 2))
                     {
-                        // Draw hierarchy boxes and connections
-                        int currentX = MARGIN;
+                        // Draw hierarchy boxes and connections vertically
+                        int currentY = MARGIN;
                         for (int i = 0; i < processedChain.Count; i++)
                         {
                             string item = processedChain[i];
                             bool isCurrent = i == processedChain.Count - 1; // Last item is current
                             int boxWidth = boxWidths[i];
+                            
+                            // Center the box horizontally
+                            int boxX = (totalWidth - boxWidth) / 2;
 
                             // Draw connection line to next box (if not last)
                             if (i < processedChain.Count - 1)
                             {
-                                int lineStartX = currentX + boxWidth;
-                                int lineEndX = lineStartX + HORIZONTAL_SPACING;
-                                int lineY = MARGIN + (BOX_HEIGHT / 2);
+                                int lineStartY = currentY + BOX_HEIGHT;
+                                int lineEndY = lineStartY + VERTICAL_SPACING;
+                                int lineX = totalWidth / 2; // Center line
                                 
-                                graphics.DrawLine(linePen, lineStartX, lineY, lineEndX, lineY);
+                                graphics.DrawLine(linePen, lineX, lineStartY, lineX, lineEndY);
                                 
-                                // Draw arrow
+                                // Draw arrow pointing down
                                 Point[] arrowPoints = {
-                                    new Point(lineEndX - 8, lineY - 4),
-                                    new Point(lineEndX, lineY),
-                                    new Point(lineEndX - 8, lineY + 4)
+                                    new Point(lineX - 4, lineEndY - 8),
+                                    new Point(lineX, lineEndY),
+                                    new Point(lineX + 4, lineEndY - 8)
                                 };
                                 graphics.DrawLines(linePen, arrowPoints);
                             }
 
                             // Draw box
-                            Rectangle boxRect = new Rectangle(currentX, MARGIN, boxWidth, BOX_HEIGHT);
+                            Rectangle boxRect = new Rectangle(boxX, currentY, boxWidth, BOX_HEIGHT);
                             
                             if (isCurrent)
                             {
@@ -133,7 +138,7 @@ namespace MsgToPdfConverter.Services
                             var textBrush = isCurrent ? currentBrush : normalBrush;
                             var font = isCurrent ? boldFont : normalFont;
                             
-                            var textRect = new Rectangle(currentX + TEXT_PADDING/2, MARGIN + TEXT_PADDING/2, 
+                            var textRect = new Rectangle(boxX + TEXT_PADDING/2, currentY + TEXT_PADDING/2, 
                                                        boxWidth - TEXT_PADDING, BOX_HEIGHT - TEXT_PADDING);
                             var stringFormat = new StringFormat
                             {
@@ -145,7 +150,7 @@ namespace MsgToPdfConverter.Services
                             
                             graphics.DrawString(item, font, textBrush, textRect, stringFormat);
 
-                            currentX += boxWidth + HORIZONTAL_SPACING;
+                            currentY += BOX_HEIGHT + VERTICAL_SPACING;
                         }
                     }
 
@@ -167,10 +172,14 @@ namespace MsgToPdfConverter.Services
             if (string.IsNullOrEmpty(fileName))
                 return "Unknown";
 
-            // If it's an email, add .msg extension
+            // If it's an email, always add .msg extension
             if (isEmail)
             {
-                return fileName + ".msg";
+                // Remove any existing extension and add .msg
+                string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                if (string.IsNullOrEmpty(nameWithoutExt))
+                    nameWithoutExt = fileName;
+                return nameWithoutExt + ".msg";
             }
 
             // For attachments, ensure they have an extension
