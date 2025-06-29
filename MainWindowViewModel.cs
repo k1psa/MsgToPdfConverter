@@ -84,7 +84,11 @@ namespace MsgToPdfConverter
         // Methods for commands
         private void SelectFiles(object parameter)
         {
+            var mainWindow = Application.Current.MainWindow;
+            bool wasTopmost = mainWindow != null && mainWindow.Topmost;
+            if (IsPinned && mainWindow != null) mainWindow.Topmost = false;
             var newFiles = FileDialogHelper.OpenMsgFileDialog();
+            if (IsPinned && mainWindow != null) mainWindow.Topmost = true;
             if (newFiles != null && newFiles.Count > 0)
             {
                 var updated = _fileListService.AddFiles(new System.Collections.Generic.List<string>(_selectedFiles), newFiles);
@@ -99,7 +103,11 @@ namespace MsgToPdfConverter
 
         private void SelectOutputFolder(object parameter)
         {
+            var mainWindow = Application.Current.MainWindow;
+            bool wasTopmost = mainWindow != null && mainWindow.Topmost;
+            if (IsPinned && mainWindow != null) mainWindow.Topmost = false;
             var folder = FileDialogHelper.OpenFolderDialog();
+            if (IsPinned && mainWindow != null) mainWindow.Topmost = true;
             if (!string.IsNullOrEmpty(folder))
             {
                 SelectedOutputFolder = folder;
@@ -229,9 +237,12 @@ namespace MsgToPdfConverter
                     string outputFolder = !string.IsNullOrEmpty(SelectedOutputFolder)
                         ? SelectedOutputFolder
                         : null;
+                    var mainWindow = Application.Current.MainWindow;
                     if (string.IsNullOrEmpty(outputFolder))
                     {
+                        if (IsPinned && mainWindow != null) mainWindow.Topmost = false;
                         outputFolder = FileDialogHelper.OpenFolderDialog();
+                        if (IsPinned && mainWindow != null) mainWindow.Topmost = true;
                     }
                     if (string.IsNullOrEmpty(outputFolder))
                         return;
