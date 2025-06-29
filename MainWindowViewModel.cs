@@ -1,0 +1,276 @@
+using System;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.IO;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Input;
+using MsgToPdfConverter.Services;
+using MsgToPdfConverter.Utils;
+
+namespace MsgToPdfConverter
+{
+    public class MainWindowViewModel : INotifyPropertyChanged
+    {
+        // State
+        private ObservableCollection<string> _selectedFiles = new ObservableCollection<string>();
+        private string _selectedOutputFolder;
+        private bool _isConverting;
+        private bool _cancellationRequested;
+        private bool _extractOriginalOnly;
+        private bool _deleteMsgAfterConversion;
+        private bool _isPinned;
+        private int _progressValue;
+        private int _progressMax;
+        private string _processingStatus;
+        private string _fileCountText;
+        private bool _appendAttachments;
+
+        // Services
+        private readonly EmailConverterService _emailService = new EmailConverterService();
+        private readonly AttachmentService _attachmentService;
+        private readonly OutlookImportService _outlookImportService = new OutlookImportService();
+        private readonly FileListService _fileListService = new FileListService();
+
+        public MainWindowViewModel()
+        {
+            _attachmentService = new AttachmentService(
+                (path, text, _) => PdfService.AddHeaderPdf(path, text),
+                OfficeConversionService.TryConvertOfficeToPdf,
+                PdfAppendTest.AppendPdfs,
+                _emailService
+            );
+            SelectFilesCommand = new RelayCommand(SelectFiles);
+            ClearListCommand = new RelayCommand(ClearList);
+            SelectOutputFolderCommand = new RelayCommand(SelectOutputFolder);
+            ClearOutputFolderCommand = new RelayCommand(ClearOutputFolder);
+            ConvertCommand = new AsyncRelayCommand(ConvertAsync, (obj) => !_isConverting && _selectedFiles.Count > 0);
+            CancelCommand = new RelayCommand(Cancel, (obj) => _isConverting);
+            OptionsCommand = new RelayCommand(OpenOptions);
+            PinCommand = new RelayCommand(TogglePin);
+            RemoveSelectedFilesCommand = new RelayCommand(RemoveSelectedFiles);
+            FileCountText = $"Files selected: {_selectedFiles.Count}";
+            _selectedFiles.CollectionChanged += (s, e) => {
+                FileCountText = $"Files selected: {_selectedFiles.Count}";
+                (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+            };
+        }
+
+        // Properties for binding
+        public ObservableCollection<string> SelectedFiles { get => _selectedFiles; set { _selectedFiles = value; OnPropertyChanged(nameof(SelectedFiles)); (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged(); } }
+        public string SelectedOutputFolder { get => _selectedOutputFolder; set { _selectedOutputFolder = value; OnPropertyChanged(nameof(SelectedOutputFolder)); } }
+        public bool IsConverting { get => _isConverting; set { _isConverting = value; OnPropertyChanged(nameof(IsConverting)); (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged(); } }
+        public bool CancellationRequested { get => _cancellationRequested; set { _cancellationRequested = value; OnPropertyChanged(nameof(CancellationRequested)); } }
+        public bool ExtractOriginalOnly { get => _extractOriginalOnly; set { _extractOriginalOnly = value; OnPropertyChanged(nameof(ExtractOriginalOnly)); } }
+        public bool DeleteMsgAfterConversion { get => _deleteMsgAfterConversion; set { _deleteMsgAfterConversion = value; OnPropertyChanged(nameof(DeleteMsgAfterConversion)); } }
+        public bool IsPinned { get => _isPinned; set { _isPinned = value; OnPropertyChanged(nameof(IsPinned)); } }
+        public int ProgressValue { get => _progressValue; set { _progressValue = value; OnPropertyChanged(nameof(ProgressValue)); } }
+        public int ProgressMax { get => _progressMax; set { _progressMax = value; OnPropertyChanged(nameof(ProgressMax)); } }
+        public string ProcessingStatus { get => _processingStatus; set { _processingStatus = value; OnPropertyChanged(nameof(ProcessingStatus)); } }
+        public string FileCountText { get => _fileCountText; set { _fileCountText = value; OnPropertyChanged(nameof(FileCountText)); } }
+        public bool AppendAttachments { get => _appendAttachments; set { _appendAttachments = value; OnPropertyChanged(nameof(AppendAttachments)); } }
+
+        // Commands
+        public ICommand SelectFilesCommand { get; }
+        public ICommand ClearListCommand { get; }
+        public ICommand SelectOutputFolderCommand { get; }
+        public ICommand ClearOutputFolderCommand { get; }
+        public ICommand ConvertCommand { get; }
+        public ICommand CancelCommand { get; }
+        public ICommand OptionsCommand { get; }
+        public ICommand PinCommand { get; }
+        public ICommand RemoveSelectedFilesCommand { get; }
+
+        // Methods for commands
+        private void SelectFiles(object parameter)
+        {
+            var newFiles = FileDialogHelper.OpenMsgFileDialog();
+            if (newFiles != null && newFiles.Count > 0)
+            {
+                var updated = _fileListService.AddFiles(new System.Collections.Generic.List<string>(_selectedFiles), newFiles);
+                SelectedFiles = new ObservableCollection<string>(updated);
+            }
+        }
+
+        private void ClearList(object parameter)
+        {
+            SelectedFiles = new ObservableCollection<string>(_fileListService.ClearFiles());
+        }
+
+        private void SelectOutputFolder(object parameter)
+        {
+            var folder = FileDialogHelper.OpenFolderDialog();
+            if (!string.IsNullOrEmpty(folder))
+            {
+                SelectedOutputFolder = folder;
+            }
+        }
+
+        private void ClearOutputFolder(object parameter)
+        {
+            SelectedOutputFolder = null;
+        }
+
+        private async Task ConvertAsync(object parameter)
+        {
+            if (IsConverting) return;
+            IsConverting = true;
+            ProgressValue = 0;
+            ProgressMax = SelectedFiles.Count;
+            ProcessingStatus = "";
+            var conversionService = new ConversionService();
+            try
+            {
+                var result = await Task.Run(() =>
+                    conversionService.ConvertMsgFilesWithAttachments(
+                        new System.Collections.Generic.List<string>(SelectedFiles),
+                        SelectedOutputFolder,
+                        AppendAttachments,
+                        ExtractOriginalOnly,
+                        DeleteMsgAfterConversion,
+                        _emailService,
+                        _attachmentService,
+                        (processed, total, progress, statusText) =>
+                        {
+                            ProcessingStatus = statusText;
+                            ProgressValue = processed;
+                        },
+                        () => CancellationRequested,
+                        (msg) => MessageBox.Show(msg, "Processing Results", MessageBoxButton.OK, MessageBoxImage.Information)
+                    )
+                );
+                string statusMessage = result.Cancelled
+                    ? $"Processing cancelled. Processed {result.Processed} files. Success: {result.Success}, Failed: {result.Fail}"
+                    : $"Processing completed. Total files: {SelectedFiles.Count}, Success: {result.Success}, Failed: {result.Fail}";
+                MessageBox.Show(statusMessage, "Processing Results", MessageBoxButton.OK,
+                    result.Fail > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                IsConverting = false;
+                CancellationRequested = false;
+                ProcessingStatus = "";
+            }
+        }
+
+        private void Cancel(object parameter)
+        {
+            CancellationRequested = true;
+            ProcessingStatus = "Cancelling... Please wait.";
+        }
+
+        private void OpenOptions(object parameter)
+        {
+            var optionsWindow = new OptionsWindow(ExtractOriginalOnly, DeleteMsgAfterConversion)
+            {
+                Owner = Application.Current.MainWindow
+            };
+            if (optionsWindow.ShowDialog() == true)
+            {
+                ExtractOriginalOnly = optionsWindow.ExtractOriginalOnly;
+                DeleteMsgAfterConversion = optionsWindow.DeleteMsgAfterConversion;
+            }
+        }
+
+        private void TogglePin(object parameter)
+        {
+            IsPinned = !IsPinned;
+            if (Application.Current.MainWindow != null)
+                Application.Current.MainWindow.Topmost = IsPinned;
+        }
+
+        private void RemoveSelectedFiles(object selectedItems)
+        {
+            if (selectedItems is System.Collections.IList items && items.Count > 0)
+            {
+                var toRemove = new System.Collections.Generic.List<string>();
+                foreach (var item in items)
+                {
+                    if (item is string s)
+                        toRemove.Add(s);
+                }
+                var updated = _fileListService.RemoveFiles(new System.Collections.Generic.List<string>(SelectedFiles), toRemove);
+                SelectedFiles = new ObservableCollection<string>(updated);
+            }
+        }
+
+        // Drag-and-drop support for ListBox
+        public void HandleDrop(IDataObject data)
+        {
+            // 1. Standard file/folder drop
+            if (data.GetDataPresent(DataFormats.FileDrop))
+            {
+                string[] droppedItems = (string[])data.GetData(DataFormats.FileDrop);
+                var updated = new System.Collections.Generic.List<string>(SelectedFiles);
+                foreach (string item in droppedItems)
+                {
+                    if (File.Exists(item))
+                    {
+                        updated = _fileListService.AddFiles(updated, new[] { item });
+                    }
+                    else if (Directory.Exists(item))
+                    {
+                        updated = _fileListService.AddFilesFromDirectory(updated, item);
+                    }
+                }
+                SelectedFiles = new ObservableCollection<string>(updated);
+                return;
+            }
+
+            // 2. Outlook email drag-and-drop support
+            if (data.GetDataPresent("FileGroupDescriptorW") || data.GetDataPresent("FileGroupDescriptor"))
+            {
+                try
+                {
+                    string outputFolder = !string.IsNullOrEmpty(SelectedOutputFolder)
+                        ? SelectedOutputFolder
+                        : null;
+                    if (string.IsNullOrEmpty(outputFolder))
+                    {
+                        outputFolder = FileDialogHelper.OpenFolderDialog();
+                    }
+                    if (string.IsNullOrEmpty(outputFolder))
+                        return;
+
+                    var result = _outlookImportService.ExtractMsgFilesFromDragDrop(
+                        data,
+                        outputFolder,
+                        FileService.SanitizeFileName);
+
+                    var updated = _fileListService.AddFiles(new System.Collections.Generic.List<string>(SelectedFiles), result.ExtractedFiles);
+                    SelectedFiles = new ObservableCollection<string>(updated);
+
+                    if (result.SkippedFiles.Count > 0)
+                    {
+                        MessageBox.Show(
+                            $"Some emails could not be added due to missing data from Outlook.\n\nPossible reasons:\n- The email is protected or encrypted\n- Outlook security settings\n- Outlook version limitations\n- The email is a meeting request or special item\n\nTry dragging the email(s) to a folder first, then add the .msg file.\n\nSkipped:\n{string.Join("\n", result.SkippedFiles)}",
+                            "Outlook Drag-and-Drop",
+                            MessageBoxButton.OK,
+                            MessageBoxImage.Warning);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Error processing Outlook email drop: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+                return;
+            }
+
+            // 3. If all else fails, inform the user
+            MessageBox.Show(
+                "Could not extract email from Outlook drag-and-drop.\n\n" +
+                "This may be due to Outlook version or security settings.\n" +
+                "Try dragging the email to a folder first, then add the .msg file.",
+                "Outlook Drag-and-Drop Not Supported",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+
+        public event PropertyChangedEventHandler PropertyChanged;
+        protected void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+    }
+}
