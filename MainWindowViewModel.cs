@@ -57,7 +57,7 @@ namespace MsgToPdfConverter
         }
 
         // Properties for binding
-        public ObservableCollection<string> SelectedFiles { get => _selectedFiles; set { _selectedFiles = value; OnPropertyChanged(nameof(SelectedFiles)); (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged(); } }
+        public ObservableCollection<string> SelectedFiles { get => _selectedFiles; /* set removed to prevent replacement */ }
         public string SelectedOutputFolder { get => _selectedOutputFolder; set { _selectedOutputFolder = value; OnPropertyChanged(nameof(SelectedOutputFolder)); } }
         public bool IsConverting { get => _isConverting; set { _isConverting = value; OnPropertyChanged(nameof(IsConverting)); (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged(); } }
         public bool CancellationRequested { get => _cancellationRequested; set { _cancellationRequested = value; OnPropertyChanged(nameof(CancellationRequested)); } }
@@ -92,13 +92,15 @@ namespace MsgToPdfConverter
             if (newFiles != null && newFiles.Count > 0)
             {
                 var updated = _fileListService.AddFiles(new System.Collections.Generic.List<string>(_selectedFiles), newFiles);
-                SelectedFiles = new ObservableCollection<string>(updated);
+                _selectedFiles.Clear();
+                foreach (var file in updated)
+                    _selectedFiles.Add(file);
             }
         }
 
         private void ClearList(object parameter)
         {
-            SelectedFiles = new ObservableCollection<string>(_fileListService.ClearFiles());
+            _selectedFiles.Clear();
         }
 
         private void SelectOutputFolder(object parameter)
@@ -201,8 +203,10 @@ namespace MsgToPdfConverter
                     if (item is string s)
                         toRemove.Add(s);
                 }
-                var updated = _fileListService.RemoveFiles(new System.Collections.Generic.List<string>(SelectedFiles), toRemove);
-                SelectedFiles = new ObservableCollection<string>(updated);
+                var updated = _fileListService.RemoveFiles(new System.Collections.Generic.List<string>(_selectedFiles), toRemove);
+                _selectedFiles.Clear();
+                foreach (var file in updated)
+                    _selectedFiles.Add(file);
             }
         }
 
@@ -213,7 +217,7 @@ namespace MsgToPdfConverter
             if (data.GetDataPresent(DataFormats.FileDrop))
             {
                 string[] droppedItems = (string[])data.GetData(DataFormats.FileDrop);
-                var updated = new System.Collections.Generic.List<string>(SelectedFiles);
+                var updated = new System.Collections.Generic.List<string>(_selectedFiles);
                 foreach (string item in droppedItems)
                 {
                     if (File.Exists(item))
@@ -225,7 +229,9 @@ namespace MsgToPdfConverter
                         updated = _fileListService.AddFilesFromDirectory(updated, item);
                     }
                 }
-                SelectedFiles = new ObservableCollection<string>(updated);
+                _selectedFiles.Clear();
+                foreach (var file in updated)
+                    _selectedFiles.Add(file);
                 return;
             }
 
@@ -252,8 +258,10 @@ namespace MsgToPdfConverter
                         outputFolder,
                         FileService.SanitizeFileName);
 
-                    var updated = _fileListService.AddFiles(new System.Collections.Generic.List<string>(SelectedFiles), result.ExtractedFiles);
-                    SelectedFiles = new ObservableCollection<string>(updated);
+                    var updated = _fileListService.AddFiles(new System.Collections.Generic.List<string>(_selectedFiles), result.ExtractedFiles);
+                    _selectedFiles.Clear();
+                    foreach (var file in updated)
+                        _selectedFiles.Add(file);
 
                     if (result.SkippedFiles.Count > 0)
                     {
