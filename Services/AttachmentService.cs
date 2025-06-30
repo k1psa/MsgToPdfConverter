@@ -6,6 +6,9 @@ using System.Linq;
 using MsgReader.Outlook;
 using System.Diagnostics;
 using MsgToPdfConverter.Utils;
+using SharpCompress.Archives;
+using SharpCompress.Archives.SevenZip;
+using SharpCompress.Common;
 
 namespace MsgToPdfConverter.Services
 {
@@ -343,6 +346,11 @@ namespace MsgToPdfConverter.Services
                     // Use hierarchy-aware ZIP processing with empty parent chain for legacy calls
                     finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName);
                 }
+                else if (ext == ".7z")
+                {
+                    // Use hierarchy-aware 7z processing with empty parent chain for legacy calls
+                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName);
+                }
                 else
                 {
                     finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
@@ -449,6 +457,28 @@ namespace MsgToPdfConverter.Services
                                 entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
                                 _appendPdfs(new List<string> { entryHeaderPdf, entryPath }, entryPdf);
                                 allTempFiles.Add(entryHeaderPdf);
+                                allTempFiles.Add(entryPdf);
+                            }
+                            else if (entryExt == ".jpg" || entryExt == ".jpeg" || entryExt == ".png" || entryExt == ".bmp" || entryExt == ".gif")
+                            {
+                                // 1. Create header PDF (with hierarchy graphic/text)
+                                string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_header.pdf");
+                                CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - {currentFileName}", entryHeaderPdf);
+                                // 2. Create image-only PDF
+                                string imagePdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_image.pdf");
+                                using (var writer = new iText.Kernel.Pdf.PdfWriter(imagePdf))
+                                using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
+                                using (var docImg = new iText.Layout.Document(pdf))
+                                {
+                                    var imgData = iText.IO.Image.ImageDataFactory.Create(entryPath);
+                                    var image = new iText.Layout.Element.Image(imgData);
+                                    docImg.Add(image);
+                                }
+                                // 3. Merge header and image PDF
+                                entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
+                                _appendPdfs(new List<string> { entryHeaderPdf, imagePdf }, entryPdf);
+                                allTempFiles.Add(entryHeaderPdf);
+                                allTempFiles.Add(imagePdf);
                                 allTempFiles.Add(entryPdf);
                             }
                             else if (entryExt == ".doc" || entryExt == ".docx" || entryExt == ".xls" || entryExt == ".xlsx")
@@ -649,6 +679,11 @@ namespace MsgToPdfConverter.Services
                     // Process ZIP files with hierarchy support
                     finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem);
                 }
+                else if (ext == ".7z")
+                {
+                    // Process 7z files with hierarchy support
+                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem);
+                }
                 else
                 {
                     // For other file types, create a placeholder with SmartArt header
@@ -666,6 +701,251 @@ namespace MsgToPdfConverter.Services
             }
 
             return finalAttachmentPdf;
+        }
+
+        public string Process7zAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem)
+        {
+            try
+            {
+                Console.WriteLine($"[7Z] Processing 7z file: {attPath}");
+
+                // Create enhanced header text with hierarchy
+                string enhancedHeaderText = CreateHierarchyHeaderText(parentChain, currentItem, headerText);
+
+                using (var archive = SevenZipArchive.Open(attPath))
+                {
+                    var sevenZipPdfFiles = new List<string>();
+
+                    // Create header PDF for the 7z file itself
+                    string sevenZipHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_header.pdf");
+                    CreateHierarchyHeaderPdf(parentChain, currentItem, enhancedHeaderText + $"\n\n7z Archive Contents ({archive.Entries.Count()} files):", sevenZipHeaderPdf);
+                    sevenZipPdfFiles.Add(sevenZipHeaderPdf);
+                    allTempFiles.Add(sevenZipHeaderPdf);
+
+                    int entryIndex = 0;
+                    var entries = archive.Entries.Where(e => !e.IsDirectory).ToList();
+                    int totalEntries = entries.Count;
+
+                    foreach (var entry in archive.Entries)
+                    {
+                        entryIndex++;
+                        Console.WriteLine($"[7Z] Processing entry {entryIndex}/{archive.Entries.Count()}: {entry.Key}");
+
+                        // Build comprehensive parent chain for 7z entries including folder structure
+                        var sevenZipEntryParentChain = new List<string>(parentChain);
+                        sevenZipEntryParentChain.Add(currentItem);
+
+                        // For nested folder structures, add each folder level to the parent chain
+                        var pathParts = entry.Key.Split('/', '\\');
+                        for (int i = 0; i < pathParts.Length - 1; i++) // Exclude the filename itself
+                        {
+                            if (!string.IsNullOrEmpty(pathParts[i]))
+                            {
+                                sevenZipEntryParentChain.Add(pathParts[i] + "/");
+                            }
+                        }
+
+                        if (entry.IsDirectory)
+                        {
+                            // This is a directory - show it in hierarchy but don't process as file
+                            Console.WriteLine($"[7Z] Found directory: {entry.Key}");
+                            string folderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_folder.pdf");
+
+                            // For directories, use the directory name as the current item (not the full path)
+                            string dirName = entry.Key.TrimEnd('/', '\\');
+                            string[] dirParts = dirName.Split('/', '\\');
+                            string currentDirName = dirParts.LastOrDefault() + "/";
+
+                            // Build parent chain without the current directory
+                            var dirParentChain = new List<string>(parentChain);
+                            dirParentChain.Add(currentItem);
+                            for (int i = 0; i < dirParts.Length - 1; i++)
+                            {
+                                if (!string.IsNullOrEmpty(dirParts[i]))
+                                {
+                                    dirParentChain.Add(dirParts[i] + "/");
+                                }
+                            }
+
+                            CreateHierarchyHeaderPdf(dirParentChain, currentDirName, $"Folder {entryIndex}/{archive.Entries.Count()} - {currentDirName}", folderPdf);
+                            sevenZipPdfFiles.Add(folderPdf);
+                            allTempFiles.Add(folderPdf);
+                            continue;
+                        }
+
+                        string entryPath = Path.Combine(tempDir, $"7z_{Guid.NewGuid()}_{Path.GetFileName(entry.Key)}");
+                        using (var entryStream = entry.OpenEntryStream())
+                        using (var fileStream = File.Create(entryPath))
+                        {
+                            entryStream.CopyTo(fileStream);
+                        }
+                        allTempFiles.Add(entryPath);
+
+                        string entryExt = Path.GetExtension(entry.Key).ToLowerInvariant();
+                        string entryPdf = null;
+                        string currentFileName = Path.GetFileName(entry.Key);
+
+                        try
+                        {
+                            if (entryExt == ".pdf")
+                            {
+                                string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_header.pdf");
+                                CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - {currentFileName}", entryHeaderPdf);
+                                entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_merged.pdf");
+                                _appendPdfs(new List<string> { entryHeaderPdf, entryPath }, entryPdf);
+                                allTempFiles.Add(entryHeaderPdf);
+                                allTempFiles.Add(entryPdf);
+                            }
+                            else if (entryExt == ".jpg" || entryExt == ".jpeg" || entryExt == ".png" || entryExt == ".bmp" || entryExt == ".gif")
+                            {
+                                // 1. Create header PDF (with hierarchy graphic/text)
+                                string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_header.pdf");
+                                CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - {currentFileName}", entryHeaderPdf);
+                                // 2. Create image-only PDF
+                                string imagePdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_image.pdf");
+                                using (var writer = new iText.Kernel.Pdf.PdfWriter(imagePdf))
+                                using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
+                                using (var docImg = new iText.Layout.Document(pdf))
+                                {
+                                    var imgData = iText.IO.Image.ImageDataFactory.Create(entryPath);
+                                    var image = new iText.Layout.Element.Image(imgData);
+                                    docImg.Add(image);
+                                }
+                                // 3. Merge header and image PDF
+                                entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_merged.pdf");
+                                _appendPdfs(new List<string> { entryHeaderPdf, imagePdf }, entryPdf);
+                                allTempFiles.Add(entryHeaderPdf);
+                                allTempFiles.Add(imagePdf);
+                                allTempFiles.Add(entryPdf);
+                            }
+                            else if (entryExt == ".doc" || entryExt == ".docx" || entryExt == ".xls" || entryExt == ".xlsx")
+                            {
+                                string convertedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_converted.pdf");
+                                if (_tryConvertOfficeToPdf(entryPath, convertedPdf))
+                                {
+                                    string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_header.pdf");
+                                    CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - {currentFileName}", entryHeaderPdf);
+                                    entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_merged.pdf");
+                                    _appendPdfs(new List<string> { entryHeaderPdf, convertedPdf }, entryPdf);
+                                    allTempFiles.Add(entryHeaderPdf);
+                                    allTempFiles.Add(convertedPdf);
+                                    allTempFiles.Add(entryPdf);
+                                }
+                                else
+                                {
+                                    entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_placeholder.pdf");
+                                    CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - {currentFileName}\n(Conversion failed)", entryPdf);
+                                    allTempFiles.Add(entryPdf);
+                                }
+                            }
+                            else if (entryExt == ".msg")
+                            {
+                                // Handle nested MSG files in 7z
+                                try
+                                {
+                                    using (var nestedMsg = new Storage.Message(entryPath))
+                                    {
+                                        string nestedSubject = nestedMsg.Subject ?? currentFileName;
+                                        string nestedHeaderText = $"Attachment {entryIndex}/{totalEntries} - Nested Email: {nestedSubject}";
+
+                                        // Create header for nested MSG
+                                        string nestedHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_nested_header.pdf");
+                                        CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, nestedHeaderText, nestedHeaderPdf);
+                                        allTempFiles.Add(nestedHeaderPdf);
+
+                                        // Convert nested MSG to HTML and then PDF
+                                        var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(nestedMsg, false);
+                                        string nestedHtmlPath = Path.Combine(tempDir, Guid.NewGuid() + "_nested.html");
+                                        File.WriteAllText(nestedHtmlPath, htmlResult.Html, System.Text.Encoding.UTF8);
+
+                                        string nestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested.pdf");
+                                        var psi = new System.Diagnostics.ProcessStartInfo
+                                        {
+                                            FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
+                                            Arguments = $"--html2pdf \"{nestedHtmlPath}\" \"{nestedPdf}\"",
+                                            UseShellExecute = false,
+                                            CreateNoWindow = true,
+                                            RedirectStandardOutput = true,
+                                            RedirectStandardError = true
+                                        };
+
+                                        var proc = System.Diagnostics.Process.Start(psi);
+                                        proc.WaitForExit();
+
+                                        if (proc.ExitCode == 0 && File.Exists(nestedPdf))
+                                        {
+                                            entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_nested_merged.pdf");
+                                            _appendPdfs(new List<string> { nestedHeaderPdf, nestedPdf }, entryPdf);
+                                            allTempFiles.Add(nestedPdf);
+                                        }
+                                        else
+                                        {
+                                            entryPdf = nestedHeaderPdf; // Use just the header if conversion failed
+                                        }
+
+                                        allTempFiles.Add(nestedHtmlPath);
+                                        allTempFiles.Add(entryPdf);
+                                    }
+                                }
+                                catch (Exception msgEx)
+                                {
+                                    Console.WriteLine($"[7Z] Failed to process nested MSG {entry.Key}: {msgEx.Message}");
+                                    entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_msg_error.pdf");
+                                    CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - MSG: {currentFileName}\n(Error: {msgEx.Message})", entryPdf);
+                                    allTempFiles.Add(entryPdf);
+                                }
+                            }
+                            else
+                            {
+                                // Create placeholder for other file types
+                                entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_placeholder.pdf");
+                                CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {entryIndex}/{totalEntries} - {currentFileName}\n(File type: {entryExt})", entryPdf);
+                                allTempFiles.Add(entryPdf);
+                            }
+
+                            if (entryPdf != null)
+                                sevenZipPdfFiles.Add(entryPdf);
+                        }
+                        catch (Exception entryEx)
+                        {
+                            Console.WriteLine($"[7Z] Error processing entry {entry.Key}: {entryEx.Message}");
+                            entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_error.pdf");
+                            string errorFileName = Path.GetFileName(entry.Key);
+                            CreateHierarchyHeaderPdf(sevenZipEntryParentChain, errorFileName, $"Attachment {entryIndex}/{totalEntries} - {errorFileName}\n(Error: {entryEx.Message})", entryPdf);
+                            sevenZipPdfFiles.Add(entryPdf);
+                            allTempFiles.Add(entryPdf);
+                        }
+                    }
+
+                    // Merge all 7z entry PDFs
+                    if (sevenZipPdfFiles.Count > 1)
+                    {
+                        string final7zPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_final.pdf");
+                        _appendPdfs(sevenZipPdfFiles, final7zPdf);
+                        allTempFiles.Add(final7zPdf);
+                        return final7zPdf;
+                    }
+                    else if (sevenZipPdfFiles.Count == 1)
+                    {
+                        return sevenZipPdfFiles[0];
+                    }
+                }
+
+                // Fallback if no entries processed
+                string fallbackPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_empty.pdf");
+                CreateHierarchyHeaderPdf(parentChain, currentItem, enhancedHeaderText + "\n\n(Empty 7z file)", fallbackPdf);
+                allTempFiles.Add(fallbackPdf);
+                return fallbackPdf;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[7Z] Error processing 7z file {attPath}: {ex.Message}");
+                string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_error.pdf");
+                string enhancedHeaderText = CreateHierarchyHeaderText(parentChain, currentItem, headerText);
+                CreateHierarchyHeaderPdf(parentChain, currentItem, enhancedHeaderText + $"\n\n(7z processing error: {ex.Message})", errorPdf);
+                allTempFiles.Add(errorPdf);
+                return errorPdf;
+            }
         }
 
     }
