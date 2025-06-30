@@ -573,7 +573,8 @@ namespace MsgToPdfConverter.Services
                             {
                                 // Create placeholder for other file types and track as unconvertible
                                 entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_placeholder.pdf");
-                                CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}\n(File type: {entryExt})", entryPdf);
+                                string warning = $"Attachment {fileIndex}/{fileCount} - {currentFileName}\n(File type: {entryExt})\nThis file type is not supported for PDF conversion and was not converted.";
+                                CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, warning, entryPdf);
                                 allTempFiles.Add(entryPdf);
                                 unconvertibleFiles.Add(currentFileName);
                             }
@@ -839,7 +840,8 @@ namespace MsgToPdfConverter.Services
                             {
                                 // Create placeholder for other file types and track as unconvertible
                                 entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_placeholder.pdf");
-                                CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}\n(File type: {entryExt})", entryPdf);
+                                string warning = $"Attachment {fileIndex}/{fileCount} - {currentFileName}\n(File type: {entryExt})\nThis file type is not supported for PDF conversion and was not converted.";
+                                CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, warning, entryPdf);
                                 allTempFiles.Add(entryPdf);
                                 unconvertibleFiles.Add(currentFileName);
                             }
