@@ -54,6 +54,7 @@ namespace MsgToPdfConverter
                 FileCountText = $"Files selected: {_selectedFiles.Count}";
                 (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
             };
+            Console.WriteLine("MainWindowViewModel initialized");
         }
 
         // Properties for binding
@@ -124,6 +125,7 @@ namespace MsgToPdfConverter
         private async Task ConvertAsync(object parameter)
         {
             if (IsConverting) return;
+            Console.WriteLine($"Starting conversion for {SelectedFiles.Count} files. Output folder: {SelectedOutputFolder}");
             IsConverting = true;
             ProgressValue = 0;
             ProgressMax = SelectedFiles.Count;
@@ -144,6 +146,7 @@ namespace MsgToPdfConverter
                         {
                             ProcessingStatus = statusText;
                             ProgressValue = processed;
+                            Console.WriteLine($"Progress: {processed}/{total} - {statusText}");
                         },
                         () => CancellationRequested,
                         (msg) => MessageBox.Show(msg, "Processing Results", MessageBoxButton.OK, MessageBoxImage.Information)
@@ -152,15 +155,18 @@ namespace MsgToPdfConverter
                 string statusMessage = result.Cancelled
                     ? $"Processing cancelled. Processed {result.Processed} files. Success: {result.Success}, Failed: {result.Fail}"
                     : $"Processing completed. Total files: {SelectedFiles.Count}, Success: {result.Success}, Failed: {result.Fail}";
+                Console.WriteLine(statusMessage);
                 MessageBox.Show(statusMessage, "Processing Results", MessageBoxButton.OK,
                     result.Fail > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
+                Console.WriteLine($"An error occurred: {ex.Message}");
                 MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
+                Console.WriteLine("Conversion finished.");
                 IsConverting = false;
                 CancellationRequested = false;
                 ProcessingStatus = "";
