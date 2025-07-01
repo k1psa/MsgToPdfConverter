@@ -150,19 +150,22 @@ namespace MsgToPdfConverter.Services
                     };
                     using (var process = Process.Start(startInfo))
                     {
-                        process.WaitForExit();
-                        if (process.ExitCode == 0)
+                        process.WaitForExit(); if (process.ExitCode == 0)
                         {
-                            // Create hierarchy header with SmartArt
-                            string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                            CreateHierarchyHeaderPdf(new List<string>(parentChain), msgSubject, usedHeaderText, headerPdf);
-                            string finalNestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested_merged.pdf");
-                            _appendPdfs(new List<string> { headerPdf, nestedPdf }, finalNestedPdf);
-                            allPdfFiles.Add(finalNestedPdf);
-                            allTempFiles.Add(headerPdf);
+                            // Add nested PDF directly without header
+                            allPdfFiles.Add(nestedPdf);
                             allTempFiles.Add(nestedPdf);
-                            allTempFiles.Add(finalNestedPdf);
                             Console.WriteLine($"[MSG] Depth {depth} - Successfully created PDF for nested MSG body: {msgSubject}");
+
+                            // COMMENTED OUT: Create hierarchy header with SmartArt
+                            // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                            // CreateHierarchyHeaderPdf(new List<string>(parentChain), msgSubject, usedHeaderText, headerPdf);
+                            // string finalNestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested_merged.pdf");
+                            // _appendPdfs(new List<string> { headerPdf, nestedPdf }, finalNestedPdf);
+                            // allPdfFiles.Add(finalNestedPdf);
+                            // allTempFiles.Add(headerPdf);
+                            // allTempFiles.Add(nestedPdf);
+                            // allTempFiles.Add(finalNestedPdf);
                         }
                         else
                         {
@@ -293,18 +296,21 @@ namespace MsgToPdfConverter.Services
             {
                 if (ext == ".pdf")
                 {
-                    string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    _addHeaderPdf(headerPdf, headerText, null);
-                    finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    _appendPdfs(new List<string> { headerPdf, attPath }, finalAttachmentPdf);
-                    allTempFiles.Add(headerPdf);
-                    allTempFiles.Add(finalAttachmentPdf);
+                    // Return PDF directly without header
+                    finalAttachmentPdf = attPath;
+                    // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                    // _addHeaderPdf(headerPdf, headerText, null);
+                    // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                    // _appendPdfs(new List<string> { headerPdf, attPath }, finalAttachmentPdf);
+                    // allTempFiles.Add(headerPdf);
+                    // allTempFiles.Add(finalAttachmentPdf);
                 }
                 else if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".gif")
                 {
+                    // Create image-only PDF without header
                     // 1. Create header PDF (with hierarchy graphic/text)
-                    string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    _addHeaderPdf(headerPdf, headerText, null);
+                    // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                    // _addHeaderPdf(headerPdf, headerText, null);
                     // 2. Create image-only PDF
                     string imagePdf = Path.Combine(tempDir, Guid.NewGuid() + "_image.pdf");
                     using (var writer = new iText.Kernel.Pdf.PdfWriter(imagePdf))
@@ -316,23 +322,27 @@ namespace MsgToPdfConverter.Services
                         docImg.Add(image);
                     }
                     // 3. Merge header and image PDF
-                    finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    _appendPdfs(new List<string> { headerPdf, imagePdf }, finalAttachmentPdf);
-                    allTempFiles.Add(headerPdf);
-                    allTempFiles.Add(imagePdf);
+                    finalAttachmentPdf = imagePdf;
+                    // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                    // _appendPdfs(new List<string> { headerPdf, imagePdf }, finalAttachmentPdf);
+                    // allTempFiles.Add(headerPdf);
+                    // allTempFiles.Add(imagePdf);
                     allTempFiles.Add(finalAttachmentPdf);
                 }
                 else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
                 {
                     if (_tryConvertOfficeToPdf(attPath, attPdf))
                     {
-                        string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                        _addHeaderPdf(headerPdf, headerText, null);
-                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                        _appendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
-                        allTempFiles.Add(headerPdf);
+                        // Return converted PDF directly without header
+                        finalAttachmentPdf = attPdf;
                         allTempFiles.Add(attPdf);
-                        allTempFiles.Add(finalAttachmentPdf);
+                        // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                        // _addHeaderPdf(headerPdf, headerText, null);
+                        // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                        // _appendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
+                        // allTempFiles.Add(headerPdf);
+                        // allTempFiles.Add(attPdf);
+                        // allTempFiles.Add(finalAttachmentPdf);
                     }
                     else
                     {
@@ -461,18 +471,21 @@ namespace MsgToPdfConverter.Services
                         {
                             if (entryExt == ".pdf")
                             {
-                                string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_header.pdf");
-                                CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
-                                entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
-                                _appendPdfs(new List<string> { entryHeaderPdf, entryPath }, entryPdf);
-                                allTempFiles.Add(entryHeaderPdf);
-                                allTempFiles.Add(entryPdf);
+                                // Return PDF directly without header
+                                entryPdf = entryPath;
+                                // string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_header.pdf");
+                                // CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
+                                // entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
+                                // _appendPdfs(new List<string> { entryHeaderPdf, entryPath }, entryPdf);
+                                // allTempFiles.Add(entryHeaderPdf);
+                                // allTempFiles.Add(entryPdf);
                             }
                             else if (entryExt == ".jpg" || entryExt == ".jpeg" || entryExt == ".png" || entryExt == ".bmp" || entryExt == ".gif")
                             {
+                                // Create image-only PDF without header
                                 // 1. Create header PDF (with hierarchy graphic/text)
-                                string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_header.pdf");
-                                CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
+                                // string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_header.pdf");
+                                // CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
                                 // 2. Create image-only PDF
                                 string imagePdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_image.pdf");
                                 using (var writer = new iText.Kernel.Pdf.PdfWriter(imagePdf))
@@ -484,10 +497,11 @@ namespace MsgToPdfConverter.Services
                                     docImg.Add(image);
                                 }
                                 // 3. Merge header and image PDF
-                                entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
-                                _appendPdfs(new List<string> { entryHeaderPdf, imagePdf }, entryPdf);
-                                allTempFiles.Add(entryHeaderPdf);
-                                allTempFiles.Add(imagePdf);
+                                entryPdf = imagePdf;
+                                // entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
+                                // _appendPdfs(new List<string> { entryHeaderPdf, imagePdf }, entryPdf);
+                                // allTempFiles.Add(entryHeaderPdf);
+                                // allTempFiles.Add(imagePdf);
                                 allTempFiles.Add(entryPdf);
                             }
                             else if (entryExt == ".doc" || entryExt == ".docx" || entryExt == ".xls" || entryExt == ".xlsx")
@@ -495,13 +509,16 @@ namespace MsgToPdfConverter.Services
                                 string convertedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_converted.pdf");
                                 if (_tryConvertOfficeToPdf(entryPath, convertedPdf))
                                 {
-                                    string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_header.pdf");
-                                    CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
-                                    entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
-                                    _appendPdfs(new List<string> { entryHeaderPdf, convertedPdf }, entryPdf);
-                                    allTempFiles.Add(entryHeaderPdf);
+                                    // Return converted PDF directly without header
+                                    entryPdf = convertedPdf;
                                     allTempFiles.Add(convertedPdf);
-                                    allTempFiles.Add(entryPdf);
+                                    // string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_header.pdf");
+                                    // CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
+                                    // entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
+                                    // _appendPdfs(new List<string> { entryHeaderPdf, convertedPdf }, entryPdf);
+                                    // allTempFiles.Add(entryHeaderPdf);
+                                    // allTempFiles.Add(convertedPdf);
+                                    // allTempFiles.Add(entryPdf);
                                 }
                                 else
                                 {
@@ -729,18 +746,21 @@ namespace MsgToPdfConverter.Services
                         {
                             if (entryExt == ".pdf")
                             {
-                                string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_header.pdf");
-                                CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
-                                entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_merged.pdf");
-                                _appendPdfs(new List<string> { entryHeaderPdf, entryPath }, entryPdf);
-                                allTempFiles.Add(entryHeaderPdf);
-                                allTempFiles.Add(entryPdf);
+                                // Return PDF directly without header
+                                entryPdf = entryPath;
+                                // string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_header.pdf");
+                                // CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
+                                // entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_merged.pdf");
+                                // _appendPdfs(new List<string> { entryHeaderPdf, entryPath }, entryPdf);
+                                // allTempFiles.Add(entryHeaderPdf);
+                                // allTempFiles.Add(entryPdf);
                             }
                             else if (entryExt == ".jpg" || entryExt == ".jpeg" || entryExt == ".png" || entryExt == ".bmp" || entryExt == ".gif")
                             {
+                                // Create image-only PDF without header
                                 // 1. Create header PDF (with hierarchy graphic/text)
-                                string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_header.pdf");
-                                CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
+                                // string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_header.pdf");
+                                // CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
                                 // 2. Create image-only PDF
                                 string imagePdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_image.pdf");
                                 using (var writer = new iText.Kernel.Pdf.PdfWriter(imagePdf))
@@ -752,10 +772,11 @@ namespace MsgToPdfConverter.Services
                                     docImg.Add(image);
                                 }
                                 // 3. Merge header and image PDF
-                                entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_merged.pdf");
-                                _appendPdfs(new List<string> { entryHeaderPdf, imagePdf }, entryPdf);
-                                allTempFiles.Add(entryHeaderPdf);
-                                allTempFiles.Add(imagePdf);
+                                entryPdf = imagePdf;
+                                // entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_merged.pdf");
+                                // _appendPdfs(new List<string> { entryHeaderPdf, imagePdf }, entryPdf);
+                                // allTempFiles.Add(entryHeaderPdf);
+                                // allTempFiles.Add(imagePdf);
                                 allTempFiles.Add(entryPdf);
                             }
                             else if (entryExt == ".doc" || entryExt == ".docx" || entryExt == ".xls" || entryExt == ".xlsx")
@@ -763,13 +784,16 @@ namespace MsgToPdfConverter.Services
                                 string convertedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_converted.pdf");
                                 if (_tryConvertOfficeToPdf(entryPath, convertedPdf))
                                 {
-                                    string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_header.pdf");
-                                    CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
-                                    entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_merged.pdf");
-                                    _appendPdfs(new List<string> { entryHeaderPdf, convertedPdf }, entryPdf);
-                                    allTempFiles.Add(entryHeaderPdf);
+                                    // Return converted PDF directly without header
+                                    entryPdf = convertedPdf;
                                     allTempFiles.Add(convertedPdf);
-                                    allTempFiles.Add(entryPdf);
+                                    // string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_header.pdf");
+                                    // CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
+                                    // entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_merged.pdf");
+                                    // _appendPdfs(new List<string> { entryHeaderPdf, convertedPdf }, entryPdf);
+                                    // allTempFiles.Add(entryHeaderPdf);
+                                    // allTempFiles.Add(convertedPdf);
+                                    // allTempFiles.Add(entryPdf);
                                 }
                                 else
                                 {
@@ -916,18 +940,21 @@ namespace MsgToPdfConverter.Services
             {
                 if (ext == ".pdf")
                 {
-                    string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
-                    finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    _appendPdfs(new List<string> { headerPdf, attPath }, finalAttachmentPdf);
-                    allTempFiles.Add(headerPdf);
-                    allTempFiles.Add(finalAttachmentPdf);
+                    // Return PDF directly without header
+                    finalAttachmentPdf = attPath;
+                    // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                    // CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
+                    // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                    // _appendPdfs(new List<string> { headerPdf, attPath }, finalAttachmentPdf);
+                    // allTempFiles.Add(headerPdf);
+                    // allTempFiles.Add(finalAttachmentPdf);
                 }
                 else if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".gif")
                 {
+                    // Create image-only PDF without header
                     // 1. Create header PDF (with hierarchy graphic/text)
-                    string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
+                    // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                    // CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
                     // 2. Create image-only PDF
                     string imagePdf = Path.Combine(tempDir, Guid.NewGuid() + "_image.pdf");
                     using (var writer = new iText.Kernel.Pdf.PdfWriter(imagePdf))
@@ -939,23 +966,27 @@ namespace MsgToPdfConverter.Services
                         docImg.Add(image);
                     }
                     // 3. Merge header and image PDF
-                    finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    _appendPdfs(new List<string> { headerPdf, imagePdf }, finalAttachmentPdf);
-                    allTempFiles.Add(headerPdf);
-                    allTempFiles.Add(imagePdf);
+                    finalAttachmentPdf = imagePdf;
+                    // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                    // _appendPdfs(new List<string> { headerPdf, imagePdf }, finalAttachmentPdf);
+                    // allTempFiles.Add(headerPdf);
+                    // allTempFiles.Add(imagePdf);
                     allTempFiles.Add(finalAttachmentPdf);
                 }
                 else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
                 {
                     if (_tryConvertOfficeToPdf(attPath, attPdf))
                     {
-                        string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                        CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
-                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                        _appendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
-                        allTempFiles.Add(headerPdf);
+                        // Return converted PDF directly without header
+                        finalAttachmentPdf = attPdf;
                         allTempFiles.Add(attPdf);
-                        allTempFiles.Add(finalAttachmentPdf);
+                        // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
+                        // CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
+                        // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
+                        // _appendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
+                        // allTempFiles.Add(headerPdf);
+                        // allTempFiles.Add(attPdf);
+                        // allTempFiles.Add(finalAttachmentPdf);
                     }
                     else
                     {
