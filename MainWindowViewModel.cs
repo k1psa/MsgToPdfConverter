@@ -199,6 +199,11 @@ namespace MsgToPdfConverter
                 if (CombineAllPdfs && !string.IsNullOrEmpty(CombinedPdfOutputPath) && generatedPdfs.Count > 0)
                 {
                     PdfAppendTest.AppendPdfs(generatedPdfs, CombinedPdfOutputPath);
+                    // Delete individual PDFs after combining
+                    foreach (var pdf in generatedPdfs)
+                    {
+                        try { if (File.Exists(pdf)) File.Delete(pdf); } catch { }
+                    }
                     MessageBox.Show($"All PDFs combined into: {CombinedPdfOutputPath}", "PDF Combined", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
                 string statusMessage = result.Cancelled
