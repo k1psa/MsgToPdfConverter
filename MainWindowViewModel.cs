@@ -190,28 +190,30 @@ namespace MsgToPdfConverter
                             Console.WriteLine($"Progress: {processed}/{total} - {statusText}");
                         },
                         () => CancellationRequested,
-                        (msg) => MessageBox.Show(msg, "Processing Results", MessageBoxButton.OK, MessageBoxImage.Information),
+                        null, // no messagebox during conversion
                         generatedPdfs // <-- pass list to collect generated PDFs
                     );
                     return res;
                 });
-                // Combine PDFs if requested
+                string statusMessage;
                 if (CombineAllPdfs && !string.IsNullOrEmpty(CombinedPdfOutputPath) && generatedPdfs.Count > 0)
                 {
                     PdfAppendTest.AppendPdfs(generatedPdfs, CombinedPdfOutputPath);
-                    // Delete individual PDFs after combining
                     foreach (var pdf in generatedPdfs)
                     {
                         try { if (File.Exists(pdf)) File.Delete(pdf); } catch { }
                     }
-                    MessageBox.Show($"All PDFs combined into: {CombinedPdfOutputPath}", "PDF Combined", MessageBoxButton.OK, MessageBoxImage.Information);
+                    statusMessage = $"{generatedPdfs.Count} file(s) have been combined into {System.IO.Path.GetFileName(CombinedPdfOutputPath)}";
                 }
-                string statusMessage = result.Cancelled
-                    ? $"Processing cancelled. Processed {result.Processed} files. Success: {result.Success}, Failed: {result.Fail}"
-                    : $"Processing completed. Total files: {SelectedFiles.Count}, Success: {result.Success}, Failed: {result.Fail}";
+                else
+                {
+                    statusMessage = result.Cancelled
+                        ? $"Processing cancelled. Processed {result.Processed} files. Success: {result.Success}, Failed: {result.Fail}"
+                        : $"Processing completed. Total files: {SelectedFiles.Count}, Success: {result.Success}, Failed: {result.Fail}";
+                }
                 Console.WriteLine(statusMessage);
                 MessageBox.Show(statusMessage, "Processing Results", MessageBoxButton.OK,
-                    result.Fail > 0 ? MessageBoxImage.Warning : MessageBoxImage.Information);
+                    (result.Fail > 0 && !CombineAllPdfs) ? MessageBoxImage.Warning : MessageBoxImage.Information);
             }
             catch (Exception ex)
             {
