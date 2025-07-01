@@ -106,20 +106,22 @@ namespace MsgToPdfConverter.Services
                             if (att is Storage.Attachment a)
                             {
                                 Console.WriteLine($"[DEBUG] Attachment: {a.FileName}, IsInline: {a.IsInline}, ContentId: '{a.ContentId}', Size: {a.Data?.Length ?? 0} bytes");
-                                // Skip attachments if they are marked as inline OR have a ContentId that's referenced in the email body
-                                if (a.IsInline == true || (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' '))))
+                                string ext = System.IO.Path.GetExtension(a.FileName ?? "").ToLowerInvariant();
+                                bool isImage = ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" || ext == ".bmp";
+                                // Only skip inline or signature images, not other file types
+                                if (isImage)
                                 {
-                                    Console.WriteLine($"[DEBUG] Skipping inline attachment (IsInline: {a.IsInline} or referenced in email body): {a.FileName}");
-                                    continue;
+                                    if (a.IsInline == true || (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' '))))
+                                    {
+                                        Console.WriteLine($"[DEBUG] Skipping inline attachment (IsInline: {a.IsInline} or referenced in email body): {a.FileName}");
+                                        continue;
+                                    }
+                                    if (IsLikelySignatureImage(a))
+                                    {
+                                        Console.WriteLine($"[DEBUG] Skipping likely signature/decorative image: {a.FileName}");
+                                        continue;
+                                    }
                                 }
-
-                                // Skip small images that are likely signature images or decorative elements
-                                if (IsLikelySignatureImage(a))
-                                {
-                                    Console.WriteLine($"[DEBUG] Skipping likely signature/decorative image: {a.FileName}");
-                                    continue;
-                                }
-
                                 Console.WriteLine($"[DEBUG] Adding attachment for processing: {a.FileName}");
                                 typedAttachments.Add(a);
                             }
@@ -206,9 +208,18 @@ namespace MsgToPdfConverter.Services
                     msg = null;
                     GC.Collect();
                     GC.WaitForPendingFinalizers();
-                    if (deleteMsgAfterConversion && System.IO.File.Exists(msgFilePath))
+                    Console.WriteLine($"[DELETE] Should delete: {msgFilePath}, deleteMsgAfterConversion={deleteMsgAfterConversion}");
+                    if (deleteMsgAfterConversion)
                     {
-                        try { FileService.MoveFileToRecycleBin(msgFilePath); } catch { }
+                        if (System.IO.File.Exists(msgFilePath))
+                        {
+                            Console.WriteLine($"[DELETE] Attempting to delete: {msgFilePath}");
+                            try { FileService.MoveFileToRecycleBin(msgFilePath); } catch (Exception ex) { Console.WriteLine($"[DELETE] Failed: {ex.Message}"); }
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[DELETE] File not found: {msgFilePath}");
+                        }
                     }
                 }
             }

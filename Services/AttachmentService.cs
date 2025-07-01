@@ -991,6 +991,7 @@ namespace MsgToPdfConverter.Services
         /// </summary>
         public string ProcessSingleAttachmentWithHierarchy(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false)
         {
+            Console.WriteLine($"[ATTACH-DEBUG] ENTER: attName={att?.FileName}, attPath={attPath}, tempDir={tempDir}, headerText={headerText}, parentChain=[{string.Join(" -> ", parentChain ?? new List<string>())}], currentItem={currentItem}, extractOriginalOnly={extractOriginalOnly}");
             string attName = att.FileName ?? "attachment";
             string ext = Path.GetExtension(attName).ToLowerInvariant();
             string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
@@ -1002,12 +1003,6 @@ namespace MsgToPdfConverter.Services
                 {
                     // Return PDF directly without header
                     finalAttachmentPdf = attPath;
-                    // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    // CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
-                    // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    // _appendPdfs(new List<string> { headerPdf, attPath }, finalAttachmentPdf);
-                    // allTempFiles.Add(headerPdf);
-                    // allTempFiles.Add(finalAttachmentPdf);
                 }
                 else if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".gif")
                 {
@@ -1092,6 +1087,7 @@ namespace MsgToPdfConverter.Services
                 allTempFiles.Add(finalAttachmentPdf);
             }
 
+            Console.WriteLine($"[ATTACH-DEBUG] EXIT: attName={att?.FileName}, resultPdf={finalAttachmentPdf}");
             return finalAttachmentPdf;
         }
 

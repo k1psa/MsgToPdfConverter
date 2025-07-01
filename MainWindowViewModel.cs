@@ -125,6 +125,7 @@ namespace MsgToPdfConverter
         {
             if (IsConverting) return;
             Console.WriteLine($"Starting conversion for {SelectedFiles.Count} files. Output folder: {SelectedOutputFolder}");
+            Console.WriteLine($"[DEBUG] Passing DeleteMsgAfterConversion: {DeleteMsgAfterConversion}");
             IsConverting = true;
             ProgressValue = 0;
             ProgressMax = SelectedFiles.Count;
@@ -137,8 +138,8 @@ namespace MsgToPdfConverter
                         new System.Collections.Generic.List<string>(SelectedFiles),
                         SelectedOutputFolder,
                         AppendAttachments,
-                        DeleteMsgAfterConversion,
                         false, // always ignore extractOriginalOnly
+                        DeleteMsgAfterConversion,
                         _emailService,
                         _attachmentService,
                         (processed, total, progress, statusText) =>
@@ -187,6 +188,7 @@ namespace MsgToPdfConverter
             if (optionsWindow.ShowDialog() == true)
             {
                 DeleteMsgAfterConversion = optionsWindow.DeleteMsgAfterConversion;
+                Console.WriteLine($"[DEBUG] DeleteMsgAfterConversion set to: {DeleteMsgAfterConversion}");
             }
         }
 
