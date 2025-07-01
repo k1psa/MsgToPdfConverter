@@ -111,6 +111,14 @@ namespace MsgToPdfConverter.Services
                                     Console.WriteLine($"[DEBUG] Skipping inline attachment (referenced in email body): {a.FileName}");
                                     continue;
                                 }
+
+                                // Skip small images that are likely signature images or decorative elements
+                                if (IsLikelySignatureImage(a))
+                                {
+                                    Console.WriteLine($"[DEBUG] Skipping likely signature/decorative image: {a.FileName}");
+                                    continue;
+                                }
+
                                 Console.WriteLine($"[DEBUG] Adding attachment for processing: {a.FileName}");
                                 typedAttachments.Add(a);
                             }
@@ -204,6 +212,57 @@ namespace MsgToPdfConverter.Services
                 }
             }
             return (success, fail, processed, isCancellationRequested());
+        }
+
+        /// <summary>
+        /// Determines if an attachment is likely a signature image or decorative element that should be skipped
+        /// </summary>
+        private bool IsLikelySignatureImage(Storage.Attachment attachment)
+        {
+            try
+            {
+                string fileName = attachment.FileName ?? "";
+                string ext = Path.GetExtension(fileName).ToLowerInvariant();
+
+                // Only check image files
+                if (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".gif" && ext != ".bmp")
+                {
+                    return false; // Not an image, so not a signature image
+                }
+
+                // Check file size - signature images are typically small (less than 50KB)
+                int fileSizeKB = (attachment.Data?.Length ?? 0) / 1024;
+                bool isSmallImage = fileSizeKB < 50;
+
+                // Check for common signature image patterns in filename
+                string lowerFileName = fileName.ToLowerInvariant();
+                bool hasSignaturePattern = lowerFileName.Contains("image") ||
+                                         lowerFileName.Contains("signature") ||
+                                         lowerFileName.Contains("logo") ||
+                                         lowerFileName.Contains("banner") ||
+                                         lowerFileName.StartsWith("oledata.mso");
+
+                // If it's a small image with signature patterns, likely a signature
+                if (isSmallImage && hasSignaturePattern)
+                {
+                    Console.WriteLine($"[FILTER] Detected signature image: {fileName} ({fileSizeKB}KB)");
+                    return true;
+                }
+
+                // If it's marked as inline AND small, likely decorative/signature
+                if (attachment.IsInline == true && isSmallImage)
+                {
+                    Console.WriteLine($"[FILTER] Detected small inline image: {fileName} ({fileSizeKB}KB)");
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FILTER] Error checking signature image {attachment.FileName}: {ex.Message}");
+                return false; // If in doubt, don't filter out
+            }
         }
     }
 }

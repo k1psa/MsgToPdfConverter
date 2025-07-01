@@ -60,6 +60,7 @@ namespace MsgToPdfConverter.Services
                 .Where(a =>
                     !string.IsNullOrEmpty(a.FileName) &&
                     (string.IsNullOrEmpty(a.ContentId) || !inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' '))) &&
+                    !IsLikelySignatureImage(a) &&
                     !new[] { ".p7s", ".p7m", ".smime", ".asc", ".sig" }.Contains(Path.GetExtension(a.FileName).ToLowerInvariant())
                 )
                 .Select(a => System.Net.WebUtility.HtmlEncode(a.FileName)));
@@ -335,6 +336,54 @@ namespace MsgToPdfConverter.Services
                    "</html>";
 
             return (html, tempFiles);
+        }
+
+        /// <summary>
+        /// Determines if an attachment is likely a signature image or decorative element that should be skipped
+        /// </summary>
+        private bool IsLikelySignatureImage(Storage.Attachment attachment)
+        {
+            try
+            {
+                string fileName = attachment.FileName ?? "";
+                string ext = Path.GetExtension(fileName).ToLowerInvariant();
+
+                // Only check image files
+                if (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".gif" && ext != ".bmp")
+                {
+                    return false; // Not an image, so not a signature image
+                }
+
+                // Check file size - signature images are typically small (less than 50KB)
+                int fileSizeKB = (attachment.Data?.Length ?? 0) / 1024;
+                bool isSmallImage = fileSizeKB < 50;
+
+                // Check for common signature image patterns in filename
+                string lowerFileName = fileName.ToLowerInvariant();
+                bool hasSignaturePattern = lowerFileName.Contains("image") ||
+                                         lowerFileName.Contains("signature") ||
+                                         lowerFileName.Contains("logo") ||
+                                         lowerFileName.Contains("banner") ||
+                                         lowerFileName.StartsWith("oledata.mso");
+
+                // If it's a small image with signature patterns, likely a signature
+                if (isSmallImage && hasSignaturePattern)
+                {
+                    return true;
+                }
+
+                // If it's marked as inline AND small, likely decorative/signature
+                if (attachment.IsInline == true && isSmallImage)
+                {
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception)
+            {
+                return false; // If in doubt, don't filter out
+            }
         }
     }
 }
