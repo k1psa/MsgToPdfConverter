@@ -98,21 +98,29 @@ namespace MsgToPdfConverter.Services
                     GC.WaitForPendingFinalizers();
                     if (appendAttachments && msg.Attachments != null && msg.Attachments.Count > 0)
                     {
+                        Console.WriteLine($"[DEBUG] Found {msg.Attachments.Count} total attachments in {baseName}");
                         var typedAttachments = new List<Storage.Attachment>();
                         var nestedMessages = new List<Storage.Message>();
                         foreach (var att in msg.Attachments)
                         {
                             if (att is Storage.Attachment a)
                             {
-                                if ((a.IsInline == true) || (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' '))))
+                                Console.WriteLine($"[DEBUG] Attachment: {a.FileName}, IsInline: {a.IsInline}, ContentId: '{a.ContentId}', Size: {a.Data?.Length ?? 0} bytes");
+                                if (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' ')))
+                                {
+                                    Console.WriteLine($"[DEBUG] Skipping inline attachment (referenced in email body): {a.FileName}");
                                     continue;
+                                }
+                                Console.WriteLine($"[DEBUG] Adding attachment for processing: {a.FileName}");
                                 typedAttachments.Add(a);
                             }
                             else if (att is Storage.Message nestedMsg)
                             {
+                                Console.WriteLine($"[DEBUG] Found nested message: {nestedMsg.Subject ?? "[No Subject]"}");
                                 nestedMessages.Add(nestedMsg);
                             }
                         }
+                        Console.WriteLine($"[DEBUG] After filtering: {typedAttachments.Count} regular attachments, {nestedMessages.Count} nested messages");
                         var allPdfFiles = new List<string> { pdfFilePath };
                         var allTempFiles = new List<string>();
                         string tempDir = System.IO.Path.GetDirectoryName(pdfFilePath);

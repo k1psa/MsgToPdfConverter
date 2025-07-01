@@ -59,7 +59,6 @@ namespace MsgToPdfConverter.Services
                 .OfType<Storage.Attachment>()
                 .Where(a =>
                     !string.IsNullOrEmpty(a.FileName) &&
-                    (a.IsInline != true) &&
                     (string.IsNullOrEmpty(a.ContentId) || !inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' '))) &&
                     !new[] { ".p7s", ".p7m", ".smime", ".asc", ".sig" }.Contains(Path.GetExtension(a.FileName).ToLowerInvariant())
                 )

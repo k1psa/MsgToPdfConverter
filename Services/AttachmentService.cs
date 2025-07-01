@@ -205,11 +205,15 @@ namespace MsgToPdfConverter.Services
                 {
                     Console.WriteLine($"[MSG] Depth {depth} - Examining attachment: {a.FileName} (IsInline: {a.IsInline}, ContentId: {a.ContentId})");
 
-                    if ((a.IsInline == true) || (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '\"', '\'', ' '))))
+                    // Only skip attachments if they have a ContentId that's actually referenced in the email body as an inline image
+                    // Don't skip attachments just because they are marked as IsInline - they could still be real attachments
+                    if (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '\"', '\'', ' ')))
                     {
-                        Console.WriteLine($"[MSG] Depth {depth} - Skipping inline attachment: {a.FileName}");
+                        Console.WriteLine($"[MSG] Depth {depth} - Skipping inline attachment (referenced in email body): {a.FileName}");
                         continue;
                     }
+
+                    Console.WriteLine($"[MSG] Depth {depth} - Including attachment for processing: {a.FileName}");
 
                     typedAttachments.Add(a);
                 }
