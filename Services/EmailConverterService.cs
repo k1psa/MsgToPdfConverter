@@ -10,7 +10,24 @@ namespace MsgToPdfConverter.Services
     {
         public string BuildEmailHtml(Storage.Message msg, bool extractOriginalOnly = false)
         {
-            string from = msg.Sender?.DisplayName ?? msg.Sender?.Email ?? "";
+            // Build proper From field with both name and email
+            string from = "";
+            if (msg.Sender != null)
+            {
+                if (!string.IsNullOrEmpty(msg.Sender.DisplayName) && !string.IsNullOrEmpty(msg.Sender.Email))
+                {
+                    from = $"{msg.Sender.DisplayName} <{msg.Sender.Email}>";
+                }
+                else if (!string.IsNullOrEmpty(msg.Sender.DisplayName))
+                {
+                    from = msg.Sender.DisplayName;
+                }
+                else if (!string.IsNullOrEmpty(msg.Sender.Email))
+                {
+                    from = msg.Sender.Email;
+                }
+            }
+
             string sent = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("f") : "";
             string to = string.Join(", ", msg.Recipients?.FindAll(r => r.Type == Storage.Recipient.RecipientType.To)?.ConvertAll(r => r.DisplayName + (string.IsNullOrEmpty(r.Email) ? "" : $" <{r.Email}>")) ?? new List<string>());
             string cc = string.Join(", ", msg.Recipients?.FindAll(r => r.Type == Storage.Recipient.RecipientType.Cc)?.ConvertAll(r => r.DisplayName + (string.IsNullOrEmpty(r.Email) ? "" : $" <{r.Email}>")) ?? new List<string>());
@@ -277,7 +294,24 @@ namespace MsgToPdfConverter.Services
         /// </summary>
         public (string Html, List<string> TempFiles) BuildEmailHtmlWithInlineImages(Storage.Message msg, bool extractOriginalOnly = false)
         {
-            string from = msg.Sender?.DisplayName ?? msg.Sender?.Email ?? "";
+            // Build proper From field with both name and email
+            string from = "";
+            if (msg.Sender != null)
+            {
+                if (!string.IsNullOrEmpty(msg.Sender.DisplayName) && !string.IsNullOrEmpty(msg.Sender.Email))
+                {
+                    from = $"{msg.Sender.DisplayName} <{msg.Sender.Email}>";
+                }
+                else if (!string.IsNullOrEmpty(msg.Sender.DisplayName))
+                {
+                    from = msg.Sender.DisplayName;
+                }
+                else if (!string.IsNullOrEmpty(msg.Sender.Email))
+                {
+                    from = msg.Sender.Email;
+                }
+            }
+
             string sent = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("f") : "";
             string to = string.Join(", ", msg.Recipients?.FindAll(r => r.Type == Storage.Recipient.RecipientType.To)?.ConvertAll(r => r.DisplayName + (string.IsNullOrEmpty(r.Email) ? "" : $" <{r.Email}>")) ?? new List<string>());
             string cc = string.Join(", ", msg.Recipients?.FindAll(r => r.Type == Storage.Recipient.RecipientType.Cc)?.ConvertAll(r => r.DisplayName + (string.IsNullOrEmpty(r.Email) ? "" : $" <{r.Email}>")) ?? new List<string>());

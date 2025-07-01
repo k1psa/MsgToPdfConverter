@@ -365,11 +365,21 @@ namespace MsgToPdfConverter.Services
                 {
                     // Use hierarchy-aware ZIP processing with empty parent chain for legacy calls
                     finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName);
+                    // Add the final ZIP PDF to temp files for cleanup after it's merged into main output
+                    if (finalAttachmentPdf != null)
+                    {
+                        allTempFiles.Add(finalAttachmentPdf);
+                    }
                 }
                 else if (ext == ".7z")
                 {
                     // Use hierarchy-aware 7z processing with empty parent chain for legacy calls
                     finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName);
+                    // Add the final 7z PDF to temp files for cleanup after it's merged into main output
+                    if (finalAttachmentPdf != null)
+                    {
+                        allTempFiles.Add(finalAttachmentPdf);
+                    }
                 }
                 else
                 {
@@ -1050,11 +1060,21 @@ namespace MsgToPdfConverter.Services
                 {
                     // Process ZIP files with hierarchy support
                     finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem);
+                    // Add the final ZIP PDF to temp files for cleanup after it's merged into main output
+                    if (finalAttachmentPdf != null)
+                    {
+                        allTempFiles.Add(finalAttachmentPdf);
+                    }
                 }
                 else if (ext == ".7z")
                 {
                     // Process 7z files with hierarchy support
                     finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem);
+                    // Add the final 7z PDF to temp files for cleanup after it's merged into main output
+                    if (finalAttachmentPdf != null)
+                    {
+                        allTempFiles.Add(finalAttachmentPdf);
+                    }
                 }
                 else
                 {
