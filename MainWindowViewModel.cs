@@ -17,7 +17,6 @@ namespace MsgToPdfConverter
         private string _selectedOutputFolder;
         private bool _isConverting;
         private bool _cancellationRequested;
-        private bool _extractOriginalOnly;
         private bool _deleteMsgAfterConversion;
         private bool _isPinned;
         private int _progressValue;
@@ -50,7 +49,8 @@ namespace MsgToPdfConverter
             PinCommand = new RelayCommand(TogglePin);
             RemoveSelectedFilesCommand = new RelayCommand(RemoveSelectedFiles);
             FileCountText = $"Files selected: {_selectedFiles.Count}";
-            _selectedFiles.CollectionChanged += (s, e) => {
+            _selectedFiles.CollectionChanged += (s, e) =>
+            {
                 FileCountText = $"Files selected: {_selectedFiles.Count}";
                 (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
             };
@@ -62,7 +62,6 @@ namespace MsgToPdfConverter
         public string SelectedOutputFolder { get => _selectedOutputFolder; set { _selectedOutputFolder = value; OnPropertyChanged(nameof(SelectedOutputFolder)); } }
         public bool IsConverting { get => _isConverting; set { _isConverting = value; OnPropertyChanged(nameof(IsConverting)); (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged(); } }
         public bool CancellationRequested { get => _cancellationRequested; set { _cancellationRequested = value; OnPropertyChanged(nameof(CancellationRequested)); } }
-        public bool ExtractOriginalOnly { get => _extractOriginalOnly; set { _extractOriginalOnly = value; OnPropertyChanged(nameof(ExtractOriginalOnly)); } }
         public bool DeleteMsgAfterConversion { get => _deleteMsgAfterConversion; set { _deleteMsgAfterConversion = value; OnPropertyChanged(nameof(DeleteMsgAfterConversion)); } }
         public bool IsPinned { get => _isPinned; set { _isPinned = value; OnPropertyChanged(nameof(IsPinned)); } }
         public int ProgressValue { get => _progressValue; set { _progressValue = value; OnPropertyChanged(nameof(ProgressValue)); } }
@@ -138,8 +137,8 @@ namespace MsgToPdfConverter
                         new System.Collections.Generic.List<string>(SelectedFiles),
                         SelectedOutputFolder,
                         AppendAttachments,
-                        ExtractOriginalOnly,
                         DeleteMsgAfterConversion,
+                        false, // always ignore extractOriginalOnly
                         _emailService,
                         _attachmentService,
                         (processed, total, progress, statusText) =>
@@ -181,13 +180,12 @@ namespace MsgToPdfConverter
 
         private void OpenOptions(object parameter)
         {
-            var optionsWindow = new OptionsWindow(ExtractOriginalOnly, DeleteMsgAfterConversion)
+            var optionsWindow = new OptionsWindow(DeleteMsgAfterConversion)
             {
                 Owner = Application.Current.MainWindow
             };
             if (optionsWindow.ShowDialog() == true)
             {
-                ExtractOriginalOnly = optionsWindow.ExtractOriginalOnly;
                 DeleteMsgAfterConversion = optionsWindow.DeleteMsgAfterConversion;
             }
         }

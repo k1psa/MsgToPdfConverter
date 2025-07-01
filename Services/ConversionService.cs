@@ -75,7 +75,7 @@ namespace MsgToPdfConverter.Services
                     string pdfFilePath = System.IO.Path.Combine(dir, $"{baseName} - {datePart}.pdf");
                     if (System.IO.File.Exists(pdfFilePath))
                         System.IO.File.Delete(pdfFilePath);
-                    var htmlResult = emailService.BuildEmailHtmlWithInlineImages(msg, extractOriginalOnly);
+                    var htmlResult = emailService.BuildEmailHtmlWithInlineImages(msg, false);
                     string htmlWithHeader = htmlResult.Html;
                     var tempHtmlPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid() + ".html");
                     System.IO.File.WriteAllText(tempHtmlPath, htmlWithHeader, System.Text.Encoding.UTF8);
@@ -145,7 +145,7 @@ namespace MsgToPdfConverter.Services
                                 System.IO.File.WriteAllBytes(attPath, att.Data);
                                 allTempFiles.Add(attPath);
                                 var attachmentParentChain = new List<string> { msg.Subject ?? System.IO.Path.GetFileName(msgFilePath) };
-                                string finalAttachmentPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, attachmentParentChain, attName, extractOriginalOnly);
+                                string finalAttachmentPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, attachmentParentChain, attName, false);
                                 if (finalAttachmentPdf != null)
                                     allPdfFiles.Add(finalAttachmentPdf);
                             }
@@ -165,7 +165,7 @@ namespace MsgToPdfConverter.Services
                             string nestedSubject = nestedMsg.Subject ?? $"nested_msg_depth_1";
                             string nestedHeaderText = $"Attachment (Depth 1): {nestedIndex + 1}/{nestedMessages.Count} - Nested Email: {nestedSubject}";
                             var initialParentChain = new List<string> { msg.Subject ?? System.IO.Path.GetFileName(msgFilePath) };
-                            attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, 1, 5, nestedHeaderText, initialParentChain);
+                            attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, false, 1, 5, nestedHeaderText, initialParentChain);
                         }
                         string mergedPdf = System.IO.Path.Combine(tempDir, System.IO.Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
                         PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf);
