@@ -446,15 +446,23 @@ namespace MsgToPdfConverter.Services
                         }
                         fileIndex++;
 
+                        // Get the final filename for the current item in hierarchy
+                        string currentFileName = Path.GetFileName(entry.FullName);
+                        string entryExt = Path.GetExtension(entry.Name).ToLowerInvariant();
+
+                        // Skip signature images before extracting the file
+                        if ((entryExt == ".jpg" || entryExt == ".jpeg" || entryExt == ".png" || entryExt == ".bmp" || entryExt == ".gif") &&
+                            IsLikelySignatureImageByNameAndSize(currentFileName, entry.Length))
+                        {
+                            Console.WriteLine($"[ZIP] Skipping likely signature image: {currentFileName}");
+                            continue; // Skip this image file entirely - don't extract or process
+                        }
+
                         string entryPath = Path.Combine(tempDir, $"zip_{Guid.NewGuid()}_{Path.GetFileName(entry.Name)}");
                         entry.ExtractToFile(entryPath, true);
                         allTempFiles.Add(entryPath);
 
-                        string entryExt = Path.GetExtension(entry.Name).ToLowerInvariant();
                         string entryPdf = null;
-
-                        // Get the final filename for the current item in hierarchy
-                        string currentFileName = Path.GetFileName(entry.FullName);
 
                         try
                         {
@@ -520,61 +528,66 @@ namespace MsgToPdfConverter.Services
                             }
                             else if (entryExt == ".msg")
                             {
-                                // Handle nested MSG files in ZIP
+                                // Handle nested MSG files in ZIP with full recursive processing (including attachments)
                                 try
                                 {
                                     using (var nestedMsg = new Storage.Message(entryPath))
                                     {
-                                        string nestedSubject = nestedMsg.Subject ?? currentFileName;
-                                        string nestedHeaderText = $"Attachment {fileIndex}/{fileCount} - Nested Email: {nestedSubject}";
+                                        Console.WriteLine($"[ZIP] Processing nested MSG with full recursion: {currentFileName}");
 
-                                        // COMMENTED OUT: Create header for nested MSG
-                                        // string nestedHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_nested_header.pdf");
-                                        // CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, nestedHeaderText, nestedHeaderPdf);
-                                        // allTempFiles.Add(nestedHeaderPdf);
+                                        // Create a temporary list to collect all PDFs from this nested MSG
+                                        var nestedPdfFiles = new List<string>();
+                                        var nestedTempFiles = new List<string>();
 
-                                        // Convert nested MSG to HTML and then PDF
-                                        var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(nestedMsg, false);
-                                        string nestedHtmlPath = Path.Combine(tempDir, Guid.NewGuid() + "_nested.html");
-                                        File.WriteAllText(nestedHtmlPath, htmlResult.Html, System.Text.Encoding.UTF8);
+                                        // Process the MSG recursively (this will handle the email body + all attachments)
+                                        ProcessMsgAttachmentsRecursively(nestedMsg, nestedPdfFiles, nestedTempFiles, tempDir, false, 1, 5,
+                                            $"Nested Email from ZIP: {nestedMsg.Subject ?? currentFileName}",
+                                            new List<string>(zipEntryParentChain));
 
-                                        string nestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested.pdf");
-                                        // Use HtmlToPdfWorker for conversion
-                                        var psi = new System.Diagnostics.ProcessStartInfo
+                                        // Add all temp files to our main cleanup list
+                                        allTempFiles.AddRange(nestedTempFiles);
+
+                                        if (nestedPdfFiles.Count > 0)
                                         {
-                                            FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
-                                            Arguments = $"--html2pdf \"{nestedHtmlPath}\" \"{nestedPdf}\"",
-                                            UseShellExecute = false,
-                                            CreateNoWindow = true,
-                                            RedirectStandardOutput = true,
-                                            RedirectStandardError = true
-                                        };
+                                            if (nestedPdfFiles.Count == 1)
+                                            {
+                                                // Single PDF from nested MSG
+                                                entryPdf = nestedPdfFiles[0];
+                                                Console.WriteLine($"[ZIP] Nested MSG produced single PDF: {entryPdf}");
+                                            }
+                                            else
+                                            {
+                                                // Multiple PDFs from nested MSG - merge them
+                                                entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_nested_merged.pdf");
+                                                _appendPdfs(nestedPdfFiles, entryPdf);
+                                                Console.WriteLine($"[ZIP] Nested MSG produced {nestedPdfFiles.Count} PDFs, merged into: {entryPdf}");
 
-                                        var proc = System.Diagnostics.Process.Start(psi);
-                                        proc.WaitForExit();
-
-                                        if (proc.ExitCode == 0 && File.Exists(nestedPdf))
-                                        {
-                                            // Return nested PDF directly without header
-                                            entryPdf = nestedPdf;
-                                            // entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_nested_merged.pdf");
-                                            // _appendPdfs(new List<string> { nestedHeaderPdf, nestedPdf }, entryPdf);
-                                            // allTempFiles.Add(nestedPdf);
+                                                // Clean up individual PDFs after merging
+                                                foreach (var pdf in nestedPdfFiles)
+                                                {
+                                                    try
+                                                    {
+                                                        if (File.Exists(pdf) && pdf != entryPdf)
+                                                        {
+                                                            File.Delete(pdf);
+                                                        }
+                                                    }
+                                                    catch { } // Ignore cleanup errors
+                                                }
+                                            }
                                         }
                                         else
                                         {
-                                            // Create simple text PDF for failed MSG conversion
+                                            // No PDFs produced - create error PDF
                                             entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_msg_error.pdf");
-                                            _addHeaderPdf(entryPdf, $"File: {currentFileName}\n(MSG conversion failed)", null);
+                                            _addHeaderPdf(entryPdf, $"File: {currentFileName}\n(No content could be extracted)", null);
+                                            allTempFiles.Add(entryPdf);
                                         }
-
-                                        allTempFiles.Add(nestedHtmlPath);
-                                        allTempFiles.Add(entryPdf);
                                     }
                                 }
                                 catch (Exception msgEx)
                                 {
-                                    Console.WriteLine($"[ZIP] Failed to process nested MSG {entry.Name}: {msgEx.Message}");
+                                    Console.WriteLine($"[ZIP] Error processing nested MSG {currentFileName}: {msgEx.Message}");
                                     entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_msg_error.pdf");
                                     _addHeaderPdf(entryPdf, $"File: {currentFileName}\n(MSG processing error: {msgEx.Message})", null);
                                     allTempFiles.Add(entryPdf);
@@ -619,11 +632,33 @@ namespace MsgToPdfConverter.Services
                     {
                         string finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_final.pdf");
                         _appendPdfs(zipPdfFiles, finalZipPdf);
-                        allTempFiles.Add(finalZipPdf);
+                        Console.WriteLine($"[ZIP] Created final merged PDF with {zipPdfFiles.Count} files: {finalZipPdf}");
+
+                        // Add individual PDFs to cleanup since they're now merged into finalZipPdf
+                        foreach (var pdf in zipPdfFiles)
+                        {
+                            if (File.Exists(pdf) && pdf != finalZipPdf)
+                            {
+                                try
+                                {
+                                    File.Delete(pdf);
+                                    Console.WriteLine($"[ZIP] Cleaned up individual PDF: {pdf}");
+                                }
+                                catch (Exception cleanupEx)
+                                {
+                                    Console.WriteLine($"[ZIP] Warning - could not delete individual PDF {pdf}: {cleanupEx.Message}");
+                                    allTempFiles.Add(pdf); // Add to cleanup list if manual delete failed
+                                }
+                            }
+                        }
+
+                        // DON'T add finalZipPdf to allTempFiles - it needs to be returned for the main output
                         return finalZipPdf;
                     }
                     else if (zipPdfFiles.Count == 1)
                     {
+                        Console.WriteLine($"[ZIP] Returning single PDF: {zipPdfFiles[0]}");
+                        // Don't add to allTempFiles - it needs to be returned for the main output
                         return zipPdfFiles[0];
                     }
                     else
@@ -703,6 +738,17 @@ namespace MsgToPdfConverter.Services
                         }
                         fileIndex++;
 
+                        string currentFileName = Path.GetFileName(entry.Key);
+                        string entryExt = Path.GetExtension(entry.Key).ToLowerInvariant();
+
+                        // Skip signature images before extracting the file
+                        if ((entryExt == ".jpg" || entryExt == ".jpeg" || entryExt == ".png" || entryExt == ".bmp" || entryExt == ".gif") &&
+                            IsLikelySignatureImageByNameAndSize(currentFileName, entry.Size))
+                        {
+                            Console.WriteLine($"[7Z] Skipping likely signature image: {currentFileName}");
+                            continue; // Skip this image file
+                        }
+
                         string entryPath = Path.Combine(tempDir, $"7z_{Guid.NewGuid()}_{Path.GetFileName(entry.Key)}");
                         using (var entryStream = entry.OpenEntryStream())
                         using (var fileStream = File.Create(entryPath))
@@ -711,9 +757,7 @@ namespace MsgToPdfConverter.Services
                         }
                         allTempFiles.Add(entryPath);
 
-                        string entryExt = Path.GetExtension(entry.Key).ToLowerInvariant();
                         string entryPdf = null;
-                        string currentFileName = Path.GetFileName(entry.Key);
 
                         try
                         {
@@ -779,60 +823,66 @@ namespace MsgToPdfConverter.Services
                             }
                             else if (entryExt == ".msg")
                             {
-                                // Handle nested MSG files in 7z
+                                // Handle nested MSG files in 7z with full recursive processing (including attachments)
                                 try
                                 {
                                     using (var nestedMsg = new Storage.Message(entryPath))
                                     {
-                                        string nestedSubject = nestedMsg.Subject ?? currentFileName;
-                                        string nestedHeaderText = $"Attachment {fileIndex}/{fileCount} - Nested Email: {nestedSubject}";
+                                        Console.WriteLine($"[7Z] Processing nested MSG with full recursion: {currentFileName}");
 
-                                        // COMMENTED OUT: Create header for nested MSG
-                                        // string nestedHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_nested_header.pdf");
-                                        // CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, nestedHeaderText, nestedHeaderPdf);
-                                        // allTempFiles.Add(nestedHeaderPdf);
+                                        // Create a temporary list to collect all PDFs from this nested MSG
+                                        var nestedPdfFiles = new List<string>();
+                                        var nestedTempFiles = new List<string>();
 
-                                        // Convert nested MSG to HTML and then PDF
-                                        var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(nestedMsg, false);
-                                        string nestedHtmlPath = Path.Combine(tempDir, Guid.NewGuid() + "_nested.html");
-                                        File.WriteAllText(nestedHtmlPath, htmlResult.Html, System.Text.Encoding.UTF8);
+                                        // Process the MSG recursively (this will handle the email body + all attachments)
+                                        ProcessMsgAttachmentsRecursively(nestedMsg, nestedPdfFiles, nestedTempFiles, tempDir, false, 1, 5,
+                                            $"Nested Email from 7z: {nestedMsg.Subject ?? currentFileName}",
+                                            new List<string>(sevenZipEntryParentChain));
 
-                                        string nestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested.pdf");
-                                        var psi = new System.Diagnostics.ProcessStartInfo
+                                        // Add all temp files to our main cleanup list
+                                        allTempFiles.AddRange(nestedTempFiles);
+
+                                        if (nestedPdfFiles.Count > 0)
                                         {
-                                            FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
-                                            Arguments = $"--html2pdf \"{nestedHtmlPath}\" \"{nestedPdf}\"",
-                                            UseShellExecute = false,
-                                            CreateNoWindow = true,
-                                            RedirectStandardOutput = true,
-                                            RedirectStandardError = true
-                                        };
+                                            if (nestedPdfFiles.Count == 1)
+                                            {
+                                                // Single PDF from nested MSG
+                                                entryPdf = nestedPdfFiles[0];
+                                                Console.WriteLine($"[7Z] Nested MSG produced single PDF: {entryPdf}");
+                                            }
+                                            else
+                                            {
+                                                // Multiple PDFs from nested MSG - merge them
+                                                entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_nested_merged.pdf");
+                                                _appendPdfs(nestedPdfFiles, entryPdf);
+                                                Console.WriteLine($"[7Z] Nested MSG produced {nestedPdfFiles.Count} PDFs, merged into: {entryPdf}");
 
-                                        var proc = System.Diagnostics.Process.Start(psi);
-                                        proc.WaitForExit();
-
-                                        if (proc.ExitCode == 0 && File.Exists(nestedPdf))
-                                        {
-                                            // Return nested PDF directly without header
-                                            entryPdf = nestedPdf;
-                                            // entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_nested_merged.pdf");
-                                            // _appendPdfs(new List<string> { nestedHeaderPdf, nestedPdf }, entryPdf);
-                                            // allTempFiles.Add(nestedPdf);
+                                                // Clean up individual PDFs after merging
+                                                foreach (var pdf in nestedPdfFiles)
+                                                {
+                                                    try
+                                                    {
+                                                        if (File.Exists(pdf) && pdf != entryPdf)
+                                                        {
+                                                            File.Delete(pdf);
+                                                        }
+                                                    }
+                                                    catch { } // Ignore cleanup errors
+                                                }
+                                            }
                                         }
                                         else
                                         {
-                                            // Create simple text PDF for failed MSG conversion
+                                            // No PDFs produced - create error PDF
                                             entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_msg_error.pdf");
-                                            _addHeaderPdf(entryPdf, $"File: {currentFileName}\n(MSG conversion failed)", null);
+                                            _addHeaderPdf(entryPdf, $"File: {currentFileName}\n(No content could be extracted)", null);
+                                            allTempFiles.Add(entryPdf);
                                         }
-
-                                        allTempFiles.Add(nestedHtmlPath);
-                                        allTempFiles.Add(entryPdf);
                                     }
                                 }
                                 catch (Exception msgEx)
                                 {
-                                    Console.WriteLine($"[7Z] Failed to process nested MSG {entry.Key}: {msgEx.Message}");
+                                    Console.WriteLine($"[7Z] Error processing nested MSG {currentFileName}: {msgEx.Message}");
                                     entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_msg_error.pdf");
                                     _addHeaderPdf(entryPdf, $"File: {currentFileName}\n(MSG processing error: {msgEx.Message})", null);
                                     allTempFiles.Add(entryPdf);
@@ -877,11 +927,33 @@ namespace MsgToPdfConverter.Services
                     {
                         string final7zPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_final.pdf");
                         _appendPdfs(sevenZipPdfFiles, final7zPdf);
-                        allTempFiles.Add(final7zPdf);
+                        Console.WriteLine($"[7Z] Created final merged PDF with {sevenZipPdfFiles.Count} files: {final7zPdf}");
+
+                        // Add individual PDFs to cleanup since they're now merged into final7zPdf
+                        foreach (var pdf in sevenZipPdfFiles)
+                        {
+                            if (File.Exists(pdf) && pdf != final7zPdf)
+                            {
+                                try
+                                {
+                                    File.Delete(pdf);
+                                    Console.WriteLine($"[7Z] Cleaned up individual PDF: {pdf}");
+                                }
+                                catch (Exception cleanupEx)
+                                {
+                                    Console.WriteLine($"[7Z] Warning - could not delete individual PDF {pdf}: {cleanupEx.Message}");
+                                    allTempFiles.Add(pdf); // Add to cleanup list if manual delete failed
+                                }
+                            }
+                        }
+
+                        // DON'T add final7zPdf to allTempFiles - it needs to be returned for the main output
                         return final7zPdf;
                     }
                     else if (sevenZipPdfFiles.Count == 1)
                     {
+                        Console.WriteLine($"[7Z] Returning single PDF: {sevenZipPdfFiles[0]}");
+                        // Don't add to allTempFiles - it needs to be returned for the main output
                         return sevenZipPdfFiles[0];
                     }
                     else
@@ -1004,6 +1076,63 @@ namespace MsgToPdfConverter.Services
         }
 
         /// <summary>
+        /// Unified method for processing MSG files - converts MSG to PDF using consistent logic
+        /// </summary>
+        /// <param name="msgFilePath">Path to the MSG file to process</param>
+        /// <param name="tempDir">Temporary directory for intermediate files</param>
+        /// <param name="allTempFiles">List to track temporary files for cleanup</param>
+        /// <returns>Path to the generated PDF, or null if conversion failed</returns>
+        private string ProcessMsgToPdf(string msgFilePath, string tempDir, List<string> allTempFiles)
+        {
+            try
+            {
+                Console.WriteLine($"[MSG] Processing MSG file: {Path.GetFileName(msgFilePath)}");
+
+                using (var nestedMsg = new Storage.Message(msgFilePath))
+                {
+                    // Convert nested MSG to HTML and then PDF
+                    var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(nestedMsg, false);
+                    string nestedHtmlPath = Path.Combine(tempDir, Guid.NewGuid() + "_nested.html");
+                    File.WriteAllText(nestedHtmlPath, htmlResult.Html, System.Text.Encoding.UTF8);
+                    allTempFiles.Add(nestedHtmlPath); // Always add HTML to temp files for cleanup
+
+                    string nestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested.pdf");
+
+                    // Use HtmlToPdfWorker for conversion
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
+                        Arguments = $"--html2pdf \"{nestedHtmlPath}\" \"{nestedPdf}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+
+                    var proc = System.Diagnostics.Process.Start(psi);
+                    proc.WaitForExit();
+
+                    if (proc.ExitCode == 0 && File.Exists(nestedPdf))
+                    {
+                        Console.WriteLine($"[MSG] Successfully converted MSG to PDF: {Path.GetFileName(msgFilePath)} -> {nestedPdf}");
+                        // Return the PDF path - caller is responsible for managing this file
+                        return nestedPdf;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[MSG] Failed to convert MSG to PDF: {Path.GetFileName(msgFilePath)}");
+                        return null;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[MSG] Error processing MSG file {Path.GetFileName(msgFilePath)}: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
         /// Determines if an attachment is likely a signature image or decorative element that should be skipped
         /// </summary>
         private bool IsLikelySignatureImage(Storage.Attachment attachment)
@@ -1050,6 +1179,56 @@ namespace MsgToPdfConverter.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"[FILTER] Error checking signature image {attachment.FileName}: {ex.Message}");
+                return false; // If in doubt, don't filter out
+            }
+        }
+
+        /// <summary>
+        /// Determines if a file is likely a signature image based on name and size (for archive processing)
+        /// </summary>
+        private bool IsLikelySignatureImageByNameAndSize(string fileName, long fileSize)
+        {
+            try
+            {
+                string ext = Path.GetExtension(fileName).ToLowerInvariant();
+
+                // Only check image files
+                if (ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".gif" && ext != ".bmp")
+                {
+                    return false; // Not an image, so not a signature image
+                }
+
+                // Check file size - signature images are typically small (less than 50KB)
+                int fileSizeKB = (int)(fileSize / 1024);
+                bool isSmallImage = fileSizeKB < 50;
+
+                // Check for common signature image patterns in filename
+                string lowerFileName = fileName.ToLowerInvariant();
+                bool hasSignaturePattern = lowerFileName.Contains("image") ||
+                                         lowerFileName.Contains("signature") ||
+                                         lowerFileName.Contains("logo") ||
+                                         lowerFileName.Contains("banner") ||
+                                         lowerFileName.StartsWith("oledata.mso");
+
+                // If it's a small image with signature patterns, likely a signature
+                if (isSmallImage && hasSignaturePattern)
+                {
+                    Console.WriteLine($"[FILTER] Detected signature image: {fileName} ({fileSizeKB}KB)");
+                    return true;
+                }
+
+                // If it's very small (less than 10KB), likely decorative/signature
+                if (fileSizeKB < 10)
+                {
+                    Console.WriteLine($"[FILTER] Detected very small image: {fileName} ({fileSizeKB}KB)");
+                    return true;
+                }
+
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FILTER] Error checking signature image {fileName}: {ex.Message}");
                 return false; // If in doubt, don't filter out
             }
         }
