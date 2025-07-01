@@ -55,6 +55,7 @@ namespace MsgToPdfConverter.Services
             Action<int, int, int, string> updateProgress, // (processed, total, progress, statusText)
             Func<bool> isCancellationRequested,
             Action<string> showMessageBox // (message)
+            , List<string> generatedPdfs = null // optional: collect generated PDFs
         )
         {
             int success = 0, fail = 0, processed = 0;
@@ -195,6 +196,8 @@ namespace MsgToPdfConverter.Services
                             System.IO.File.Move(mergedPdf, pdfFilePath);
                         }
                     }
+                    // Add generated PDF to list if requested
+                    generatedPdfs?.Add(pdfFilePath);
                     success++;
                 }
                 catch

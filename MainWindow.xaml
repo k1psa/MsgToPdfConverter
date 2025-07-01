@@ -7,14 +7,14 @@
         Height="370"
         Width="525">
     <Window.DataContext>
-        <local:MainWindowViewModel />
+        <local:MainWindowViewModel/>
     </Window.DataContext>
     <Window.Resources>
-        <utils:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
-        <utils:InverseBoolConverter x:Key="InverseBoolConverter" />
-        <utils:StringToVisibilityConverter x:Key="StringToVisibilityConverter" />
-        <utils:PinForegroundConverter x:Key="PinForegroundConverter" />
-        <utils:PinOpacityConverter x:Key="PinOpacityConverter" />
+        <utils:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+        <utils:InverseBoolConverter x:Key="InverseBoolConverter"/>
+        <utils:StringToVisibilityConverter x:Key="StringToVisibilityConverter"/>
+        <utils:PinForegroundConverter x:Key="PinForegroundConverter"/>
+        <utils:PinOpacityConverter x:Key="PinOpacityConverter"/>
     </Window.Resources>
     <Grid Margin="10">
         <Grid.RowDefinitions>
@@ -67,7 +67,8 @@
             <ListBox.Style>
                 <Style TargetType="ListBox">
                     <Style.Triggers>
-                        <Trigger Property="HasItems" Value="False">
+                        <Trigger Property="HasItems"
+                                Value="False">
                             <Setter Property="Template">
                                 <Setter.Value>
                                     <ControlTemplate>
@@ -89,10 +90,16 @@
                 </Style>
             </ListBox.Style>
         </ListBox>
-        <CheckBox Content="Append attachments as PDF at the end"
-                  IsChecked="{Binding AppendAttachments}"
-                  Margin="0,0,0,10"
-                  Grid.Row="4"/>
+        <StackPanel Orientation="Horizontal"
+                Grid.Row="4"
+                Margin="0,0,0,10">
+            <CheckBox Content="Append attachments as PDF at the end"
+                      IsChecked="{Binding AppendAttachments}"
+                      Margin="0,0,10,0"/>
+            <CheckBox Content="Combine all PDFs into one file"
+                      IsChecked="{Binding CombineAllPdfs}"
+                      Margin="0,0,0,0"/>
+        </StackPanel>
         <StackPanel Orientation="Horizontal"
                     Grid.Row="7"
                     Margin="0,0,0,10">

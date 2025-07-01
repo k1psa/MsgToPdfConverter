@@ -5,6 +5,7 @@ using System.IO;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using System.Collections.Generic;
 using MsgToPdfConverter.Services;
 using MsgToPdfConverter.Utils;
 
@@ -24,6 +25,8 @@ namespace MsgToPdfConverter
         private string _processingStatus;
         private string _fileCountText;
         private bool _appendAttachments;
+        private bool _combineAllPdfs;
+        private string _combinedPdfOutputPath;
 
         // Services
         private readonly EmailConverterService _emailService = new EmailConverterService();
@@ -69,6 +72,42 @@ namespace MsgToPdfConverter
         public string ProcessingStatus { get => _processingStatus; set { _processingStatus = value; OnPropertyChanged(nameof(ProcessingStatus)); } }
         public string FileCountText { get => _fileCountText; set { _fileCountText = value; OnPropertyChanged(nameof(FileCountText)); } }
         public bool AppendAttachments { get => _appendAttachments; set { _appendAttachments = value; OnPropertyChanged(nameof(AppendAttachments)); } }
+        public bool CombineAllPdfs
+        {
+            get => _combineAllPdfs;
+            set
+            {
+                if (_combineAllPdfs != value)
+                {
+                    _combineAllPdfs = value;
+                    OnPropertyChanged(nameof(CombineAllPdfs));
+                    if (_combineAllPdfs)
+                    {
+                        // Show file save dialog when checked
+                        string path = FileDialogHelper.SavePdfFileDialog("Binder1.pdf");
+                        if (!string.IsNullOrEmpty(path))
+                        {
+                            CombinedPdfOutputPath = path;
+                        }
+                        else
+                        {
+                            // If user cancels, uncheck
+                            _combineAllPdfs = false;
+                            OnPropertyChanged(nameof(CombineAllPdfs));
+                        }
+                    }
+                    else
+                    {
+                        CombinedPdfOutputPath = null;
+                    }
+                }
+            }
+        }
+        public string CombinedPdfOutputPath
+        {
+            get => _combinedPdfOutputPath;
+            set { _combinedPdfOutputPath = value; OnPropertyChanged(nameof(CombinedPdfOutputPath)); }
+        }
 
         // Commands
         public ICommand SelectFilesCommand { get; }
@@ -133,8 +172,10 @@ namespace MsgToPdfConverter
             var conversionService = new ConversionService();
             try
             {
+                List<string> generatedPdfs = new List<string>();
                 var result = await Task.Run(() =>
-                    conversionService.ConvertMsgFilesWithAttachments(
+                {
+                    var res = conversionService.ConvertMsgFilesWithAttachments(
                         new System.Collections.Generic.List<string>(SelectedFiles),
                         SelectedOutputFolder,
                         AppendAttachments,
@@ -149,9 +190,17 @@ namespace MsgToPdfConverter
                             Console.WriteLine($"Progress: {processed}/{total} - {statusText}");
                         },
                         () => CancellationRequested,
-                        (msg) => MessageBox.Show(msg, "Processing Results", MessageBoxButton.OK, MessageBoxImage.Information)
-                    )
-                );
+                        (msg) => MessageBox.Show(msg, "Processing Results", MessageBoxButton.OK, MessageBoxImage.Information),
+                        generatedPdfs // <-- pass list to collect generated PDFs
+                    );
+                    return res;
+                });
+                // Combine PDFs if requested
+                if (CombineAllPdfs && !string.IsNullOrEmpty(CombinedPdfOutputPath) && generatedPdfs.Count > 0)
+                {
+                    PdfAppendTest.AppendPdfs(generatedPdfs, CombinedPdfOutputPath);
+                    MessageBox.Show($"All PDFs combined into: {CombinedPdfOutputPath}", "PDF Combined", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
                 string statusMessage = result.Cancelled
                     ? $"Processing cancelled. Processed {result.Processed} files. Success: {result.Success}, Failed: {result.Fail}"
                     : $"Processing completed. Total files: {SelectedFiles.Count}, Success: {result.Success}, Failed: {result.Fail}";

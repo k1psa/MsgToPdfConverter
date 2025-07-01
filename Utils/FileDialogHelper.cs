@@ -97,5 +97,22 @@ namespace MsgToPdfConverter.Utils
             }
             return null;
         }
+
+        public static string SavePdfFileDialog(string defaultFileName = "Binder1.pdf")
+        {
+            using (var dialog = new System.Windows.Forms.SaveFileDialog())
+            {
+                dialog.Title = "Save Combined PDF As";
+                dialog.Filter = "PDF Files (*.pdf)|*.pdf|All Files (*.*)|*.*";
+                dialog.FilterIndex = 1;
+                dialog.FileName = defaultFileName;
+                dialog.OverwritePrompt = true;
+                if (dialog.ShowDialog() == DialogResult.OK)
+                {
+                    return dialog.FileName;
+                }
+            }
+            return null;
+        }
     }
 }
