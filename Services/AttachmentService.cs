@@ -251,7 +251,7 @@ namespace MsgToPdfConverter.Services
                         attachmentParentChain.Add($"Nested Email: {msg.Subject ?? "No Subject"}");
                     }
 
-                    string finalAttachmentPdf = ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, attachmentHeaderText, allTempFiles, attachmentParentChain, attName);
+                    string finalAttachmentPdf = ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, attachmentHeaderText, allTempFiles, attachmentParentChain, attName, extractOriginalOnly);
 
                     if (finalAttachmentPdf != null)
                         allPdfFiles.Add(finalAttachmentPdf);
@@ -364,7 +364,7 @@ namespace MsgToPdfConverter.Services
                 else if (ext == ".zip")
                 {
                     // Use hierarchy-aware ZIP processing with empty parent chain for legacy calls
-                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName);
+                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false);
                     // Add the final ZIP PDF to temp files for cleanup after it's merged into main output
                     if (finalAttachmentPdf != null)
                     {
@@ -374,7 +374,7 @@ namespace MsgToPdfConverter.Services
                 else if (ext == ".7z")
                 {
                     // Use hierarchy-aware 7z processing with empty parent chain for legacy calls
-                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName);
+                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false);
                     // Add the final 7z PDF to temp files for cleanup after it's merged into main output
                     if (finalAttachmentPdf != null)
                     {
@@ -399,7 +399,7 @@ namespace MsgToPdfConverter.Services
             return finalAttachmentPdf;
         }
 
-        public string ProcessZipAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem)
+        public string ProcessZipAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false)
         {
             try
             {
@@ -549,8 +549,8 @@ namespace MsgToPdfConverter.Services
                                         var nestedPdfFiles = new List<string>();
                                         var nestedTempFiles = new List<string>();
 
-                                        // Process the MSG recursively (this will handle the email body + all attachments)
-                                        ProcessMsgAttachmentsRecursively(nestedMsg, nestedPdfFiles, nestedTempFiles, tempDir, false, 1, 5,
+                                        // Process the MSG recursively (this will handle the email body + all attachments based on extractOriginalOnly flag)
+                                        ProcessMsgAttachmentsRecursively(nestedMsg, nestedPdfFiles, nestedTempFiles, tempDir, extractOriginalOnly, 1, 5,
                                             $"Nested Email from ZIP: {nestedMsg.Subject ?? currentFileName}",
                                             new List<string>(zipEntryParentChain));
 
@@ -691,7 +691,7 @@ namespace MsgToPdfConverter.Services
             }
         }
 
-        public string Process7zAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem)
+        public string Process7zAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false)
         {
             try
             {
@@ -844,8 +844,8 @@ namespace MsgToPdfConverter.Services
                                         var nestedPdfFiles = new List<string>();
                                         var nestedTempFiles = new List<string>();
 
-                                        // Process the MSG recursively (this will handle the email body + all attachments)
-                                        ProcessMsgAttachmentsRecursively(nestedMsg, nestedPdfFiles, nestedTempFiles, tempDir, false, 1, 5,
+                                        // Process the MSG recursively (this will handle the email body + all attachments based on extractOriginalOnly flag)
+                                        ProcessMsgAttachmentsRecursively(nestedMsg, nestedPdfFiles, nestedTempFiles, tempDir, extractOriginalOnly, 1, 5,
                                             $"Nested Email from 7z: {nestedMsg.Subject ?? currentFileName}",
                                             new List<string>(sevenZipEntryParentChain));
 
@@ -989,7 +989,7 @@ namespace MsgToPdfConverter.Services
         /// <summary>
         /// Processes a single attachment with SmartArt hierarchy support
         /// </summary>
-        public string ProcessSingleAttachmentWithHierarchy(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem)
+        public string ProcessSingleAttachmentWithHierarchy(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false)
         {
             string attName = att.FileName ?? "attachment";
             string ext = Path.GetExtension(attName).ToLowerInvariant();
@@ -1059,7 +1059,7 @@ namespace MsgToPdfConverter.Services
                 else if (ext == ".zip")
                 {
                     // Process ZIP files with hierarchy support
-                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem);
+                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem, extractOriginalOnly);
                     // Add the final ZIP PDF to temp files for cleanup after it's merged into main output
                     if (finalAttachmentPdf != null)
                     {
@@ -1069,7 +1069,7 @@ namespace MsgToPdfConverter.Services
                 else if (ext == ".7z")
                 {
                     // Process 7z files with hierarchy support
-                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem);
+                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem, extractOriginalOnly);
                     // Add the final 7z PDF to temp files for cleanup after it's merged into main output
                     if (finalAttachmentPdf != null)
                     {

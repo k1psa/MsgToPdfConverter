@@ -144,7 +144,7 @@ namespace MsgToPdfConverter.Services
                                 System.IO.File.WriteAllBytes(attPath, att.Data);
                                 allTempFiles.Add(attPath);
                                 var attachmentParentChain = new List<string> { msg.Subject ?? System.IO.Path.GetFileName(msgFilePath) };
-                                string finalAttachmentPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, attachmentParentChain, attName);
+                                string finalAttachmentPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, attachmentParentChain, attName, extractOriginalOnly);
                                 if (finalAttachmentPdf != null)
                                     allPdfFiles.Add(finalAttachmentPdf);
                             }
