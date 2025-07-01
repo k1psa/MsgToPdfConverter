@@ -106,9 +106,10 @@ namespace MsgToPdfConverter.Services
                             if (att is Storage.Attachment a)
                             {
                                 Console.WriteLine($"[DEBUG] Attachment: {a.FileName}, IsInline: {a.IsInline}, ContentId: '{a.ContentId}', Size: {a.Data?.Length ?? 0} bytes");
-                                if (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' ')))
+                                // Skip attachments if they are marked as inline OR have a ContentId that's referenced in the email body
+                                if (a.IsInline == true || (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' '))))
                                 {
-                                    Console.WriteLine($"[DEBUG] Skipping inline attachment (referenced in email body): {a.FileName}");
+                                    Console.WriteLine($"[DEBUG] Skipping inline attachment (IsInline: {a.IsInline} or referenced in email body): {a.FileName}");
                                     continue;
                                 }
 
