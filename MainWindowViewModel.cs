@@ -237,7 +237,7 @@ namespace MsgToPdfConverter
 
         private void OpenOptions(object parameter)
         {
-            var optionsWindow = new OptionsWindow(DeleteMsgAfterConversion)
+            var optionsWindow = new OptionsWindow(DeleteMsgAfterConversion, Properties.Settings.Default.CloseButtonBehavior ?? "Ask")
             {
                 Owner = Application.Current.MainWindow
             };
