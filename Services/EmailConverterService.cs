@@ -8,6 +8,54 @@ namespace MsgToPdfConverter.Services
 {
     public class EmailConverterService
     {
+        // Helper method to generate DejaVu Sans font style with base64 embedding
+        private string GetDejaVuSansFontStyle()
+        {
+            try
+            {
+                string fontPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fonts", "DejaVuSans.ttf");
+                if (!File.Exists(fontPath))
+                {
+                    Console.WriteLine($"[FONT] DejaVu Sans font not found at: {fontPath}");
+                    return @"
+                        <style>
+                        html, body, table, div, span, p, td, th, b, i, u, strong, em, h1, h2, h3, h4, h5, h6 {
+                            font-family: Arial, sans-serif !important;
+                        }
+                        </style>";
+                }
+
+                // Read font file and convert to base64
+                byte[] fontBytes = File.ReadAllBytes(fontPath);
+                string base64Font = Convert.ToBase64String(fontBytes);
+
+                Console.WriteLine($"[FONT] Embedded DejaVu Sans font as base64 data URI ({fontBytes.Length} bytes)");
+
+                return $@"
+                    <style>
+                    @font-face {{
+                        font-family: 'DejaVu Sans';
+                        src: url('data:font/truetype;charset=utf-8;base64,{base64Font}') format('truetype');
+                        font-weight: normal;
+                        font-style: normal;
+                    }}
+                    html, body, table, div, span, p, td, th, b, i, u, strong, em, h1, h2, h3, h4, h5, h6 {{
+                        font-family: 'DejaVu Sans', Arial, sans-serif !important;
+                    }}
+                    </style>";
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FONT] Error embedding DejaVu Sans font: {ex.Message}");
+                return @"
+                    <style>
+                    html, body, table, div, span, p, td, th, b, i, u, strong, em, h1, h2, h3, h4, h5, h6 {
+                        font-family: Arial, sans-serif !important;
+                    }
+                    </style>";
+            }
+        }
+
         public string BuildEmailHtml(Storage.Message msg, bool extractOriginalOnly = false)
         {
             // Build proper From field with both name and email
@@ -41,6 +89,9 @@ namespace MsgToPdfConverter.Services
 
             string attachmentsLine = BuildAttachmentsLine(msg);
 
+            // Embed DejaVu Sans font
+            string fontStyle = GetDejaVuSansFontStyle();
+
             string header =
                 "<div style='font-family:Segoe UI,Arial,sans-serif;font-size:12pt;margin-bottom:16px;'>" +
                 $"<div><b>From:</b> {System.Net.WebUtility.HtmlEncode(from)}</div>" +
@@ -57,6 +108,7 @@ namespace MsgToPdfConverter.Services
                    "<meta charset=\"UTF-8\">" +
                    "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">" +
                    "<title>Email</title>" +
+                   fontStyle +
                    "</head>" +
                    "<body>" +
                    header + body +
@@ -150,8 +202,10 @@ namespace MsgToPdfConverter.Services
                 return false;
 
             // Look for patterns that indicate encoding issues
+            // Do NOT treat the Euro sign ("€") as an encoding issue
+            // Common encoding artifacts: "Ã", "Î", "Ï", "â", "™" (but not "€")
             return text.Contains("Ã") || text.Contains("Î") || text.Contains("Ï") ||
-                   text.Contains("â") || text.Contains("€") || text.Contains("™");
+                   text.Contains("â") || text.Contains("™");
         }
 
         /// <summary>
@@ -185,7 +239,6 @@ namespace MsgToPdfConverter.Services
                         // Check if this looks better (has fewer encoding issue patterns)
                         if (!HasEncodingIssues(result) && result != text)
                         {
-                            Console.WriteLine($"[ENCODING] Fixed encoding using {encoding.EncodingName}");
                             return result;
                         }
                     }
@@ -195,9 +248,9 @@ namespace MsgToPdfConverter.Services
                     }
                 }
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine($"[ENCODING] Error trying to fix encoding: {ex.Message}");
+                // Ignore errors and return original
             }
 
             return text; // Return original if no fix found
@@ -347,6 +400,9 @@ namespace MsgToPdfConverter.Services
                 }
             }
 
+            // Embed DejaVu Sans font
+            string fontStyle = GetDejaVuSansFontStyle();
+
             string header =
                 "<div style='font-family:Segoe UI,Arial,sans-serif;font-size:12pt;margin-bottom:16px;'>" +
                 $"<div><b>From:</b> {System.Net.WebUtility.HtmlEncode(from)}</div>" +
@@ -363,11 +419,25 @@ namespace MsgToPdfConverter.Services
                    "<meta charset=\"UTF-8\">" +
                    "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">" +
                    "<title>Email</title>" +
+                   fontStyle +
                    "</head>" +
                    "<body>" +
                    header + body +
                    "</body>" +
                    "</html>";
+
+            // Save HTML to temp file for debugging
+            try
+            {
+                string debugHtmlPath = Path.Combine(Path.GetTempPath(), $"debug_email_{DateTime.Now:yyyyMMdd_HHmmss}.html");
+                File.WriteAllText(debugHtmlPath, html, System.Text.Encoding.UTF8);
+                Console.WriteLine($"[DEBUG-HTML] Saved generated HTML to: {debugHtmlPath}");
+                Console.WriteLine($"[DEBUG-HTML] Sample body content: {(body?.Length > 200 ? body.Substring(0, 200) + "..." : body)}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[DEBUG-HTML] Failed to save debug HTML: {ex.Message}");
+            }
 
             return (html, tempFiles);
         }
