@@ -7,7 +7,6 @@ namespace MsgToPdfConverter
     {
         private MainWindowViewModel _viewModel;
         private System.Windows.Forms.NotifyIcon _trayIcon;
-        private bool _isExit = false;
 
         public MainWindow()
         {
@@ -156,7 +155,6 @@ namespace MsgToPdfConverter
         {
             this.Dispatcher.Invoke(() =>
             {
-                _isExit = true;
                 _trayIcon.Visible = false;
                 _trayIcon.Dispose();
                 this.Close();
