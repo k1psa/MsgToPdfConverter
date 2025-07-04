@@ -31,9 +31,10 @@
         </Grid.RowDefinitions>
         <TextBlock FontSize="16"
                    FontWeight="Bold"
-                   Text="Select files or folders to convert to PDF (supports: .msg, .pdf, .doc, .docx, .xls, .xlsx, .zip, .7z, .jpg, .jpeg, .png, .bmp, .gif)"
+                   Text="Select files or folders to convert to PDF"
                    Margin="0,0,0,10"
                    Grid.Row="0"/>
+
         <StackPanel Orientation="Horizontal"
                     Grid.Row="1"
                     Margin="0,0,0,10">
@@ -77,12 +78,18 @@
                                         <Border Background="{TemplateBinding Background}"
                                                 BorderBrush="{TemplateBinding BorderBrush}"
                                                 BorderThickness="{TemplateBinding BorderThickness}">
-                                            <TextBlock Text="Drop compatible files or folders here, or use the button above"
-                                                       Foreground="Gray"
-                                                       FontStyle="Italic"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"
-                                                       Margin="10"/>
+                                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10">
+                                                <TextBlock Text="Drop compatible files or folders here, or use the button above"
+                                                           Foreground="Gray"
+                                                           FontStyle="Italic"
+                                                           HorizontalAlignment="Center"
+                                                           Margin="0,0,0,2"/>
+                                                <TextBlock Text="(supports: .msg, .pdf, .doc, .docx, .xls, .xlsx, .zip, .7z, .jpg, .jpeg, .png, .bmp, .gif)"
+                                                           Foreground="Gray"
+                                                           FontStyle="Italic"
+                                                           FontSize="11"
+                                                           HorizontalAlignment="Center"/>
+                                            </StackPanel>
                                         </Border>
                                     </ControlTemplate>
                                 </Setter.Value>
@@ -93,7 +100,7 @@
             </ListBox.Style>
         </ListBox>
         <StackPanel Orientation="Horizontal"
-                    Grid.Row="4"
+                    Grid.Row="5"
                     Margin="0,0,0,10">
             <CheckBox Content="Append attachments as PDF at the end"
                       IsChecked="{Binding AppendAttachments}"
@@ -103,7 +110,7 @@
                       Margin="0,0,0,0"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal"
-                    Grid.Row="7"
+                    Grid.Row="6"
                     Margin="0,0,0,10">
             <Button Content="Select Output Folder"
                     Command="{Binding SelectOutputFolderCommand}"
@@ -113,11 +120,11 @@
                     Command="{Binding ClearOutputFolderCommand}"
                     Width="50"
                     Margin="0,0,10,0"/>
-            <TextBlock Text="{Binding SelectedOutputFolder, TargetNullValue=(Default: Same as .msg file)}"
+            <TextBlock Text="{Binding SelectedOutputFolder, TargetNullValue=(Default: Same as file)}"
                        VerticalAlignment="Center"/>
         </StackPanel>
         <StackPanel Orientation="Vertical"
-                    Grid.Row="8"
+                    Grid.Row="7"
                     Margin="0,0,0,10">
             <StackPanel Orientation="Horizontal">
                 <Button Content="Convert to PDF"
@@ -142,7 +149,7 @@
                      Maximum="{Binding ProgressMax}"
                      Value="{Binding ProgressValue}"
                      Visibility="{Binding IsConverting, Converter={StaticResource BoolToVisibilityConverter}}"
-                     Grid.Row="10"/>
+                     Grid.Row="9"/>
         <Button Content="📌"
                 VerticalAlignment="Bottom"
                 HorizontalAlignment="Right"
