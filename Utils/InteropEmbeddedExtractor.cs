@@ -499,48 +499,90 @@ namespace MsgToPdfConverter.Utils
                 }
             }
 
-            // --- Assign synthetic page numbers if all are -1 and fallback was used ---
+            // --- Find ACTUAL page numbers using Word Interop if fallback was used ---
             if (results.Count > 0 && results.All(o => o.PageNumber == -1))
             {
-                // Try to estimate number of pages in the main PDF (if available)
-                int mainPdfPages = 0;
-                string pdfPath = null;
+                Console.WriteLine($"[InteropExtractor] Finding actual page numbers for {results.Count} objects using Word Interop");
+                
+                Application pageWordApp = null;
+                Document pageDoc = null;
                 try
                 {
-                    // Try to find the main PDF in the same outputDir
-                    var pdfs = Directory.GetFiles(outputDir, "*.pdf");
-                    if (pdfs.Length > 0)
+                    pageWordApp = new Application { Visible = false, DisplayAlerts = WdAlertLevel.wdAlertsNone };
+                    pageDoc = pageWordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
+                    
+                    // Get the actual page numbers from the InlineShapes we found earlier
+                    Console.WriteLine($"[InteropExtractor] Document has {pageDoc.InlineShapes.Count} InlineShapes");
+                    
+                    for (int i = 0; i < results.Count && i < pageDoc.InlineShapes.Count; i++)
                     {
-                        pdfPath = pdfs[0];
-                        using (var pdfDoc = new iText.Kernel.Pdf.PdfDocument(new iText.Kernel.Pdf.PdfReader(pdfPath)))
+                        try
                         {
-                            mainPdfPages = pdfDoc.GetNumberOfPages();
+                            var shape = pageDoc.InlineShapes[i + 1]; // 1-based indexing
+                            if (shape.Type == WdInlineShapeType.wdInlineShapeEmbeddedOLEObject)
+                            {
+                                int actualPage = -1;
+                                
+                                // Try multiple methods to get the page number
+                                try
+                                {
+                                    actualPage = (int)shape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
+                                    if (actualPage <= 0)
+                                    {
+                                        actualPage = (int)shape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
+                                    }
+                                    if (actualPage <= 0)
+                                    {
+                                        // Try using the range start
+                                        var startRange = pageDoc.Range(shape.Range.Start, shape.Range.Start);
+                                        actualPage = (int)startRange.get_Information(WdInformation.wdActiveEndPageNumber);
+                                    }
+                                }
+                                catch (Exception pageEx)
+                                {
+                                    Console.WriteLine($"[InteropExtractor] Could not get page for shape {i+1}: {pageEx.Message}");
+                                }
+                                
+                                if (actualPage > 0)
+                                {
+                                    results[i].PageNumber = actualPage;
+                                    Console.WriteLine($"[InteropExtractor] Object {i+1} found on actual page {actualPage}");
+                                }
+                                else
+                                {
+                                    // Fallback: use simple sequential assignment
+                                    results[i].PageNumber = i + 1;
+                                    Console.WriteLine($"[InteropExtractor] Object {i+1} assigned to fallback page {i+1}");
+                                }
+                            }
+                        }
+                        catch (Exception shapeEx)
+                        {
+                            Console.WriteLine($"[InteropExtractor] Error processing shape {i+1}: {shapeEx.Message}");
+                            results[i].PageNumber = i + 1; // Fallback
                         }
                     }
                 }
-                catch { mainPdfPages = 0; }
-                if (mainPdfPages == 0) mainPdfPages = results.Count + 2; // Conservative estimate
-                
-                // More conservative synthetic page assignment:
-                // Distribute embedded objects evenly across the document instead of clustering at the beginning
-                Console.WriteLine($"[InteropExtractor] Assigning synthetic page numbers for {results.Count} objects across {mainPdfPages} pages");
-                
-                if (results.Count == 1)
+                catch (Exception ex)
                 {
-                    // Single object: place it in the middle of the document
-                    results[0].PageNumber = Math.Max(1, mainPdfPages / 2);
-                    Console.WriteLine($"[InteropExtractor] Single object assigned to middle page {results[0].PageNumber}");
-                }
-                else
-                {
-                    // Multiple objects: distribute them across the document
+                    Console.WriteLine($"[InteropExtractor] Page detection failed: {ex.Message}. Using simple assignment.");
+                    
+                    // Final fallback: simple sequential assignment
                     for (int i = 0; i < results.Count; i++)
                     {
-                        // Distribute objects from page 1 to mainPdfPages-1 (not on the last page)
-                        double ratio = (double)i / (results.Count - 1);
-                        int assignedPage = Math.Max(1, Math.Min((int)(ratio * (mainPdfPages - 1)) + 1, mainPdfPages - 1));
-                        results[i].PageNumber = assignedPage;
-                        Console.WriteLine($"[InteropExtractor] Object {i+1}/{results.Count} assigned to page {assignedPage} (ratio={ratio:F2})");
+                        results[i].PageNumber = i + 1;
+                        Console.WriteLine($"[InteropExtractor] Object {i+1} assigned to fallback page {i+1}");
+                    }
+                }
+                finally
+                {
+                    if (pageDoc != null)
+                    {
+                        try { pageDoc.Close(false); } catch { }
+                    }
+                    if (pageWordApp != null)
+                    {
+                        try { pageWordApp.Quit(false); } catch { }
                     }
                 }
             }
