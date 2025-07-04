@@ -17,6 +17,8 @@ namespace MsgToPdfConverter.Services
     /// </summary>
     public static class PdfEmbeddedInsertionService
     {
+        private static EmailConverterService _emailConverterService = new EmailConverterService();
+
         /// <summary>
         /// Inserts extracted embedded files into the main PDF document after the pages where they were found
         /// </summary>
@@ -47,22 +49,18 @@ namespace MsgToPdfConverter.Services
             foreach (var obj in extractedObjects)
             {
                 Console.WriteLine($"[PDF-INSERT] Checking object: {Path.GetFileName(obj.FilePath)} at {obj.FilePath}");
-                
                 if (!File.Exists(obj.FilePath))
                 {
                     Console.WriteLine($"[PDF-INSERT] Warning: Extracted file not found: {obj.FilePath}");
                     continue;
                 }
-
                 var fileInfo = new FileInfo(obj.FilePath);
                 Console.WriteLine($"[PDF-INSERT] File exists, size: {fileInfo.Length} bytes, page: {obj.PageNumber}");
-                
                 if (fileInfo.Length == 0)
                 {
                     Console.WriteLine($"[PDF-INSERT] Warning: Extracted file is empty: {obj.FilePath}");
                     continue;
                 }
-
                 validObjects.Add(obj);
             }
 
@@ -77,59 +75,60 @@ namespace MsgToPdfConverter.Services
 
             Console.WriteLine($"[PDF-INSERT] Inserting {validObjects.Count} embedded files into {mainPdfPath}");
 
-            // Group extracted objects by page number and sort by page
+            // Sort embedded objects by PageNumber (synthetic or real), then by DocumentOrderIndex for tie-breaking
             var objectsByPage = validObjects
-                .Where(obj => File.Exists(obj.FilePath))
-                .GroupBy(obj => obj.PageNumber > 0 ? obj.PageNumber : int.MaxValue) // Insert unknown page objects at the end
-                .OrderBy(g => g.Key)
+                .Where(obj => obj.PageNumber > 0)
+                .OrderBy(obj => obj.PageNumber)
+                .ThenBy(obj => obj.DocumentOrderIndex)
                 .ToList();
 
-            // Also separate objects that should be inserted at the end (page -1 or 0)
-            var objectsAtEnd = validObjects
-                .Where(obj => obj.PageNumber <= 0 && File.Exists(obj.FilePath))
-                .ToList();
+            // Log the insertion plan
+            Console.WriteLine($"[PDF-INSERT] Insertion plan:");
+            foreach (var obj in objectsByPage)
+            {
+                Console.WriteLine($"  - {Path.GetFileName(obj.FilePath)} -> after page {obj.PageNumber} (order: {obj.DocumentOrderIndex})");
+            }
 
             try
             {
                 using (var outputStream = new FileStream(outputPdfPath, FileMode.Create, FileAccess.Write))
                 using (var pdfWriter = new PdfWriter(outputStream))
                 using (var outputPdf = new PdfDocument(pdfWriter))
+                using (var mainPdf = new PdfDocument(new PdfReader(mainPdfPath)))
                 {
-                    int mainPageCount;
+                    int mainPageCount = mainPdf.GetNumberOfPages();
                     int currentOutputPage = 0;
+                    int nextObjIdx = 0;
 
-                    // First, copy all pages from the main PDF
-                    using (var mainPdf = new PdfDocument(new PdfReader(mainPdfPath)))
+                    Console.WriteLine($"[PDF-INSERT] Main PDF has {mainPageCount} pages");
+
+                    // Validate that no object requests insertion after a non-existent page
+                    foreach (var obj in objectsByPage)
                     {
-                        mainPageCount = mainPdf.GetNumberOfPages();
-
-                        for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
+                        if (obj.PageNumber > mainPageCount)
                         {
-                            // Copy the current page from main PDF
-                            mainPdf.CopyPagesTo(mainPage, mainPage, outputPdf);
-                            currentOutputPage++;
-
-                            Console.WriteLine($"[PDF-INSERT] Copied main page {mainPage} to output page {currentOutputPage}");
-
-                            // Check if there are embedded objects for this page (excluding end-of-document objects)
-                            var objectsForThisPage = objectsByPage.FirstOrDefault(g => g.Key == mainPage);
-                            if (objectsForThisPage != null)
-                            {
-                                foreach (var obj in objectsForThisPage)
-                                {
-                                    currentOutputPage = InsertEmbeddedObject(obj, outputPdf, currentOutputPage);
-                                }
-                            }
+                            Console.WriteLine($"[PDF-INSERT] Warning: Object {Path.GetFileName(obj.FilePath)} requests insertion after page {obj.PageNumber}, but main PDF only has {mainPageCount} pages. Adjusting to page {mainPageCount}.");
+                            obj.PageNumber = mainPageCount;
                         }
-                    } // mainPdf is disposed here, but outputPdf remains open
+                    }
 
-                    // Insert all objects that couldn't be placed at specific pages (page <= 0) at the end
-                    if (objectsAtEnd.Count > 0)
+                    // Re-sort after potential adjustments
+                    objectsByPage = objectsByPage.OrderBy(obj => obj.PageNumber).ThenBy(obj => obj.DocumentOrderIndex).ToList();
+
+                    // For each main PDF page, copy the page, then insert any embedded objects whose PageNumber == current main page
+                    for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
                     {
-                        Console.WriteLine($"[PDF-INSERT] Inserting {objectsAtEnd.Count} objects at the end of the document");
-                        foreach (var obj in objectsAtEnd)
+                        mainPdf.CopyPagesTo(mainPage, mainPage, outputPdf);
+                        currentOutputPage++;
+                        Console.WriteLine($"[PDF-INSERT] Copied main page {mainPage} to output page {currentOutputPage}");
+
+                        // Insert all embedded objects whose PageNumber == mainPage (immediately after this page)
+                        while (nextObjIdx < objectsByPage.Count && objectsByPage[nextObjIdx].PageNumber == mainPage)
                         {
-                            currentOutputPage = InsertEmbeddedObject(obj, outputPdf, currentOutputPage);
+                            var obj = objectsByPage[nextObjIdx];
+                            // Insert PDF or MSG directly, do NOT add separator/grey page
+                            currentOutputPage = InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage);
+                            nextObjIdx++;
                         }
                     }
                 }
@@ -139,8 +138,6 @@ namespace MsgToPdfConverter.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"[PDF-INSERT] Error creating PDF with embedded files: {ex.Message}");
-                
-                // Fallback: just copy the main PDF
                 try
                 {
                     File.Copy(mainPdfPath, outputPdfPath, true);
@@ -153,124 +150,99 @@ namespace MsgToPdfConverter.Services
             }
         }
 
-        /// <summary>
-        /// Inserts a PDF file into the output document
-        /// </summary>
-        private static int InsertPdfFile(string pdfPath, PdfDocument outputPdf, int currentPage, string oleClass)
+        // Insert embedded object without separator/grey page
+        private static int InsertEmbeddedObject_NoSeparator(InteropEmbeddedExtractor.ExtractedObjectInfo obj, PdfDocument outputPdf, int currentOutputPage)
         {
-            Console.WriteLine($"[PDF-INSERT] Inserting PDF: {Path.GetFileName(pdfPath)} after page {currentPage}");
-
             try
             {
-                // First, validate the PDF file
+                if (obj.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                {
+                    return InsertPdfFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage, obj.OleClass);
+                }
+                else if (obj.FilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                {
+                    return InsertMsgFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
+                }
+                else
+                {
+                    // Only for unsupported types, add a placeholder
+                    return InsertPlaceholderForFile(obj.FilePath, outputPdf, currentOutputPage, obj.OleClass);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PDF-INSERT] Error inserting {obj.FilePath}: {ex.Message}");
+                return InsertErrorPlaceholder(obj.FilePath, outputPdf, currentOutputPage, ex.Message);
+            }
+        }
+
+        // Insert PDF file without separator/grey page
+        private static int InsertPdfFile_NoSeparator(string pdfPath, PdfDocument outputPdf, int currentPage, string oleClass)
+        {
+            Console.WriteLine($"[PDF-INSERT] Inserting PDF: {Path.GetFileName(pdfPath)} after page {currentPage}");
+            try
+            {
                 if (!File.Exists(pdfPath))
                 {
                     Console.WriteLine($"[PDF-INSERT] PDF file not found: {pdfPath}");
                     return InsertErrorPlaceholder(pdfPath, outputPdf, currentPage, "File not found");
                 }
-
-                // Check file size
                 var fileInfo = new FileInfo(pdfPath);
                 if (fileInfo.Length == 0)
                 {
                     Console.WriteLine($"[PDF-INSERT] PDF file is empty: {pdfPath}");
                     return InsertErrorPlaceholder(pdfPath, outputPdf, currentPage, "Empty file");
                 }
-
-                Console.WriteLine($"[PDF-INSERT] Reading PDF file ({fileInfo.Length} bytes): {pdfPath}");
-
-                // Try to create a reader with more robust error handling
                 PdfReader reader = null;
                 PdfDocument embeddedPdf = null;
-                
                 try
                 {
                     reader = new PdfReader(pdfPath);
                     embeddedPdf = new PdfDocument(reader);
-                    
                     int embeddedPageCount = embeddedPdf.GetNumberOfPages();
-                    Console.WriteLine($"[PDF-INSERT] PDF has {embeddedPageCount} pages");
-                    
-                    // Add a separator page with information about the embedded file
-                    AddSeparatorPage(outputPdf, $"Embedded PDF: {Path.GetFileName(pdfPath)}", $"Original location: Page {currentPage}", oleClass);
-                    currentPage++;
-
-                    // Copy all pages from the embedded PDF one by one for better error handling
                     for (int pageNum = 1; pageNum <= embeddedPageCount; pageNum++)
                     {
-                        try
-                        {
-                            embeddedPdf.CopyPagesTo(pageNum, pageNum, outputPdf);
-                            Console.WriteLine($"[PDF-INSERT] Copied page {pageNum}/{embeddedPageCount} from {Path.GetFileName(pdfPath)}");
-                        }
-                        catch (Exception pageEx)
-                        {
-                            Console.WriteLine($"[PDF-INSERT] Error copying page {pageNum}: {pageEx.Message}");
-                            // Continue with next page
-                        }
+                        embeddedPdf.CopyPagesTo(pageNum, pageNum, outputPdf);
+                        currentPage++;
+                        Console.WriteLine($"[PDF-INSERT] Copied page {pageNum}/{embeddedPageCount} from {Path.GetFileName(pdfPath)}");
                     }
-                    
-                    currentPage += embeddedPageCount;
                     Console.WriteLine($"[PDF-INSERT] Successfully inserted {embeddedPageCount} pages from {Path.GetFileName(pdfPath)}");
                 }
                 finally
                 {
-                    // Explicit cleanup
-                    try
-                    {
-                        embeddedPdf?.Close();
-                        reader?.Close();
-                    }
-                    catch (Exception disposeEx)
-                    {
-                        Console.WriteLine($"[PDF-INSERT] Error disposing PDF resources: {disposeEx.Message}");
-                    }
+                    try { embeddedPdf?.Close(); reader?.Close(); } catch { }
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[PDF-INSERT] Error reading PDF {pdfPath}: {ex.Message}");
-                Console.WriteLine($"[PDF-INSERT] Exception details: {ex}");
                 currentPage = InsertErrorPlaceholder(pdfPath, outputPdf, currentPage, ex.Message);
             }
-
             return currentPage;
         }
 
-        /// <summary>
-        /// Converts and inserts an MSG file
-        /// </summary>
-        private static int InsertMsgFile(string msgPath, PdfDocument outputPdf, int currentPage)
+        // Insert MSG file without separator/grey page
+        private static int InsertMsgFile_NoSeparator(string msgPath, PdfDocument outputPdf, int currentPage)
         {
             Console.WriteLine($"[PDF-INSERT] Converting and inserting MSG: {Path.GetFileName(msgPath)} after page {currentPage}");
-
             try
             {
-                // Create a temporary PDF for the MSG content
                 string tempPdfPath = Path.Combine(Path.GetTempPath(), $"msg_temp_{Guid.NewGuid()}.pdf");
-                
                 try
                 {
-                    // Try to convert MSG to PDF using existing services
                     bool converted = TryConvertMsgToPdf(msgPath, tempPdfPath);
-                    
                     if (converted && File.Exists(tempPdfPath))
                     {
-                        currentPage = InsertPdfFile(tempPdfPath, outputPdf, currentPage, "MSG");
+                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "MSG");
                     }
                     else
                     {
-                        // Fallback: create a placeholder for the MSG file
                         currentPage = InsertPlaceholderForFile(msgPath, outputPdf, currentPage, "MSG");
                     }
                 }
                 finally
                 {
-                    // Clean up temp file
-                    if (File.Exists(tempPdfPath))
-                    {
-                        try { File.Delete(tempPdfPath); } catch { }
-                    }
+                    if (File.Exists(tempPdfPath)) { try { File.Delete(tempPdfPath); } catch { } }
                 }
             }
             catch (Exception ex)
@@ -278,26 +250,75 @@ namespace MsgToPdfConverter.Services
                 Console.WriteLine($"[PDF-INSERT] Error processing MSG {msgPath}: {ex.Message}");
                 currentPage = InsertErrorPlaceholder(msgPath, outputPdf, currentPage, ex.Message);
             }
-
             return currentPage;
         }
 
         /// <summary>
-        /// Attempts to convert MSG to PDF using existing conversion services
+        /// Attempts to convert MSG to PDF using the main HTML-to-PDF pipeline (DinkToPdf/HtmlToPdfWorker)
         /// </summary>
         private static bool TryConvertMsgToPdf(string msgPath, string outputPdfPath)
         {
             try
             {
-                // This would use the existing MSG conversion logic
-                // For now, we'll create a simple placeholder
-                // In a full implementation, this would call the existing MSG to PDF conversion
-                return false; // Placeholder - implement actual MSG conversion
+                Console.WriteLine($"[PDF-INSERT] Converting MSG to PDF (HTML pipeline): {msgPath} -> {outputPdfPath}");
+                using (var msg = new MsgReader.Outlook.Storage.Message(msgPath))
+                {
+                    // Build HTML with inline images using the main service
+                    var htmlResult = _emailConverterService.BuildEmailHtmlWithInlineImages(msg, false);
+                    string html = htmlResult.Html;
+                    var tempHtmlPath = Path.Combine(Path.GetTempPath(), $"msg2pdf_{Guid.NewGuid()}.html");
+                    File.WriteAllText(tempHtmlPath, html, System.Text.Encoding.UTF8);
+
+                    var psi = new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
+                        Arguments = $"--html2pdf \"{tempHtmlPath}\" \"{outputPdfPath}\"",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true
+                    };
+                    var proc = System.Diagnostics.Process.Start(psi);
+                    string stdOut = proc.StandardOutput.ReadToEnd();
+                    string stdErr = proc.StandardError.ReadToEnd();
+                    proc.WaitForExit();
+                    File.Delete(tempHtmlPath);
+                    if (proc.ExitCode == 0 && File.Exists(outputPdfPath))
+                    {
+                        Console.WriteLine($"[PDF-INSERT] Successfully converted MSG to PDF: {outputPdfPath}");
+                        return true;
+                    }
+                    else
+                    {
+                        // Dump HTML to debug file for inspection
+                        var debugHtmlPath = tempHtmlPath + ".fail.html";
+                        File.WriteAllText(debugHtmlPath, html, System.Text.Encoding.UTF8);
+                        Console.WriteLine($"[PDF-INSERT] HtmlToPdfWorker failed.\nSTDOUT: {stdOut}\nSTDERR: {stdErr}\nHTML dumped to: {debugHtmlPath}");
+                        return false;
+                    }
+                }
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine($"[PDF-INSERT] Failed to convert MSG to PDF: {ex.Message}\n{ex}");
                 return false;
             }
+        }
+
+        // Simple HTML tag stripper for fallback
+        private static string StripHtml(string html)
+        {
+            if (string.IsNullOrEmpty(html)) return string.Empty;
+            var array = new char[html.Length];
+            int arrayIndex = 0;
+            bool inside = false;
+            foreach (char let in html)
+            {
+                if (let == '<') { inside = true; continue; }
+                if (let == '>') { inside = false; continue; }
+                if (!inside) array[arrayIndex++] = let;
+            }
+            return new string(array, 0, arrayIndex);
         }
 
         /// <summary>
@@ -454,30 +475,8 @@ namespace MsgToPdfConverter.Services
         /// </summary>
         private static int InsertEmbeddedObject(InteropEmbeddedExtractor.ExtractedObjectInfo obj, PdfDocument outputPdf, int currentOutputPage)
         {
-            try
-            {
-                if (obj.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Insert PDF file
-                    return InsertPdfFile(obj.FilePath, outputPdf, currentOutputPage, obj.OleClass);
-                }
-                else if (obj.FilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-                {
-                    // Convert MSG to PDF first, then insert
-                    return InsertMsgFile(obj.FilePath, outputPdf, currentOutputPage);
-                }
-                else
-                {
-                    // Create a placeholder PDF for other file types
-                    return InsertPlaceholderForFile(obj.FilePath, outputPdf, currentOutputPage, obj.OleClass);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[PDF-INSERT] Error inserting {obj.FilePath}: {ex.Message}");
-                // Insert error placeholder
-                return InsertErrorPlaceholder(obj.FilePath, outputPdf, currentOutputPage, ex.Message);
-            }
+            // Route all calls to the new no-separator version
+            return InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage);
         }
     }
 }

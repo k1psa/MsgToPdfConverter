@@ -519,13 +519,29 @@ namespace MsgToPdfConverter.Utils
                     }
                 }
                 catch { mainPdfPages = 0; }
-                if (mainPdfPages == 0) mainPdfPages = results.Count + 1;
-                // Distribute objects evenly after each page
-                for (int i = 0; i < results.Count; i++)
+                if (mainPdfPages == 0) mainPdfPages = results.Count + 2; // Conservative estimate
+                
+                // More conservative synthetic page assignment:
+                // Distribute embedded objects evenly across the document instead of clustering at the beginning
+                Console.WriteLine($"[InteropExtractor] Assigning synthetic page numbers for {results.Count} objects across {mainPdfPages} pages");
+                
+                if (results.Count == 1)
                 {
-                    // Insert after page N for object N (1-based)
-                    results[i].PageNumber = Math.Min(i + 1, mainPdfPages);
-                    Console.WriteLine($"[InteropExtractor] Assigned synthetic page number {results[i].PageNumber} to object {results[i].FilePath}");
+                    // Single object: place it in the middle of the document
+                    results[0].PageNumber = Math.Max(1, mainPdfPages / 2);
+                    Console.WriteLine($"[InteropExtractor] Single object assigned to middle page {results[0].PageNumber}");
+                }
+                else
+                {
+                    // Multiple objects: distribute them across the document
+                    for (int i = 0; i < results.Count; i++)
+                    {
+                        // Distribute objects from page 1 to mainPdfPages-1 (not on the last page)
+                        double ratio = (double)i / (results.Count - 1);
+                        int assignedPage = Math.Max(1, Math.Min((int)(ratio * (mainPdfPages - 1)) + 1, mainPdfPages - 1));
+                        results[i].PageNumber = assignedPage;
+                        Console.WriteLine($"[InteropExtractor] Object {i+1}/{results.Count} assigned to page {assignedPage} (ratio={ratio:F2})");
+                    }
                 }
             }
 
