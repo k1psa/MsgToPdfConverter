@@ -272,6 +272,16 @@ namespace MsgToPdfConverter
             }
         }
 
+        // Move a file in the SelectedFiles collection from oldIndex to newIndex
+        public void MoveFile(int oldIndex, int newIndex)
+        {
+            if (oldIndex < 0 || newIndex < 0 || oldIndex == newIndex || oldIndex >= _selectedFiles.Count || newIndex >= _selectedFiles.Count)
+                return;
+            var item = _selectedFiles[oldIndex];
+            _selectedFiles.RemoveAt(oldIndex);
+            _selectedFiles.Insert(newIndex, item);
+        }
+
         // Drag-and-drop support for ListBox
         public void HandleDrop(IDataObject data)
         {
