@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Windows;
 
 namespace MsgToPdfConverter.Services
@@ -37,8 +38,15 @@ namespace MsgToPdfConverter.Services
             for (int i = 0; i < fileNames.Length; i++)
             {
                 string fileName = fileNames[i];
-                if (!fileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                // Determine if the file is a message or an attachment
+                string ext = Path.GetExtension(fileName)?.ToLowerInvariant();
+                // List of supported extensions
+                string[] supportedExtensions = new[] { ".msg", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".7z", ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
+                if (string.IsNullOrWhiteSpace(ext) || !supportedExtensions.Any(e => string.Equals(e, ext, StringComparison.OrdinalIgnoreCase)))
+                {
+                    // If no extension or not supported, assume it's a message and append .msg
                     fileName += ".msg";
+                }
                 fileName = sanitizeFileName(fileName);
                 string destPath = Path.Combine(outputFolder, fileName);
                 int counter = 1;
