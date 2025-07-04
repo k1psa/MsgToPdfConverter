@@ -21,6 +21,18 @@ namespace MsgToPdfConverter.Services
                 {
                     if (ext == ".doc" || ext == ".docx")
                     {
+                        // Extract embedded OLE objects before PDF export
+                        try
+                        {
+                            string tempDir = Path.Combine(Path.GetTempPath(), "MsgToPdf_Embedded_" + Guid.NewGuid());
+                            Directory.CreateDirectory(tempDir);
+                            var embedded = MsgToPdfConverter.Utils.InteropEmbeddedExtractor.ExtractEmbeddedObjects(inputPath, tempDir);
+                            Console.WriteLine($"[InteropExtractor] Total extracted objects: {embedded.Count}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[InteropExtractor] Extraction failed: {ex.Message}");
+                        }
                         var wordApp = new Microsoft.Office.Interop.Word.Application();
                         var doc = wordApp.Documents.Open(inputPath);
                         doc.ExportAsFixedFormat(outputPdf, Microsoft.Office.Interop.Word.WdExportFormat.wdExportFormatPDF);
