@@ -303,6 +303,9 @@ namespace MsgToPdfConverter
         // Drag-and-drop support for ListBox
         public void HandleDrop(IDataObject data)
         {
+            Console.WriteLine("[DEBUG] HandleDrop called!");
+            Console.WriteLine($"[DEBUG] Available data formats: {string.Join(", ", data.GetFormats())}");
+            
             // 1. Standard file/folder drop
             if (data.GetDataPresent(DataFormats.FileDrop))
             {
@@ -328,6 +331,7 @@ namespace MsgToPdfConverter
             // 2. Outlook email drag-and-drop support
             if (data.GetDataPresent("FileGroupDescriptorW") || data.GetDataPresent("FileGroupDescriptor"))
             {
+                Console.WriteLine("[DEBUG] Outlook email drop detected!");
                 try
                 {
                     string outputFolder = !string.IsNullOrEmpty(SelectedOutputFolder)
@@ -352,6 +356,16 @@ namespace MsgToPdfConverter
                     _selectedFiles.Clear();
                     foreach (var file in updated)
                         _selectedFiles.Add(file);
+
+                    // Log success if files were extracted
+                    if (result.ExtractedFiles.Count > 0)
+                    {
+                        Console.WriteLine($"[DEBUG] Successfully added {result.ExtractedFiles.Count} email(s) to the list:");
+                        foreach (var file in result.ExtractedFiles)
+                        {
+                            Console.WriteLine($"[DEBUG] - {Path.GetFileName(file)}");
+                        }
+                    }
 
                     if (result.SkippedFiles.Count > 0)
                     {
