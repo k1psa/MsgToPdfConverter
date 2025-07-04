@@ -25,23 +25,13 @@ namespace MsgToPdfConverter.Utils
             using (var ms = new MemoryStream(oleObjectBytes))
             using (var cf = new CompoundFile(ms))
             {
-                Console.WriteLine("[DEBUG] OLE storages and streams:");
                 // Enumerate all streams using reflection for compatibility
                 var streamNames = new System.Collections.Generic.List<string>();
                 var rootType = cf.RootStorage.GetType();
-                Console.WriteLine($"[DEBUG] CFStorage type: {rootType.FullName}");
-                
-                // List all properties and methods for debugging
-                var props = rootType.GetProperties();
-                var methods = rootType.GetMethods();
-                Console.WriteLine($"[DEBUG] Properties count: {props.Length}");
-                Console.WriteLine($"[DEBUG] Methods count: {methods.Length}");
-                Console.WriteLine($"[DEBUG] Stream/Storage methods: {string.Join(", ", methods.Where(m => m.Name.Contains("Stream") || m.Name.Contains("Storage")).Select(m => m.Name))}");
                 
                 var getStreamNamesProp = rootType.GetProperty("StreamNames");
                 if (getStreamNamesProp != null)
                 {
-                    Console.WriteLine("[DEBUG] Found StreamNames property");
                     var names = getStreamNamesProp.GetValue(cf.RootStorage) as System.Collections.IEnumerable;
                     if (names != null)
                     {
@@ -66,7 +56,6 @@ namespace MsgToPdfConverter.Utils
                     }
                     else
                     {
-                        Console.WriteLine("[DEBUG] GetStreamNames method not found, trying manual stream names");
                         // Try common stream names manually
                         string[] commonNames = { "Package", "CONTENTS", "Contents", "Data", "ObjectPool", "\u0001Ole", "\u0001CompObj", "\u0001Ole10Native" };
                         foreach (var name in commonNames)
@@ -75,12 +64,12 @@ namespace MsgToPdfConverter.Utils
                             {
                                 var stream = cf.RootStorage.GetStream(name);
                                 streamNames.Add(name);
-                                Console.WriteLine($"[DEBUG] Found manual stream: {name}");
                             }
                             catch { }
                         }
                     }
                 }
+                // Check each stream (reduced logging)
                 foreach (var streamName in streamNames)
                 {
                     try
@@ -270,8 +259,6 @@ namespace MsgToPdfConverter.Utils
                         uint candidate = br.ReadUInt32();
                         long remaining = br.BaseStream.Length - br.BaseStream.Position;
                         
-                        Console.WriteLine($"[DEBUG] Skip {skip}: Size candidate: {candidate}, remaining bytes: {remaining}");
-                        
                         // Check if this looks like a valid data size
                         if (candidate > 0 && candidate <= remaining)
                         {
@@ -284,13 +271,12 @@ namespace MsgToPdfConverter.Utils
                                 
                                 // Check if it looks like a valid file (PDF starts with %PDF, MSG with OLE signature)
                                 bool looksValid = ValidateFileSignature(testData, fileName);
-                                Console.WriteLine($"[DEBUG] Skip {skip}: Testing data at pos {checkPos}, looks valid: {looksValid}");
                                 
                                 if (looksValid && candidate >= 100 && candidate <= 104857600)
                                 {
                                     dataSize = candidate;
                                     foundDataSize = true;
-                                    Console.WriteLine($"[DEBUG] Found validated data size: {dataSize} at position {br.BaseStream.Position - 4}");
+                                    Console.WriteLine($"[DEBUG] Found validated data size: {dataSize} at skip {skip}");
                                     break;
                                 }
                             }
@@ -425,7 +411,7 @@ namespace MsgToPdfConverter.Utils
             if (ext == ".pdf" && data.Length >= 4)
             {
                 bool isPdf = data[0] == 0x25 && data[1] == 0x50 && data[2] == 0x44 && data[3] == 0x46; // %PDF
-                Console.WriteLine($"[DEBUG] PDF signature check: {isPdf} (bytes: {data[0]:X2} {data[1]:X2} {data[2]:X2} {data[3]:X2})");
+                if (isPdf) Console.WriteLine($"[DEBUG] PDF signature check: {isPdf}");
                 return isPdf;
             }
             
@@ -434,7 +420,7 @@ namespace MsgToPdfConverter.Utils
             {
                 bool isMsg = data[0] == 0xD0 && data[1] == 0xCF && data[2] == 0x11 && data[3] == 0xE0 &&
                             data[4] == 0xA1 && data[5] == 0xB1 && data[6] == 0x1A && data[7] == 0xE1;
-                Console.WriteLine($"[DEBUG] MSG signature check: {isMsg} (bytes: {string.Join(" ", data.Take(8).Select(b => b.ToString("X2")))})");
+                if (isMsg) Console.WriteLine($"[DEBUG] MSG signature check: {isMsg}");
                 return isMsg;
             }
             
@@ -444,11 +430,9 @@ namespace MsgToPdfConverter.Utils
             bool allSame = data.Take(Math.Min(100, data.Length)).All(b => b == firstByte);
             if (allSame && firstByte == 0)
             {
-                Console.WriteLine("[DEBUG] File signature failed: data appears to be all zeros");
                 return false;
             }
             
-            Console.WriteLine("[DEBUG] File signature passed: basic sanity checks");
             return true;
         }
 
