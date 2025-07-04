@@ -182,6 +182,7 @@ namespace MsgToPdfConverter
                         AppendAttachments,
                         false, // always ignore extractOriginalOnly
                         DeleteFilesAfterConversion,
+                        CombineAllPdfs, // <--- pass combineAllPdfs
                         _emailService,
                         _attachmentService,
                         (processed, total, progress, statusText) =>
@@ -214,7 +215,10 @@ namespace MsgToPdfConverter
                     {
                         foreach (var src in SelectedFiles)
                         {
-                            try { if (File.Exists(src)) File.Delete(src); } catch { }
+                            if (!string.Equals(src, CombinedPdfOutputPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                try { if (File.Exists(src)) File.Delete(src); } catch { }
+                            }
                         }
                     }
                     statusMessage = $"{generatedPdfs.Count} file(s) have been combined into {System.IO.Path.GetFileName(CombinedPdfOutputPath)}";

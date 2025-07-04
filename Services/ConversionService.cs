@@ -50,6 +50,7 @@ namespace MsgToPdfConverter.Services
             bool appendAttachments,
             bool extractOriginalOnly,
             bool deleteFilesAfterConversion,
+            bool combineAllPdfs, // <--- new parameter
             EmailConverterService emailService,
             AttachmentService attachmentService,
             Action<int, int, int, string> updateProgress, // (processed, total, progress, statusText)
@@ -213,7 +214,7 @@ namespace MsgToPdfConverter.Services
                                 GC.Collect();
                                 GC.WaitForPendingFinalizers();
                                 Console.WriteLine($"[DELETE] Should delete: {filePath}, deleteMsgAfterConversion={deleteFilesAfterConversion}");
-                                if (deleteFilesAfterConversion && conversionSucceeded)
+                                if (deleteFilesAfterConversion && conversionSucceeded && !combineAllPdfs) // <--- updated condition
                                 {
                                     if (System.IO.File.Exists(filePath))
                                     {
@@ -362,7 +363,7 @@ namespace MsgToPdfConverter.Services
                     GC.Collect();
                     GC.WaitForPendingFinalizers();
                     // Centralized deletion logic for all file types
-                    if (deleteFilesAfterConversion && conversionSucceeded)
+                    if (deleteFilesAfterConversion && conversionSucceeded && !combineAllPdfs) // <--- updated condition
                     {
                         if (System.IO.File.Exists(filePath))
                         {
