@@ -160,7 +160,8 @@ namespace MsgToPdfConverter
             {
                 e.Cancel = true;
                 this.Hide();
-                _trayIcon.Visible = true;
+                if (_trayIcon != null)
+                    _trayIcon.Visible = true;
                 return;
             }
             else if (behavior == "Ask")
@@ -172,7 +173,8 @@ namespace MsgToPdfConverter
                     Properties.Settings.Default.Save();
                     e.Cancel = true;
                     this.Hide();
-                    _trayIcon.Visible = true;
+                    if (_trayIcon != null)
+                        _trayIcon.Visible = true;
                     return;
                 }
                 else if (result == MessageBoxResult.No)
@@ -187,8 +189,16 @@ namespace MsgToPdfConverter
                     return;
                 }
             }
-            _trayIcon.Visible = false;
-            _trayIcon.Dispose();
+            if (_trayIcon != null)
+            {
+                try
+                {
+                    _trayIcon.Visible = false;
+                    _trayIcon.Dispose();
+                }
+                catch { }
+                _trayIcon = null;
+            }
             base.OnClosing(e);
         }
 
@@ -206,9 +216,18 @@ namespace MsgToPdfConverter
         {
             this.Dispatcher.Invoke(() =>
             {
-                _trayIcon.Visible = false;
-                _trayIcon.Dispose();
+                if (_trayIcon != null)
+                {
+                    try
+                    {
+                        _trayIcon.Visible = false;
+                        _trayIcon.Dispose();
+                    }
+                    catch { }
+                    _trayIcon = null;
+                }
                 this.Close();
+                Application.Current.Shutdown();
             });
         }
 
