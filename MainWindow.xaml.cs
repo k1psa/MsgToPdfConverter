@@ -218,13 +218,13 @@ namespace MsgToPdfConverter
         private void OpenOptionsWindow()
         {
             // Load current settings
-            bool deleteMsg = Properties.Settings.Default["DeleteMsgAfterConversion"] is bool d ? d : false;
+            bool deleteFiles = Properties.Settings.Default["DeleteMsgAfterConversion"] is bool d ? d : false;
             string closeBehavior = Properties.Settings.Default.CloseButtonBehavior ?? "Ask";
-            var options = new OptionsWindow(deleteMsg, closeBehavior);
+            var options = new OptionsWindow(deleteFiles, closeBehavior);
             options.Owner = this;
             if (options.ShowDialog() == true)
             {
-                Properties.Settings.Default["DeleteMsgAfterConversion"] = options.DeleteMsgAfterConversion;
+                Properties.Settings.Default["DeleteMsgAfterConversion"] = options.DeleteFilesAfterConversion;
                 Properties.Settings.Default.CloseButtonBehavior = options.CloseButtonBehavior;
                 Properties.Settings.Default.Save();
             }

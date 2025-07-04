@@ -105,7 +105,7 @@
             <CheckBox Content="Append attachments as PDF at the end"
                       IsChecked="{Binding AppendAttachments}"
                       Margin="0,0,10,0"/>
-            <CheckBox Content="Combine all .msg into one PDF file"
+            <CheckBox Content="Combine all files into a single PDF file"
                       IsChecked="{Binding CombineAllPdfs}"
                       Margin="0,0,0,0"/>
         </StackPanel>

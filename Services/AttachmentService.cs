@@ -1163,7 +1163,7 @@ namespace MsgToPdfConverter.Services
         /// <summary>
         /// Determines if an attachment is likely a signature image or decorative element that should be skipped
         /// </summary>
-        private bool IsLikelySignatureImage(Storage.Attachment attachment)
+        public bool IsLikelySignatureImage(Storage.Attachment attachment)
         {
             try
             {

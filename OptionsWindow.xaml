@@ -17,8 +17,8 @@
                         <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <CheckBox x:Name="DeleteMsgAfterConversionCheckBox"
-                          Content="Delete .msg after conversion"
+                <CheckBox x:Name="DeleteFilesAfterConversionCheckBox"
+                          Content="Delete files after conversion"
                           Grid.Row="0"
                                 Grid.Column="0"
                                 Grid.ColumnSpan="2"

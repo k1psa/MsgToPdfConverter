@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Collections.Generic;
+using System.Linq;
 using MsgToPdfConverter.Services;
 using MsgToPdfConverter.Utils;
 
@@ -18,7 +19,7 @@ namespace MsgToPdfConverter
         private string _selectedOutputFolder;
         private bool _isConverting;
         private bool _cancellationRequested;
-        private bool _deleteMsgAfterConversion;
+        private bool _deleteFilesAfterConversion;
         private bool _isPinned;
         private int _progressValue;
         private int _progressMax;
@@ -65,7 +66,7 @@ namespace MsgToPdfConverter
         public string SelectedOutputFolder { get => _selectedOutputFolder; set { _selectedOutputFolder = value; OnPropertyChanged(nameof(SelectedOutputFolder)); } }
         public bool IsConverting { get => _isConverting; set { _isConverting = value; OnPropertyChanged(nameof(IsConverting)); (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged(); } }
         public bool CancellationRequested { get => _cancellationRequested; set { _cancellationRequested = value; OnPropertyChanged(nameof(CancellationRequested)); } }
-        public bool DeleteMsgAfterConversion { get => _deleteMsgAfterConversion; set { _deleteMsgAfterConversion = value; OnPropertyChanged(nameof(DeleteMsgAfterConversion)); } }
+        public bool DeleteFilesAfterConversion { get => _deleteFilesAfterConversion; set { _deleteFilesAfterConversion = value; OnPropertyChanged(nameof(DeleteFilesAfterConversion)); } }
         public bool IsPinned { get => _isPinned; set { _isPinned = value; OnPropertyChanged(nameof(IsPinned)); } }
         public int ProgressValue { get => _progressValue; set { _progressValue = value; OnPropertyChanged(nameof(ProgressValue)); } }
         public int ProgressMax { get => _progressMax; set { _progressMax = value; OnPropertyChanged(nameof(ProgressMax)); } }
@@ -164,7 +165,7 @@ namespace MsgToPdfConverter
         {
             if (IsConverting) return;
             Console.WriteLine($"Starting conversion for {SelectedFiles.Count} files. Output folder: {SelectedOutputFolder}");
-            Console.WriteLine($"[DEBUG] Passing DeleteMsgAfterConversion: {DeleteMsgAfterConversion}");
+            Console.WriteLine($"[DEBUG] Passing DeleteMsgAfterConversion: {DeleteFilesAfterConversion}");
             IsConverting = true;
             ProgressValue = 0;
             ProgressMax = SelectedFiles.Count;
@@ -180,7 +181,7 @@ namespace MsgToPdfConverter
                         SelectedOutputFolder,
                         AppendAttachments,
                         false, // always ignore extractOriginalOnly
-                        DeleteMsgAfterConversion,
+                        DeleteFilesAfterConversion,
                         _emailService,
                         _attachmentService,
                         (processed, total, progress, statusText) =>
@@ -199,9 +200,22 @@ namespace MsgToPdfConverter
                 if (CombineAllPdfs && !string.IsNullOrEmpty(CombinedPdfOutputPath) && generatedPdfs.Count > 0)
                 {
                     PdfAppendTest.AppendPdfs(generatedPdfs, CombinedPdfOutputPath);
+                    // Always delete intermediate PDFs after combining
                     foreach (var pdf in generatedPdfs)
                     {
-                        try { if (File.Exists(pdf)) File.Delete(pdf); } catch { }
+                        bool isOriginal = SelectedFiles.Any(f => string.Equals(f, pdf, StringComparison.OrdinalIgnoreCase));
+                        if (!isOriginal)
+                        {
+                            try { if (File.Exists(pdf)) File.Delete(pdf); } catch { }
+                        }
+                    }
+                    // Optionally delete original source files if requested
+                    if (DeleteFilesAfterConversion)
+                    {
+                        foreach (var src in SelectedFiles)
+                        {
+                            try { if (File.Exists(src)) File.Delete(src); } catch { }
+                        }
                     }
                     statusMessage = $"{generatedPdfs.Count} file(s) have been combined into {System.IO.Path.GetFileName(CombinedPdfOutputPath)}";
                 }
@@ -237,14 +251,14 @@ namespace MsgToPdfConverter
 
         private void OpenOptions(object parameter)
         {
-            var optionsWindow = new OptionsWindow(DeleteMsgAfterConversion, Properties.Settings.Default.CloseButtonBehavior ?? "Ask")
+            var optionsWindow = new OptionsWindow(DeleteFilesAfterConversion, Properties.Settings.Default.CloseButtonBehavior ?? "Ask")
             {
                 Owner = Application.Current.MainWindow
             };
             if (optionsWindow.ShowDialog() == true)
             {
-                DeleteMsgAfterConversion = optionsWindow.DeleteMsgAfterConversion;
-                Console.WriteLine($"[DEBUG] DeleteMsgAfterConversion set to: {DeleteMsgAfterConversion}");
+                DeleteFilesAfterConversion = optionsWindow.DeleteFilesAfterConversion;
+                Console.WriteLine($"[DEBUG] DeleteFilesAfterConversion set to: {DeleteFilesAfterConversion}");
             }
         }
 

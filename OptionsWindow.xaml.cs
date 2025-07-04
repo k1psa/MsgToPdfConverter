@@ -5,13 +5,13 @@ namespace MsgToPdfConverter
 {
     public partial class OptionsWindow : Window
     {
-        public bool DeleteMsgAfterConversion { get; private set; }
+        public bool DeleteFilesAfterConversion { get; private set; }
         public string CloseButtonBehavior { get; private set; }
 
-        public OptionsWindow(bool deleteMsgAfterConversion, string closeButtonBehavior)
+        public OptionsWindow(bool deleteFilesAfterConversion, string closeButtonBehavior)
         {
             InitializeComponent();
-            DeleteMsgAfterConversionCheckBox.IsChecked = deleteMsgAfterConversion;
+            DeleteFilesAfterConversionCheckBox.IsChecked = deleteFilesAfterConversion;
             switch (closeButtonBehavior)
             {
                 case "Minimize to tray":
@@ -29,8 +29,8 @@ namespace MsgToPdfConverter
 
         private void OkButton_Click(object sender, RoutedEventArgs e)
         {
-            DeleteMsgAfterConversion = DeleteMsgAfterConversionCheckBox.IsChecked == true;
-            Properties.Settings.Default.DeleteMsgAfterConversion = DeleteMsgAfterConversion;
+            DeleteFilesAfterConversion = DeleteFilesAfterConversionCheckBox.IsChecked == true;
+            Properties.Settings.Default.DeleteMsgAfterConversion = DeleteFilesAfterConversion;
 
             string selected = ((ComboBoxItem)CloseBehaviorComboBox.SelectedItem).Content.ToString();
             CloseButtonBehavior = selected == "Minimize to tray" ? "Minimize" : selected;
