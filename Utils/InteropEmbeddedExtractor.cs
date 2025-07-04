@@ -83,7 +83,32 @@ namespace MsgToPdfConverter.Utils
                                 // Try to save the embedded object if possible
                                 SaveOleObjectToFile(ole, outFile);
                             }
-                            int page = (int)ish.Range.get_Information(WdInformation.wdActiveEndPageNumber);
+                            // Try multiple methods to get page number
+                            int page = 0;
+                            try
+                            {
+                                page = (int)ish.Range.get_Information(WdInformation.wdActiveEndPageNumber);
+                                if (page <= 0)
+                                {
+                                    // Try alternative method
+                                    page = (int)ish.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
+                                }
+                                if (page <= 0)
+                                {
+                                    // Last resort: try to get from range start
+                                    var range = ish.Range;
+                                    range.Select();
+                                    page = (int)range.get_Information(WdInformation.wdActiveEndPageNumber);
+                                }
+                            }
+                            catch (Exception pageEx)
+                            {
+                                Console.WriteLine($"[InteropExtractor] Could not determine page number: {pageEx.Message}");
+                            }
+                            
+                            // If still 0, we'll insert at the end
+                            if (page <= 0) page = -1; // Special marker for "insert at end"
+                            
                             results.Add(new ExtractedObjectInfo { FilePath = outFile, PageNumber = page, OleClass = ole.ProgID });
                             Console.WriteLine($"[InteropExtractor] Extracted: {outFile} (page {page}, ProgID={ole.ProgID})");
                             interopSuccess = true;
@@ -151,7 +176,7 @@ namespace MsgToPdfConverter.Utils
                                 part.GetStream().CopyTo(fs);
                             }
                             Console.WriteLine($"[InteropExtractor] OpenXml extracted OLE: {partFile}");
-                            results.Add(new ExtractedObjectInfo { FilePath = partFile, PageNumber = 0, OleClass = "Package" });
+                            results.Add(new ExtractedObjectInfo { FilePath = partFile, PageNumber = -1, OleClass = "Package" }); // -1 = insert at end
                             xmlCounter++;
                         }
                     }
