@@ -217,7 +217,7 @@ namespace MsgToPdfConverter
                         {
                             if (!string.Equals(src, CombinedPdfOutputPath, StringComparison.OrdinalIgnoreCase))
                             {
-                                try { if (File.Exists(src)) File.Delete(src); } catch { }
+                                try { if (File.Exists(src)) FileService.MoveFileToRecycleBin(src); } catch { }
                             }
                         }
                     }
