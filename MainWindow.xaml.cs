@@ -59,6 +59,7 @@ namespace MsgToPdfConverter
             var listBox = sender as System.Windows.Controls.ListBox;
             var droppedData = e.Data.GetData(typeof(string)) as string;
             var target = GetObjectDataFromPoint(listBox, e.GetPosition(listBox)) as string;
+            // Only reorder if dropped on another item
             if (droppedData != null && target != null && droppedData != target)
             {
                 int oldIndex = listBox.Items.IndexOf(droppedData);
@@ -66,10 +67,24 @@ namespace MsgToPdfConverter
                 _viewModel.MoveFile(oldIndex, newIndex);
                 listBox.SelectedItem = droppedData;
             }
+            else if (droppedData != null && target == null)
+            {
+                // Dropped in empty space: move to end
+                int oldIndex = listBox.Items.IndexOf(droppedData);
+                int newIndex = listBox.Items.Count - 1;
+                if (oldIndex != newIndex)
+                {
+                    _viewModel.MoveFile(oldIndex, newIndex);
+                    listBox.SelectedItem = droppedData;
+                }
+            }
             else
             {
-                // Fallback to original drop logic for files/folders
-                _viewModel.HandleDrop(e.Data);
+                // Fallback to original drop logic for files/folders, but suppress irrelevant error for internal reordering
+                if (!(droppedData is string))
+                {
+                    _viewModel.HandleDrop(e.Data);
+                }
             }
         }
 
