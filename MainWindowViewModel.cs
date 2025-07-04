@@ -175,7 +175,7 @@ namespace MsgToPdfConverter
                 List<string> generatedPdfs = new List<string>();
                 var result = await Task.Run(() =>
                 {
-                    var res = conversionService.ConvertMsgFilesWithAttachments(
+                    var res = conversionService.ConvertFilesWithAttachments(
                         new System.Collections.Generic.List<string>(SelectedFiles),
                         SelectedOutputFolder,
                         AppendAttachments,

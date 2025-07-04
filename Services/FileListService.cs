@@ -9,11 +9,17 @@ namespace MsgToPdfConverter.Services
         public List<string> AddFiles(List<string> currentFiles, IEnumerable<string> newFiles)
         {
             var set = new HashSet<string>(currentFiles);
+            string[] supportedExtensions = new[] { ".msg", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".7z", ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
+            
             foreach (var file in newFiles)
             {
-                if (!set.Contains(file) && File.Exists(file) && Path.GetExtension(file).ToLowerInvariant() == ".msg")
+                if (!set.Contains(file) && File.Exists(file))
                 {
-                    set.Add(file);
+                    string ext = Path.GetExtension(file).ToLowerInvariant();
+                    if (supportedExtensions.Contains(ext))
+                    {
+                        set.Add(file);
+                    }
                 }
             }
             return set.ToList();
@@ -22,8 +28,17 @@ namespace MsgToPdfConverter.Services
         public List<string> AddFilesFromDirectory(List<string> currentFiles, string directory)
         {
             if (!Directory.Exists(directory)) return currentFiles;
-            var msgFiles = Directory.GetFiles(directory, "*.msg", SearchOption.AllDirectories);
-            return AddFiles(currentFiles, msgFiles);
+            
+            string[] supportedExtensions = new[] { ".msg", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".7z", ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
+            var allSupportedFiles = new List<string>();
+            
+            foreach (var ext in supportedExtensions)
+            {
+                var files = Directory.GetFiles(directory, "*" + ext, SearchOption.AllDirectories);
+                allSupportedFiles.AddRange(files);
+            }
+            
+            return AddFiles(currentFiles, allSupportedFiles);
         }
 
         public List<string> RemoveFiles(List<string> currentFiles, IEnumerable<string> filesToRemove)

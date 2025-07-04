@@ -992,7 +992,19 @@ namespace MsgToPdfConverter.Services
         public string ProcessSingleAttachmentWithHierarchy(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false)
         {
             Console.WriteLine($"[ATTACH-DEBUG] ENTER: attName={att?.FileName}, attPath={attPath}, tempDir={tempDir}, headerText={headerText}, parentChain=[{string.Join(" -> ", parentChain ?? new List<string>())}], currentItem={currentItem}, extractOriginalOnly={extractOriginalOnly}");
-            string attName = att.FileName ?? "attachment";
+            
+            // Handle both .msg attachments and standalone files
+            string attName;
+            if (att != null)
+            {
+                attName = att.FileName ?? "attachment";
+            }
+            else
+            {
+                // For standalone files, use the file name from the path
+                attName = Path.GetFileName(attPath) ?? "file";
+            }
+            
             string ext = Path.GetExtension(attName).ToLowerInvariant();
             string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
             string finalAttachmentPdf = null;
