@@ -56,10 +56,25 @@ namespace MsgToPdfConverter
         // Drag-and-drop event handlers delegate to ViewModel
         private void FilesListBox_Drop(object sender, DragEventArgs e)
         {
+            Console.WriteLine("[DEBUG] FilesListBox_Drop event triggered");
+            
             var listBox = sender as System.Windows.Controls.ListBox;
             var droppedData = e.Data.GetData(typeof(string)) as string;
             var target = GetObjectDataFromPoint(listBox, e.GetPosition(listBox)) as string;
-            // Only reorder if dropped on another item
+            
+            // Check if this is an external drop (files, folders, or Outlook emails)
+            bool isExternalDrop = e.Data.GetDataPresent(DataFormats.FileDrop) ||
+                                  e.Data.GetDataPresent("FileGroupDescriptorW") ||
+                                  e.Data.GetDataPresent("FileGroupDescriptor");
+            
+            if (isExternalDrop)
+            {
+                Console.WriteLine("[DEBUG] External drop detected, calling ViewModel.HandleDrop");
+                _viewModel.HandleDrop(e.Data);
+                return;
+            }
+            
+            // Handle internal reordering only if it's not an external drop
             if (droppedData != null && target != null && droppedData != target)
             {
                 int oldIndex = listBox.Items.IndexOf(droppedData);
@@ -76,14 +91,6 @@ namespace MsgToPdfConverter
                 {
                     _viewModel.MoveFile(oldIndex, newIndex);
                     listBox.SelectedItem = droppedData;
-                }
-            }
-            else
-            {
-                // Fallback to original drop logic for files/folders, but suppress irrelevant error for internal reordering
-                if (!(droppedData is string))
-                {
-                    _viewModel.HandleDrop(e.Data);
                 }
             }
         }
