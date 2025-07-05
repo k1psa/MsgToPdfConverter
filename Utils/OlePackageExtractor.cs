@@ -15,6 +15,8 @@ namespace MsgToPdfConverter.Utils
         public string OriginalStreamName { get; set; }
         // Optional: hash for robust mapping
         public string DataHash => Data != null ? BitConverter.ToString(System.Security.Cryptography.SHA1.Create().ComputeHash(Data)).Replace("-", "") : null;
+        // New: internal name for embedded Office files (Word/Excel)
+        public string EmbeddedOfficeName { get; set; }
     }
 
     public static class OlePackageExtractor
@@ -190,15 +192,45 @@ namespace MsgToPdfConverter.Utils
                             string ext = Path.GetExtension(fileName).ToLowerInvariant();
                             string contentType = ext == ".pdf" ? "application/pdf" : "application/octet-stream";
                             Console.WriteLine($"[DEBUG] OLE extracted file: {fileName}, size: {fileData.Length}, contentType: {contentType}");
-                            return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = foundStreamName };
+                            // --- Filter out placeholder/fake files ---
+                            var placeholderNames = new[] { "data.bin", "contents.bin", "objectpool.bin", "package.bin" };
+                            bool isPlaceholder = string.IsNullOrWhiteSpace(fileName)
+                                || placeholderNames.Contains(fileName.ToLowerInvariant())
+                                || (fileName.ToLowerInvariant().EndsWith(".bin") && fileName.Substring(0, fileName.Length - 4).Equals(foundStreamName, StringComparison.OrdinalIgnoreCase))
+                                || !ValidateFileData(fileData, fileName);
+                            if (isPlaceholder)
+                            {
+                                // --- Try to extract internal name for Office files ---
+                                string embeddedOfficeName = TryExtractOfficeInternalName(cf);
+                                if (!string.IsNullOrEmpty(embeddedOfficeName))
+                                {
+                                    Console.WriteLine($"[DEBUG] Embedded Office file internal name: {embeddedOfficeName}");
+                                    return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = foundStreamName, EmbeddedOfficeName = embeddedOfficeName };
+                                }
+                                Console.WriteLine($"[DEBUG] Skipping placeholder/fake file: {fileName} (stream: {foundStreamName})");
+                                return null;
+                            }
+                            // Try to extract internal name for Office files even for non-placeholder
+                            string officeName = TryExtractOfficeInternalName(cf);
+                            if (!string.IsNullOrEmpty(officeName))
+                            {
+                                Console.WriteLine($"[DEBUG] Embedded Office file internal name: {officeName}");
+                            }
+                            return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = foundStreamName, EmbeddedOfficeName = officeName };
                         }
                     }
                     catch (Exception ex)
                     {
                         // Not a standard OLE Package, just dump the stream as a file
                         Console.WriteLine($"[DEBUG] Stream '{foundStreamName}' is not a standard OLE Package: {ex.Message}");
+                        // Try to extract internal name for Office files
+                        string embeddedOfficeName = TryExtractOfficeInternalName(cf);
+                        if (!string.IsNullOrEmpty(embeddedOfficeName))
+                        {
+                            Console.WriteLine($"[DEBUG] Embedded Office file internal name: {embeddedOfficeName}");
+                        }
                         string fallbackName = foundStreamName + ".bin";
-                        return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data, OriginalStreamName = foundStreamName };
+                        return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data, OriginalStreamName = foundStreamName, EmbeddedOfficeName = embeddedOfficeName };
                     }
                 }
             }
@@ -545,6 +577,153 @@ namespace MsgToPdfConverter.Utils
             {
                 Console.WriteLine($"{indent}[Stream] Package not found (exception)");
             }
+        }
+
+        // Helper to detect embedded Word/Excel and extract internal name
+        private static bool IsEmbeddedWordOrExcel(CompoundFile cf, out string officeType, out string embeddedName)
+        {
+            officeType = null;
+            embeddedName = null;
+            try
+            {
+                var root = cf.RootStorage;
+                var streamNames = new List<string>();
+                var getStreamNamesProp = root.GetType().GetProperty("StreamNames");
+                if (getStreamNamesProp != null)
+                {
+                    var names = getStreamNamesProp.GetValue(root) as System.Collections.IEnumerable;
+                    if (names != null)
+                        foreach (var n in names)
+                            streamNames.Add(n.ToString());
+                }
+                // Word: look for 'WordDocument' stream
+                if (streamNames.Contains("WordDocument"))
+                {
+                    officeType = "Word";
+                    // Try to get the document name from summary info
+                    embeddedName = GetOfficeInternalName(cf, "WordDocument");
+                    return true;
+                }
+                // Excel: look for 'Workbook' or 'Book' stream
+                if (streamNames.Contains("Workbook") || streamNames.Contains("Book"))
+                {
+                    officeType = "Excel";
+                    embeddedName = GetOfficeInternalName(cf, "Workbook") ?? GetOfficeInternalName(cf, "Book");
+                    return true;
+                }
+            }
+            catch { }
+            return false;
+        }
+
+        // Try to extract the internal name from DocumentSummaryInformation or similar
+        private static string GetOfficeInternalName(CompoundFile cf, string mainStream)
+        {
+            try
+            {
+                // Try to get the DocumentSummaryInformation stream
+                var stream = cf.RootStorage.GetStream("\u0005DocumentSummaryInformation");
+                var data = stream.GetData();
+                // Look for the file name as a UTF-16 string
+                var text = System.Text.Encoding.Unicode.GetString(data);
+                // Try to find a .docx or .xlsx name
+                var idx = text.IndexOf(".docx", StringComparison.OrdinalIgnoreCase);
+                if (idx > 0)
+                {
+                    int start = text.LastIndexOf('\0', idx) + 1;
+                    return text.Substring(start, idx - start + 5).Replace("\0", "");
+                }
+                idx = text.IndexOf(".xlsx", StringComparison.OrdinalIgnoreCase);
+                if (idx > 0)
+                {
+                    int start = text.LastIndexOf('\0', idx) + 1;
+                    return text.Substring(start, idx - start + 5).Replace("\0", "");
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        // --- New helper: Try to extract internal name for embedded Office files ---
+        private static string TryExtractOfficeInternalName(CompoundFile cf)
+        {
+            try
+            {
+                // Look for Word or Excel storages/streams
+                // Word: "WordDocument" stream, Excel: "Workbook" stream
+                var root = cf.RootStorage;
+                foreach (var name in new[] { "WordDocument", "Workbook" })
+                {
+                    try
+                    {
+                        var stream = root.GetStream(name);
+                        if (stream != null)
+                        {
+                            // Try to find the document name in the property set storage
+                            // Look for \u0005SummaryInformation or \u0005DocumentSummaryInformation
+                            foreach (var propName in new[] { "\u0005SummaryInformation", "\u0005DocumentSummaryInformation" })
+                            {
+                                try
+                                {
+                                    var propStream = root.GetStream(propName);
+                                    if (propStream != null)
+                                    {
+                                        var propData = propStream.GetData();
+                                        // Try to extract the Title or internal name from the property set
+                                        string title = ExtractTitleFromPropertySet(propData);
+                                        if (!string.IsNullOrEmpty(title))
+                                            return title;
+                                    }
+                                }
+                                catch { }
+                            }
+                            // If not found, fallback: try to extract from the stream itself (rare)
+                        }
+                    }
+                    catch { }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        // --- New helper: Extract Title from property set stream (SummaryInformation) ---
+        private static string ExtractTitleFromPropertySet(byte[] propData)
+        {
+            // This is a minimal parser for the SummaryInformation property set
+            // Title is usually property ID 2 (VT_LPSTR or VT_LPWSTR)
+            try
+            {
+                if (propData == null || propData.Length < 48) return null;
+                // Look for the string "Title" or try to parse property ID 2
+                string asAscii = System.Text.Encoding.ASCII.GetString(propData);
+                if (asAscii.Contains("Title"))
+                {
+                    int idx = asAscii.IndexOf("Title");
+                    int strStart = idx + 5;
+                    int strEnd = asAscii.IndexOf('\0', strStart);
+                    if (strEnd > strStart)
+                    {
+                        string title = asAscii.Substring(strStart, strEnd - strStart);
+                        return title.Trim();
+                    }
+                }
+                // Fallback: try to find a plausible UTF-16 string
+                string asUnicode = System.Text.Encoding.Unicode.GetString(propData);
+                if (asUnicode.Contains("Title"))
+                {
+                    int idx = asUnicode.IndexOf("Title");
+                    int strStart = idx + 5;
+                    int strEnd = asUnicode.IndexOf('\0', strStart);
+                    if (strEnd > strStart)
+                    {
+                        string title = asUnicode.Substring(strStart, strEnd - strStart);
+                        return title.Trim();
+                    }
+                }
+            }
+            catch { }
+            return null;
         }
     }
 }

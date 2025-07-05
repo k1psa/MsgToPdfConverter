@@ -23,6 +23,9 @@ namespace MsgToPdfConverter.Utils
             public int DocumentOrderIndex { get; set; } // Order in document flow
             public int? SourceInlineShapeIndex { get; set; } // NEW: Index of InlineShape this object is mapped to (1-based)
             public int? MatchedInlineShapeIndex { get; set; } // Used for improved Package mapping
+            // New: for robust mapping
+            public string OriginalStreamName { get; set; }
+            public string ExtractedFileName { get; set; }
         }
 
         /// <summary>
@@ -538,92 +541,99 @@ namespace MsgToPdfConverter.Utils
                 if (pkgDoc != null) { try { pkgDoc.Close(false); } catch { } }
                 if (pkgWordApp != null) { try { pkgWordApp.Quit(false); } catch { } }
             }
-            // Now, when extracting real files from .bin, assign page from the correct Package InlineShape
+            // --- NEW: Extract real files from .bin in OpenXml order, and disregard non-real files immediately ---
             int packageShapeCounter = 0;
-            foreach (var obj in results.ToList())
+            var openXmlBinObjs = results.Where(obj => obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase) && (obj.OleClass ?? "").ToLower().Contains("package")).ToList();
+            foreach (var obj in openXmlBinObjs)
             {
-                if (obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase) && (obj.OleClass ?? "").ToLower().Contains("package"))
+                int? sourceIdx = null;
+                int? pageFromShape = null;
+                try
                 {
-                    int? sourceIdx = null;
-                    int? pageFromShape = null;
-                    try
+                    var bytes = File.ReadAllBytes(obj.FilePath);
+                    var pkg = MsgToPdfConverter.Utils.OlePackageExtractor.ExtractPackage(bytes);
+                    // --- Disregard non-real files immediately ---
+                    if (pkg == null || pkg.Data == null || pkg.Data.Length == 0)
                     {
-                        var bytes = File.ReadAllBytes(obj.FilePath);
-                        var pkg = MsgToPdfConverter.Utils.OlePackageExtractor.ExtractPackage(bytes);
-                        if (pkg != null && pkg.Data != null && pkg.Data.Length > 0)
+                        results.Remove(obj);
+                        continue;
+                    }
+                    // Fallback: assign by OpenXml order (packageShapeCounter)
+                    if (packageShapeCounter < packageInlineShapes.Count)
+                    {
+                        sourceIdx = packageInlineShapes[packageShapeCounter].Index;
+                        pageFromShape = packageInlineShapes[packageShapeCounter].Page;
+                        packageShapeCounter++;
+                    }
+                    string realFilePath = Path.Combine(Path.GetDirectoryName(obj.FilePath), pkg.FileName);
+                    File.WriteAllBytes(realFilePath, pkg.Data);
+                    Console.WriteLine($"[InteropExtractor] OLE bin extracted: {realFilePath} (from {obj.FilePath})");
+                    Console.WriteLine($"[InteropExtractor] Mapping: File='{pkg.FileName}', EmbeddedOfficeName='{pkg.EmbeddedOfficeName}', Stream='{pkg.OriginalStreamName}', InlineShapeIdx={sourceIdx}, Page={pageFromShape}");
+                    var newObj = new ExtractedObjectInfo {
+                        FilePath = realFilePath,
+                        PageNumber = pageFromShape ?? -1,
+                        OleClass = Path.GetExtension(realFilePath).ToLower() == ".msg" ? "Package" : obj.OleClass,
+                        DocumentOrderIndex = obj.DocumentOrderIndex,
+                        SourceInlineShapeIndex = sourceIdx,
+                        MatchedInlineShapeIndex = sourceIdx,
+                        OriginalStreamName = pkg.OriginalStreamName,
+                        ExtractedFileName = pkg.FileName
+                    };
+                    results.Add(newObj);
+                    // Remove the .bin placeholder from results
+                    results.Remove(obj);
+                    // --- Validate MSG files with enhanced debugging ---
+                    if (realFilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine($"[InteropExtractor] Validating MSG file: {realFilePath}");
+                        Console.WriteLine($"[InteropExtractor] MSG file size: {new FileInfo(realFilePath).Length} bytes");
+                        // Debug: Show first 32 bytes of the MSG file
+                        try
                         {
-                            if (packageShapeCounter < packageInlineShapes.Count)
+                            var msgBytes = File.ReadAllBytes(realFilePath);
+                            var first32 = msgBytes.Take(32).ToArray();
+                            var hexString = string.Join(" ", first32.Select(b => b.ToString("X2")));
+                            Console.WriteLine($"[InteropExtractor] MSG first 32 bytes: {hexString}");
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[InteropExtractor] Could not read MSG bytes for debugging: {ex.Message}");
+                        }
+                        if (ValidateMsgFile(realFilePath))
+                        {
+                            Console.WriteLine($"[InteropExtractor] MSG file validated successfully: {realFilePath}");
+                            newObj.FilePath = realFilePath;
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[InteropExtractor] MSG file validation failed, trying fallback validation...");
+                            bool fallbackValid = TryFallbackMsgValidation(realFilePath);
+                            if (fallbackValid)
                             {
-                                sourceIdx = packageInlineShapes[packageShapeCounter].Index;
-                                pageFromShape = packageInlineShapes[packageShapeCounter].Page;
-                                packageShapeCounter++; // increment ONLY for real file
+                                Console.WriteLine($"[InteropExtractor] MSG file validated with fallback method: {realFilePath}");
+                                newObj.FilePath = realFilePath;
                             }
-                            string realFilePath = Path.Combine(Path.GetDirectoryName(obj.FilePath), pkg.FileName);
-                            File.WriteAllBytes(realFilePath, pkg.Data);
-                            Console.WriteLine($"[InteropExtractor] OLE bin extracted: {realFilePath} (from {obj.FilePath})");
-                            var newObj = new ExtractedObjectInfo {
-                                FilePath = realFilePath,
-                                PageNumber = pageFromShape ?? -1,
-                                OleClass = Path.GetExtension(realFilePath).ToLower() == ".msg" ? "Package" : obj.OleClass,
-                                DocumentOrderIndex = obj.DocumentOrderIndex,
-                                SourceInlineShapeIndex = sourceIdx,
-                                MatchedInlineShapeIndex = sourceIdx
-                            };
-                            results.Add(newObj);
-                            // --- Validate MSG files with enhanced debugging ---
-                            if (realFilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                            else
                             {
-                                Console.WriteLine($"[InteropExtractor] Validating MSG file: {realFilePath}");
-                                Console.WriteLine($"[InteropExtractor] MSG file size: {new FileInfo(realFilePath).Length} bytes");
-                                // Debug: Show first 32 bytes of the MSG file
+                                Console.WriteLine($"[InteropExtractor] MSG file validation failed completely, removing: {realFilePath}");
+                                var debugPath = realFilePath + ".corrupted";
                                 try
                                 {
-                                    var msgBytes = File.ReadAllBytes(realFilePath);
-                                    var first32 = msgBytes.Take(32).ToArray();
-                                    var hexString = string.Join(" ", first32.Select(b => b.ToString("X2")));
-                                    Console.WriteLine($"[InteropExtractor] MSG first 32 bytes: {hexString}");
+                                    File.Copy(realFilePath, debugPath, true);
+                                    Console.WriteLine($"[InteropExtractor] Corrupted MSG saved for analysis: {debugPath}");
                                 }
-                                catch (Exception ex)
-                                {
-                                    Console.WriteLine($"[InteropExtractor] Could not read MSG bytes for debugging: {ex.Message}");
-                                }
-                                if (ValidateMsgFile(realFilePath))
-                                {
-                                    Console.WriteLine($"[InteropExtractor] MSG file validated successfully: {realFilePath}");
-                                    newObj.FilePath = realFilePath;
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"[InteropExtractor] MSG file validation failed, trying fallback validation...");
-                                    bool fallbackValid = TryFallbackMsgValidation(realFilePath);
-                                    if (fallbackValid)
-                                    {
-                                        Console.WriteLine($"[InteropExtractor] MSG file validated with fallback method: {realFilePath}");
-                                        newObj.FilePath = realFilePath;
-                                    }
-                                    else
-                                    {
-                                        Console.WriteLine($"[InteropExtractor] MSG file validation failed completely, removing: {realFilePath}");
-                                        var debugPath = realFilePath + ".corrupted";
-                                        try
-                                        {
-                                            File.Copy(realFilePath, debugPath, true);
-                                            Console.WriteLine($"[InteropExtractor] Corrupted MSG saved for analysis: {debugPath}");
-                                        }
-                                        catch { }
-                                        results.Remove(newObj);
-                                        try { File.Delete(realFilePath); } catch { }
-                                        continue;
-                                    }
-                                }
+                                catch { }
+                                results.Remove(newObj);
+                                try { File.Delete(realFilePath); } catch { }
+                                continue;
                             }
                         }
-                        // else: do NOT increment packageShapeCounter
                     }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[InteropExtractor] OLE bin extraction error: {ex.Message}");
-                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[InteropExtractor] OLE bin extraction error: {ex.Message}");
+                    results.Remove(obj);
                 }
             }
 
