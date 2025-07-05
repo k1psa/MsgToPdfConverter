@@ -44,11 +44,19 @@ namespace MsgToPdfConverter.Services
                 return;
             }
 
-            // Validate and log extracted objects
+            // Validate and log extracted objects, filter out Package placeholders
             var validObjects = new List<InteropEmbeddedExtractor.ExtractedObjectInfo>();
             foreach (var obj in extractedObjects)
             {
-                Console.WriteLine($"[PDF-INSERT] Checking object: {Path.GetFileName(obj.FilePath)} at {obj.FilePath}");
+                Console.WriteLine($"[PDF-INSERT] Checking object: {Path.GetFileName(obj.FilePath)} at {obj.FilePath}, OleClass: {obj.OleClass}");
+                
+                // Skip Package objects that don't have meaningful content
+                if (obj.OleClass == "Package" && obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine($"[PDF-INSERT] Skipping Package object (likely placeholder): {obj.FilePath}");
+                    continue;
+                }
+                
                 if (!File.Exists(obj.FilePath))
                 {
                     Console.WriteLine($"[PDF-INSERT] Warning: Extracted file not found: {obj.FilePath}");
@@ -128,7 +136,6 @@ namespace MsgToPdfConverter.Services
                     }
 
                     // Track page offset as we insert objects to adjust subsequent page numbers
-                    int pageOffset = 0;
                     int nextObjIdx = 0;
 
                     // For each main PDF page, copy the page, then insert any embedded objects whose PageNumber == current main page
@@ -231,11 +238,14 @@ namespace MsgToPdfConverter.Services
                     reader = new PdfReader(pdfPath);
                     embeddedPdf = new PdfDocument(reader);
                     int embeddedPageCount = embeddedPdf.GetNumberOfPages();
+                    
+                    // Copy pages one by one to append them after currentPage
                     for (int pageNum = 1; pageNum <= embeddedPageCount; pageNum++)
                     {
+                        // CopyPagesTo appends to the end, which is what we want for sequential insertion
                         embeddedPdf.CopyPagesTo(pageNum, pageNum, outputPdf);
                         currentPage++;
-                        Console.WriteLine($"[PDF-INSERT] Copied page {pageNum}/{embeddedPageCount} from {Path.GetFileName(pdfPath)}");
+                        Console.WriteLine($"[PDF-INSERT] Copied page {pageNum}/{embeddedPageCount} from {Path.GetFileName(pdfPath)}, now at output page {currentPage}");
                     }
                     Console.WriteLine($"[PDF-INSERT] Successfully inserted {embeddedPageCount} pages from {Path.GetFileName(pdfPath)}");
                 }
@@ -763,7 +773,16 @@ namespace MsgToPdfConverter.Services
                 
                 try
                 {
-                    excelApp = new Microsoft.Office.Interop.Excel.Application { Visible = false, DisplayAlerts = false };
+                    excelApp = new Microsoft.Office.Interop.Excel.Application 
+                    { 
+                        Visible = false, 
+                        DisplayAlerts = false,
+                        ScreenUpdating = false,
+                        EnableEvents = false,
+                        Interactive = false,
+                        UserControl = false,
+                        ShowWindowsInTaskbar = false
+                    };
                     workbook = excelApp.Workbooks.Open(xlsxPath, ReadOnly: true);
                     
                     workbook.ExportAsFixedFormat(Microsoft.Office.Interop.Excel.XlFixedFormatType.xlTypePDF, outputPdfPath);

@@ -992,7 +992,9 @@ namespace MsgToPdfConverter.Utils
                     DisplayAlerts = false,
                     ScreenUpdating = false,
                     EnableEvents = false,
-                    Interactive = false
+                    Interactive = false,
+                    UserControl = false,
+                    ShowWindowsInTaskbar = false
                 };
                 
                 Console.WriteLine("[InteropExtractor] Excel application created in silent mode");
@@ -1053,7 +1055,7 @@ namespace MsgToPdfConverter.Utils
                             }
                             
                             // Try to use DoVerb to activate and potentially save the object
-                            ole.DoVerb(Microsoft.Office.Interop.Word.WdOLEVerb.wdOLEVerbShow);
+                            ole.DoVerb(Microsoft.Office.Interop.Word.WdOLEVerb.wdOLEVerbHide); // Use Hide instead of Show to avoid popups
                             System.Threading.Thread.Sleep(300);
                             
                             // Check if Excel now has an active workbook
