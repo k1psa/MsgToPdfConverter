@@ -11,8 +11,14 @@ namespace MsgToPdfConverter
         [STAThread]
         public static void Main(string[] args)
         {
+            // Validation test mode: test page ordering logic
+            if (args != null && args.Length >= 1 && args[0] == "--validate")
+            {
+                ValidationTest.TestPageOrderingLogic();
+                return;
+            }
             // Test mode: test embedded extraction
-            if (args != null && args.Length >= 1 && args[0] == "--test")
+            else if (args != null && args.Length >= 1 && args[0] == "--test")
             {
                 string testFile = args.Length > 1 ? args[1] : "a.docx";
                 TestExtraction.TestEmbeddedExtraction(testFile);
