@@ -34,7 +34,6 @@ namespace MsgToPdfConverter.Utils
             Document doc = null;
             int counter = 1;
             int docOrderIndex = 0;
-            bool interopSuccess = false;
             try
             {
                 Console.WriteLine($"[InteropExtractor] ExtractEmbeddedObjects called for: {docxPath}");
@@ -173,7 +172,6 @@ namespace MsgToPdfConverter.Utils
                                 results.Add(new ExtractedObjectInfo { FilePath = outFile, PageNumber = page, OleClass = ole.ProgID, DocumentOrderIndex = docOrderIndex });
                                 docOrderIndex++;
                                 Console.WriteLine($"[InteropExtractor] Extracted: {outFile} (page {page}, ProgID={ole.ProgID}, Order={docOrderIndex-1})");
-                                interopSuccess = true;
                             }
                             catch (Exception ex)
                             {
