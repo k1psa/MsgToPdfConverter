@@ -149,14 +149,14 @@ namespace MsgToPdfConverter.Services
                         while (nextObjIdx < objectsByPage.Count && objectsByPage[nextObjIdx].PageNumber == mainPage)
                         {
                             var obj = objectsByPage[nextObjIdx];
-                            int pagesBefore = currentOutputPage;
+                            Console.WriteLine($"[PDF-INSERT] About to insert {Path.GetFileName(obj.FilePath)} (order {obj.DocumentOrderIndex}) after main page {mainPage}, currentOutputPage={currentOutputPage}");
                             
                             // Insert PDF or MSG directly, do NOT add separator/grey page
                             int beforeInsert = currentOutputPage;
                             currentOutputPage = InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage);
                             
                             int pagesInserted = currentOutputPage - beforeInsert;
-                            Console.WriteLine($"[PDF-INSERT] Inserted {pagesInserted} pages for {Path.GetFileName(obj.FilePath)}, currentOutputPage now: {currentOutputPage}");
+                            Console.WriteLine($"[PDF-INSERT] Completed inserting {Path.GetFileName(obj.FilePath)}: inserted {pagesInserted} pages, currentOutputPage now: {currentOutputPage}");
                             
                             nextObjIdx++;
                         }
@@ -730,10 +730,19 @@ namespace MsgToPdfConverter.Services
                 
                 try
                 {
-                    wordApp = new Microsoft.Office.Interop.Word.Application { Visible = false, DisplayAlerts = Microsoft.Office.Interop.Word.WdAlertLevel.wdAlertsNone };
-                    doc = wordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
+                    // Create Word application with minimal, safe settings
+                    wordApp = new Microsoft.Office.Interop.Word.Application();
+                    wordApp.Visible = false;
+                    wordApp.DisplayAlerts = Microsoft.Office.Interop.Word.WdAlertLevel.wdAlertsNone;
                     
-                    doc.SaveAs2(outputPdfPath, Microsoft.Office.Interop.Word.WdSaveFormat.wdFormatPDF);
+                    // Open document with basic settings
+                    doc = wordApp.Documents.Open(docxPath, ReadOnly: true, AddToRecentFiles: false);
+                    
+                    // Export to PDF with simple settings
+                    doc.ExportAsFixedFormat(outputPdfPath, Microsoft.Office.Interop.Word.WdExportFormat.wdExportFormatPDF);
+                    
+                    // Allow a moment for file to be written
+                    System.Threading.Thread.Sleep(100);
                     
                     if (File.Exists(outputPdfPath) && new FileInfo(outputPdfPath).Length > 0)
                     {
@@ -748,13 +757,42 @@ namespace MsgToPdfConverter.Services
                 }
                 finally
                 {
-                    if (doc != null) { try { doc.Close(false); } catch { } }
-                    if (wordApp != null) { try { wordApp.Quit(false); } catch { } }
+                    // Clean up with comprehensive error handling
+                    if (doc != null) 
+                    { 
+                        try 
+                        { 
+                            doc.Close(Microsoft.Office.Interop.Word.WdSaveOptions.wdDoNotSaveChanges); 
+                            System.Runtime.InteropServices.Marshal.ReleaseComObject(doc);
+                        } 
+                        catch (Exception cleanupEx) 
+                        { 
+                            Console.WriteLine($"[PDF-INSERT] Warning: Document cleanup failed: {cleanupEx.Message}");
+                        } 
+                    }
+                    if (wordApp != null) 
+                    { 
+                        try 
+                        { 
+                            wordApp.Quit(Microsoft.Office.Interop.Word.WdSaveOptions.wdDoNotSaveChanges);
+                            System.Runtime.InteropServices.Marshal.ReleaseComObject(wordApp);
+                        } 
+                        catch (Exception cleanupEx) 
+                        { 
+                            Console.WriteLine($"[PDF-INSERT] Warning: Application cleanup failed: {cleanupEx.Message}");
+                        } 
+                    }
+                    
+                    // Force garbage collection to release COM objects
+                    System.GC.Collect();
+                    System.GC.WaitForPendingFinalizers();
+                    System.GC.Collect();
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"[PDF-INSERT] Failed to convert DOCX to PDF: {ex.Message}");
+                Console.WriteLine($"[PDF-INSERT] Exception details: {ex}");
                 return false;
             }
         }
