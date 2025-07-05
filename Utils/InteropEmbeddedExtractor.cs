@@ -630,7 +630,7 @@ namespace MsgToPdfConverter.Utils
             // --- Find ACTUAL page numbers using Word Interop if fallback was used ---
             if (results.Count > 0 && results.Any(o => o.PageNumber == -1))
             {
-                Console.WriteLine($"[InteropExtractor] Finding actual page numbers for {results.Count} objects using Word Interop (robust mapping)");
+                Console.WriteLine($"[DEBUG-MAP] ===== InlineShape Table (Index, ProgID, Page) =====");
                 Application pageWordApp = null;
                 Document pageDoc = null;
                 try
@@ -659,26 +659,24 @@ namespace MsgToPdfConverter.Utils
                         }
                         catch { }
                         inlineShapeMeta.Add((idx, progId, page));
-                        Console.WriteLine($"[InteropExtractor] InlineShapeMeta: idx={idx}, ProgID={progId}, page={page}");
+                        Console.WriteLine($"[DEBUG-MAP] InlineShape {idx}: ProgID={progId}, Page={page}");
                     }
 
                     // --- Robust mapping for Package objects (bin and real files) ---
-                    // Build a list of all Package InlineShapes
                     var packageShapes = inlineShapeMeta.Where(m => (m.ProgId ?? "").ToLower().Contains("package")).ToList();
                     int packageShapePtr = 0;
-                    // Map all .bin and real files extracted from .bin to the next Package InlineShape
                     foreach (var obj in results.Where(r => (r.OleClass ?? "").ToLower().Contains("package") && r.PageNumber == -1))
                     {
                         if (packageShapes.Count == 0)
                         {
-                            Console.WriteLine($"[InteropExtractor] Robust mapping (Package): No Package InlineShapes found for {Path.GetFileName(obj.FilePath)}");
+                            Console.WriteLine($"[DEBUG-MAP] Robust mapping (Package): No Package InlineShapes found for {Path.GetFileName(obj.FilePath)}");
                             continue;
                         }
                         int useIdx = packageShapePtr < packageShapes.Count ? packageShapePtr : packageShapes.Count - 1;
                         obj.PageNumber = packageShapes[useIdx].Page > 0 ? packageShapes[useIdx].Page : packageShapes[useIdx].Index;
                         obj.SourceInlineShapeIndex = packageShapes[useIdx].Index;
                         obj.MatchedInlineShapeIndex = packageShapes[useIdx].Index;
-                        Console.WriteLine($"[InteropExtractor] Robust mapping (Package): Object {Path.GetFileName(obj.FilePath)} (OleClass={obj.OleClass}) -> InlineShape {packageShapes[useIdx].Index} (ProgID={packageShapes[useIdx].ProgId}) assigned to page {obj.PageNumber}");
+                        Console.WriteLine($"[DEBUG-MAP] Robust mapping (Package): {Path.GetFileName(obj.FilePath)} -> InlineShape {packageShapes[useIdx].Index} (ProgID={packageShapes[useIdx].ProgId}) assigned to page {obj.PageNumber}");
                         packageShapePtr++;
                     }
 
@@ -706,13 +704,20 @@ namespace MsgToPdfConverter.Utils
                         {
                             obj.PageNumber = inlineShapeMeta[foundIdx].Page > 0 ? inlineShapeMeta[foundIdx].Page : (foundIdx + 1);
                             mapped.Add(foundIdx);
-                            Console.WriteLine($"[InteropExtractor] Robust mapping: Object {Path.GetFileName(obj.FilePath)} (OleClass={obj.OleClass}) -> InlineShape {inlineShapeMeta[foundIdx].Index} (ProgID={inlineShapeMeta[foundIdx].ProgId}) assigned to page {obj.PageNumber}");
+                            Console.WriteLine($"[DEBUG-MAP] Robust mapping: {Path.GetFileName(obj.FilePath)} -> InlineShape {inlineShapeMeta[foundIdx].Index} (ProgID={inlineShapeMeta[foundIdx].ProgId}) assigned to page {obj.PageNumber}");
                         }
                         else
                         {
                             obj.PageNumber = obj.DocumentOrderIndex + 1;
-                            Console.WriteLine($"[InteropExtractor] Robust mapping: Object {Path.GetFileName(obj.FilePath)} (OleClass={obj.OleClass}) could not be matched, assigned fallback page {obj.PageNumber}");
+                            Console.WriteLine($"[DEBUG-MAP] Robust mapping: {Path.GetFileName(obj.FilePath)} could not be matched, assigned fallback page {obj.PageNumber}");
                         }
+                    }
+
+                    // --- SUMMARY TABLE ---
+                    Console.WriteLine("[DEBUG-MAP] ===== FINAL OBJECT TO PAGE MAPPING =====");
+                    foreach (var obj in results)
+                    {
+                        Console.WriteLine($"[DEBUG-MAP] File: {Path.GetFileName(obj.FilePath)}, OleClass: {obj.OleClass}, InlineShapeIdx: {obj.SourceInlineShapeIndex}, Page: {obj.PageNumber}, Order: {obj.DocumentOrderIndex}");
                     }
                 }
                 catch (Exception ex)
@@ -721,7 +726,7 @@ namespace MsgToPdfConverter.Utils
                     for (int i = 0; i < results.Count; i++)
                     {
                         results[i].PageNumber = i + 1;
-                        Console.WriteLine($"[InteropExtractor] Object {i+1} assigned to fallback page {i+1}");
+                        Console.WriteLine($"[DEBUG-MAP] Fallback: File: {Path.GetFileName(results[i].FilePath)}, Page: {results[i].PageNumber}");
                     }
                 }
                 finally

@@ -11,6 +11,10 @@ namespace MsgToPdfConverter.Utils
         public string FileName { get; set; }
         public string ContentType { get; set; }
         public byte[] Data { get; set; }
+        // New: original OLE stream name for mapping
+        public string OriginalStreamName { get; set; }
+        // Optional: hash for robust mapping
+        public string DataHash => Data != null ? BitConverter.ToString(System.Security.Cryptography.SHA1.Create().ComputeHash(Data)).Replace("-", "") : null;
     }
 
     public static class OlePackageExtractor
@@ -155,13 +159,15 @@ namespace MsgToPdfConverter.Utils
                     // Ole10Native format: different from Package format
                     try
                     {
-                        return ParseOle10Native(data);
+                        var info = ParseOle10Native(data);
+                        info.OriginalStreamName = foundStreamName;
+                        return info;
                     }
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[DEBUG] Ole10Native parsing failed: {ex.Message}");
                         string fallbackName = "Ole10Native_raw.bin";
-                        return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data };
+                        return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data, OriginalStreamName = foundStreamName };
                     }
                 }
                 else
@@ -184,7 +190,7 @@ namespace MsgToPdfConverter.Utils
                             string ext = Path.GetExtension(fileName).ToLowerInvariant();
                             string contentType = ext == ".pdf" ? "application/pdf" : "application/octet-stream";
                             Console.WriteLine($"[DEBUG] OLE extracted file: {fileName}, size: {fileData.Length}, contentType: {contentType}");
-                            return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData };
+                            return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = foundStreamName };
                         }
                     }
                     catch (Exception ex)
@@ -192,7 +198,7 @@ namespace MsgToPdfConverter.Utils
                         // Not a standard OLE Package, just dump the stream as a file
                         Console.WriteLine($"[DEBUG] Stream '{foundStreamName}' is not a standard OLE Package: {ex.Message}");
                         string fallbackName = foundStreamName + ".bin";
-                        return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data };
+                        return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data, OriginalStreamName = foundStreamName };
                     }
                 }
             }
@@ -452,14 +458,14 @@ namespace MsgToPdfConverter.Utils
                                         "application/octet-stream";
                     
                     Console.WriteLine($"[DEBUG] Ole10Native extracted file: {fileName}, size: {fileData.Length}, contentType: {contentType}, validated: {isValidData}");
-                    return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData };
+                    return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = "Ole10Native" };
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[DEBUG] Ole10Native parsing failed: {ex.Message}");
                     // Last resort: just return the raw data
                     string fallbackName = "Ole10Native_raw.bin";
-                    return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data };
+                    return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data, OriginalStreamName = "Ole10Native" };
                 }
             }
         }
