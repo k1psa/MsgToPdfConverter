@@ -4,6 +4,7 @@ using PdfSharp.Drawing;
 using System.Collections.Generic;
 using System.IO;
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
 
@@ -16,7 +17,7 @@ namespace MsgToPdfConverter.Services
             foreach (var msgFilePath in msgFilePaths)
             {
                 var email = new Storage.Message(msgFilePath);
-                string pdfFileName = Path.Combine(outputDirectory, Path.GetFileNameWithoutExtension(msgFilePath) + ".pdf");
+                string pdfFileName = GenerateUniquePdfFileName(msgFilePath, outputDirectory, msgFilePaths);
                 ConvertToPdf(email, pdfFileName);
             }
         }
@@ -85,7 +86,11 @@ namespace MsgToPdfConverter.Services
                                 string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
                                 string msgBaseName = System.IO.Path.GetFileNameWithoutExtension(filePath);
                                 string msgDir = !string.IsNullOrEmpty(selectedOutputFolder) ? selectedOutputFolder : System.IO.Path.GetDirectoryName(filePath);
-                                string pdfFilePath = System.IO.Path.Combine(msgDir, $"{msgBaseName} - {datePart}.pdf");
+                                
+                                // Generate unique PDF filename to avoid conflicts when files have same base name but different extensions
+                                string uniquePdfName = GenerateUniquePdfFileName(filePath, msgDir, selectedFiles);
+                                string pdfBaseName = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName);
+                                string pdfFilePath = System.IO.Path.Combine(msgDir, $"{pdfBaseName} - {datePart}.pdf");
                                 if (System.IO.File.Exists(pdfFilePath))
                                     System.IO.File.Delete(pdfFilePath);
                                 var htmlResult = emailService.BuildEmailHtmlWithInlineImages(msg, false);
@@ -231,14 +236,14 @@ namespace MsgToPdfConverter.Services
                         else
                         {
                             // Only convert the email body (no attachments)
-                            var result = ConvertSingleMsgFile(filePath, dir, appendAttachments, extractOriginalOnly, emailService, attachmentService, generatedPdfs);
+                            var result = ConvertSingleMsgFile(filePath, dir, appendAttachments, extractOriginalOnly, emailService, attachmentService, generatedPdfs, selectedFiles);
                             if (result) { success++; conversionSucceeded = true; } else fail++;
                         }
                     }
                     else
                     {
                         // Use the same hierarchical logic as for attachments
-                        string outputPdf = System.IO.Path.Combine(dir, $"{baseName}.pdf");
+                        string outputPdf = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
                         var tempFiles = new List<string>();
                         var allPdfFiles = new List<string>();
                         var allTempFiles = new List<string>();
@@ -380,11 +385,14 @@ namespace MsgToPdfConverter.Services
             return (success, fail, processed, isCancellationRequested());
         }
 
-        private bool ConvertSingleMsgFile(string msgFilePath, string outputDir, bool appendAttachments, bool extractOriginalOnly, EmailConverterService emailService, AttachmentService attachmentService, List<string> generatedPdfs)
+        private bool ConvertSingleMsgFile(string msgFilePath, string outputDir, bool appendAttachments, bool extractOriginalOnly, EmailConverterService emailService, AttachmentService attachmentService, List<string> generatedPdfs, List<string> selectedFiles)
         {
             Storage.Message msg = new Storage.Message(msgFilePath);
             string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
-            string baseName = System.IO.Path.GetFileNameWithoutExtension(msgFilePath);
+            
+            // Generate unique PDF filename to avoid conflicts when files have same base name but different extensions
+            string uniquePdfName = GenerateUniquePdfFileName(msgFilePath, outputDir, selectedFiles);
+            string baseName = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName);
             string pdfFilePath = System.IO.Path.Combine(outputDir, $"{baseName} - {datePart}.pdf");
             if (System.IO.File.Exists(pdfFilePath))
                 System.IO.File.Delete(pdfFilePath);
@@ -408,6 +416,37 @@ namespace MsgToPdfConverter.Services
                 throw new Exception($"HtmlToPdfWorker failed");
             generatedPdfs?.Add(pdfFilePath);
             return true;
+        }
+
+        /// <summary>
+        /// Generates a PDF filename that avoids conflicts when multiple files have the same base name but different extensions.
+        /// If there are conflicts (e.g., a.doc and a.xlsx), it will generate a.doc.pdf and a.xlsx.pdf instead of a.pdf for both.
+        /// </summary>
+        private string GenerateUniquePdfFileName(string filePath, string outputDir, List<string> allSelectedFiles)
+        {
+            string fileName = Path.GetFileName(filePath);
+            string baseNameWithoutExt = Path.GetFileNameWithoutExtension(filePath);
+            string originalExt = Path.GetExtension(filePath);
+            
+            // Check if there are other files in the list with the same base name but different extensions
+            bool hasConflict = allSelectedFiles.Any(otherFile => 
+                !string.Equals(otherFile, filePath, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(Path.GetFileNameWithoutExtension(otherFile), baseNameWithoutExt, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(Path.GetExtension(otherFile), originalExt, StringComparison.OrdinalIgnoreCase)
+            );
+            
+            if (hasConflict)
+            {
+                // Include the original extension in the PDF name to avoid conflicts
+                // Remove the dot from the extension for cleaner naming: a.doc.pdf instead of a..doc.pdf
+                string cleanOriginalExt = originalExt.TrimStart('.');
+                return Path.Combine(outputDir, $"{baseNameWithoutExt}.{cleanOriginalExt}.pdf");
+            }
+            else
+            {
+                // No conflict, use the standard naming
+                return Path.Combine(outputDir, $"{baseNameWithoutExt}.pdf");
+            }
         }
     }
 }
