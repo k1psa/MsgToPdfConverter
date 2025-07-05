@@ -289,8 +289,11 @@ namespace MsgToPdfConverter.Utils
                         Console.WriteLine("[DEBUG] Traditional approach failed, scanning for file signatures...");
                         br.BaseStream.Position = searchStartPos;
                         
-                        // Scan up to 200 bytes ahead looking for file signatures
-                        for (int offset = 0; offset < Math.Min(200, br.BaseStream.Length - searchStartPos - 16); offset++)
+                        // For MSG files, scan more extensively since they can be deeply embedded
+                        int maxScanDistance = fileName?.EndsWith(".msg", StringComparison.OrdinalIgnoreCase) == true ? 1000 : 200;
+                        
+                        // Scan up to maxScanDistance bytes ahead looking for file signatures
+                        for (int offset = 0; offset < Math.Min(maxScanDistance, br.BaseStream.Length - searchStartPos - 16); offset++)
                         {
                             br.BaseStream.Position = searchStartPos + offset;
                             byte[] testBytes = br.ReadBytes(16);
@@ -302,6 +305,45 @@ namespace MsgToPdfConverter.Utils
                                 foundDataSize = true;
                                 br.BaseStream.Position = searchStartPos + offset; // Position at start of data
                                 break;
+                            }
+                        }
+                    }
+                    
+                    // Approach 3: For MSG files specifically, try alternative parsing methods
+                    if (!foundDataSize && fileName?.EndsWith(".msg", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        Console.WriteLine("[DEBUG] Trying MSG-specific parsing approaches...");
+                        br.BaseStream.Position = searchStartPos;
+                        
+                        // Sometimes MSG files are wrapped in additional layers
+                        // Try reading different size fields and looking for OLE signatures
+                        for (int attemptOffset = 0; attemptOffset < Math.Min(500, br.BaseStream.Length - searchStartPos - 20); attemptOffset += 4)
+                        {
+                            br.BaseStream.Position = searchStartPos + attemptOffset;
+                            
+                            // Try reading as if there's a size field here
+                            if (br.BaseStream.Position + 4 < br.BaseStream.Length)
+                            {
+                                uint candidateSize = br.ReadUInt32();
+                                long remainingAfterSize = br.BaseStream.Length - br.BaseStream.Position;
+                                
+                                // Check if this size makes sense and if the data after it looks like OLE
+                                if (candidateSize > 100 && candidateSize <= remainingAfterSize && candidateSize <= 104857600)
+                                {
+                                    byte[] testData = br.ReadBytes(Math.Min(8, (int)candidateSize));
+                                    br.BaseStream.Position -= testData.Length; // Reset
+                                    
+                                    // Check for OLE signature specifically for MSG
+                                    if (testData.Length >= 8 && 
+                                        testData[0] == 0xD0 && testData[1] == 0xCF && testData[2] == 0x11 && testData[3] == 0xE0 &&
+                                        testData[4] == 0xA1 && testData[5] == 0xB1 && testData[6] == 0x1A && testData[7] == 0xE1)
+                                    {
+                                        Console.WriteLine($"[DEBUG] Found MSG OLE signature at offset {attemptOffset} with size {candidateSize}");
+                                        dataSize = candidateSize;
+                                        foundDataSize = true;
+                                        break;
+                                    }
+                                }
                             }
                         }
                     }
@@ -331,6 +373,8 @@ namespace MsgToPdfConverter.Utils
                     
                     // Validate the data by checking for known file signatures
                     bool isValidData = ValidateFileData(fileData, fileName);
+                    Console.WriteLine($"[DEBUG] Initial validation result: {isValidData}");
+                    
                     if (!isValidData && foundDataSize)
                     {
                         Console.WriteLine("[DEBUG] Data validation failed, trying fallback approach");
@@ -339,6 +383,52 @@ namespace MsgToPdfConverter.Utils
                         fileData = br.ReadBytes((int)(br.BaseStream.Length - br.BaseStream.Position));
                         Console.WriteLine($"[DEBUG] Fallback: Read {fileData.Length} bytes");
                         isValidData = ValidateFileData(fileData, fileName);
+                        Console.WriteLine($"[DEBUG] Fallback validation result: {isValidData}");
+                    }
+                    
+                    // For MSG files specifically, if still not valid, try additional fallback methods
+                    if (!isValidData && fileName?.EndsWith(".msg", StringComparison.OrdinalIgnoreCase) == true)
+                    {
+                        Console.WriteLine("[DEBUG] MSG file still not valid, trying progressive fallbacks");
+                        
+                        // Try different starting positions by skipping potential wrapper headers
+                        int[] skipOffsets = { 8, 12, 16, 20, 24, 32, 64, 128 };
+                        foreach (int skipOffset in skipOffsets)
+                        {
+                            if (searchStartPos + skipOffset < br.BaseStream.Length - 100)
+                            {
+                                br.BaseStream.Position = searchStartPos + skipOffset;
+                                byte[] testData = br.ReadBytes(8);
+                                
+                                // Check for OLE signature at this position
+                                if (testData.Length >= 8 && 
+                                    testData[0] == 0xD0 && testData[1] == 0xCF && testData[2] == 0x11 && testData[3] == 0xE0 &&
+                                    testData[4] == 0xA1 && testData[5] == 0xB1 && testData[6] == 0x1A && testData[7] == 0xE1)
+                                {
+                                    Console.WriteLine($"[DEBUG] Found MSG OLE signature at skip offset {skipOffset}");
+                                    br.BaseStream.Position = searchStartPos + skipOffset;
+                                    fileData = br.ReadBytes((int)(br.BaseStream.Length - br.BaseStream.Position));
+                                    isValidData = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // If still not valid, save the raw data anyway with detailed logging for analysis
+                        if (!isValidData)
+                        {
+                            Console.WriteLine($"[DEBUG] MSG file validation failed completely. Raw data length: {fileData.Length}");
+                            if (fileData.Length > 0)
+                            {
+                                var first32 = string.Join(" ", fileData.Take(32).Select(b => b.ToString("X2")));
+                                Console.WriteLine($"[DEBUG] First 32 bytes of invalid MSG data: {first32}");
+                                
+                                // Return the data anyway - it might be a variant that can still be processed
+                                // We'll add a marker to the filename to indicate it needs validation
+                                fileName = "UNVALIDATED_" + fileName;
+                                Console.WriteLine($"[DEBUG] Returning unvalidated MSG data as: {fileName}");
+                            }
+                        }
                     }
                     
                     // Clean up filename - remove invalid characters
@@ -420,7 +510,7 @@ namespace MsgToPdfConverter.Utils
             {
                 bool isMsg = data[0] == 0xD0 && data[1] == 0xCF && data[2] == 0x11 && data[3] == 0xE0 &&
                             data[4] == 0xA1 && data[5] == 0xB1 && data[6] == 0x1A && data[7] == 0xE1;
-                if (isMsg) Console.WriteLine($"[DEBUG] MSG signature check: {isMsg}");
+                Console.WriteLine($"[DEBUG] MSG signature check: {isMsg} (first 8 bytes: {string.Join(" ", data.Take(8).Select(b => b.ToString("X2")))})");
                 return isMsg;
             }
             
@@ -430,6 +520,7 @@ namespace MsgToPdfConverter.Utils
             bool allSame = data.Take(Math.Min(100, data.Length)).All(b => b == firstByte);
             if (allSame && firstByte == 0)
             {
+                Console.WriteLine($"[DEBUG] File signature check failed: all zeros");
                 return false;
             }
             
