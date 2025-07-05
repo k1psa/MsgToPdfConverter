@@ -692,6 +692,14 @@ namespace MsgToPdfConverter.Utils
                 return;
             }
             
+            // Handle Excel documents with enhanced extraction
+            if (ole.ProgID != null && (ole.ProgID.ToLowerInvariant().Contains("excel") || ole.ProgID.ToLowerInvariant().Contains("sheet")))
+            {
+                Console.WriteLine($"[InteropExtractor] Detected Excel object with ProgID: {ole.ProgID}");
+                SaveEmbeddedExcelDocument(ole, outFile);
+                return;
+            }
+            
             // Only certain ProgIDs support direct saving; for others, try to save the object if it's a known type
             if (ole.ProgID != null && ole.ProgID.ToLowerInvariant().Contains("pdf"))
             {
@@ -712,7 +720,7 @@ namespace MsgToPdfConverter.Utils
             }
             else
             {
-                // For Excel, etc., try SaveCopyAs if available
+                // For other objects, try SaveCopyAs if available
                 try
                 {
                     dynamic obj = ole.Object;
@@ -962,6 +970,166 @@ namespace MsgToPdfConverter.Utils
             {
                 Console.WriteLine($"[InteropExtractor] Enhanced Word extraction failed: {ex.Message}");
                 return false;
+            }
+        }
+
+        /// <summary>
+        /// Enhanced Excel document extraction using Excel Interop in silent mode
+        /// </summary>
+        private static void SaveEmbeddedExcelDocument(OLEFormat ole, string outFile)
+        {
+            Microsoft.Office.Interop.Excel.Application excelApp = null;
+            Microsoft.Office.Interop.Excel.Workbook workbook = null;
+            
+            try
+            {
+                Console.WriteLine($"[InteropExtractor] Attempting Excel document extraction using Excel Interop to: {outFile}");
+                
+                // Create Excel application in silent mode
+                excelApp = new Microsoft.Office.Interop.Excel.Application
+                {
+                    Visible = false,
+                    DisplayAlerts = false,
+                    ScreenUpdating = false,
+                    EnableEvents = false,
+                    Interactive = false
+                };
+                
+                Console.WriteLine("[InteropExtractor] Excel application created in silent mode");
+
+                // Try to get the embedded Excel data via OLE activation in Excel
+                try
+                {
+                    // Activate the OLE object to make it available to Excel
+                    ole.Activate();
+                    Console.WriteLine("[InteropExtractor] OLE object activated");
+                    
+                    // Give Excel a moment to process the activation
+                    System.Threading.Thread.Sleep(500);
+                    
+                    // Try to access the active workbook that should be opened by the activation
+                    if (excelApp.Workbooks.Count > 0)
+                    {
+                        workbook = excelApp.ActiveWorkbook;
+                        if (workbook != null)
+                        {
+                            Console.WriteLine($"[InteropExtractor] Found active Excel workbook: {workbook.Name}");
+                            
+                            // Save the workbook to the specified file
+                            workbook.SaveAs(outFile, Microsoft.Office.Interop.Excel.XlFileFormat.xlOpenXMLWorkbook);
+                            
+                            if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
+                            {
+                                Console.WriteLine("[InteropExtractor] Excel document saved successfully using Excel Interop");
+                                return;
+                            }
+                        }
+                    }
+                    
+                    Console.WriteLine("[InteropExtractor] No active workbook found after OLE activation");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[InteropExtractor] Excel Interop extraction failed: {ex.Message}");
+                }
+                
+                // Alternative approach: Try to extract OLE object data directly and open in Excel
+                try
+                {
+                    Console.WriteLine("[InteropExtractor] Trying direct OLE data extraction approach");
+                    
+                    // Create a temporary file to store the OLE object data
+                    string tempFile = Path.GetTempFileName();
+                    try
+                    {
+                        // Try to get the native data from the OLE object
+                        dynamic oleObject = ole.Object;
+                        if (oleObject != null)
+                        {
+                            // Close any existing workbooks first
+                            while (excelApp.Workbooks.Count > 0)
+                            {
+                                excelApp.Workbooks[1].Close(false);
+                            }
+                            
+                            // Try to use DoVerb to activate and potentially save the object
+                            ole.DoVerb(Microsoft.Office.Interop.Word.WdOLEVerb.wdOLEVerbShow);
+                            System.Threading.Thread.Sleep(300);
+                            
+                            // Check if Excel now has an active workbook
+                            if (excelApp.Workbooks.Count > 0)
+                            {
+                                workbook = excelApp.ActiveWorkbook;
+                                if (workbook != null)
+                                {
+                                    Console.WriteLine($"[InteropExtractor] Found workbook after DoVerb: {workbook.Name}");
+                                    
+                                    workbook.SaveAs(outFile, Microsoft.Office.Interop.Excel.XlFileFormat.xlOpenXMLWorkbook);
+                                    
+                                    if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
+                                    {
+                                        Console.WriteLine("[InteropExtractor] Excel document saved using DoVerb approach");
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    finally
+                    {
+                        try { File.Delete(tempFile); } catch { }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[InteropExtractor] Direct OLE data extraction failed: {ex.Message}");
+                }
+                
+                Console.WriteLine("[InteropExtractor] Excel extraction failed - unable to extract embedded Excel document");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[InteropExtractor] Excel extraction error: {ex.Message}");
+            }
+            finally
+            {
+                // Clean up Excel objects
+                try
+                {
+                    if (workbook != null)
+                    {
+                        workbook.Close(false);
+                        System.Runtime.InteropServices.Marshal.ReleaseComObject(workbook);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[InteropExtractor] Error closing workbook: {ex.Message}");
+                }
+                
+                try
+                {
+                    if (excelApp != null)
+                    {
+                        // Close all workbooks without saving
+                        while (excelApp.Workbooks.Count > 0)
+                        {
+                            excelApp.Workbooks[1].Close(false);
+                        }
+                        
+                        excelApp.Quit();
+                        System.Runtime.InteropServices.Marshal.ReleaseComObject(excelApp);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[InteropExtractor] Error closing Excel application: {ex.Message}");
+                }
+                
+                // Force garbage collection to help clean up COM objects
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
             }
         }
 

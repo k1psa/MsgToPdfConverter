@@ -98,7 +98,6 @@ namespace MsgToPdfConverter.Services
                 {
                     int mainPageCount = mainPdf.GetNumberOfPages();
                     int currentOutputPage = 0;
-                    int nextObjIdx = 0;
 
                     Console.WriteLine($"[PDF-INSERT] Main PDF has {mainPageCount} pages");
 
@@ -128,6 +127,10 @@ namespace MsgToPdfConverter.Services
                         Console.WriteLine($"  - {Path.GetFileName(obj.FilePath)} -> after page {obj.PageNumber} (order: {obj.DocumentOrderIndex})");
                     }
 
+                    // Track page offset as we insert objects to adjust subsequent page numbers
+                    int pageOffset = 0;
+                    int nextObjIdx = 0;
+
                     // For each main PDF page, copy the page, then insert any embedded objects whose PageNumber == current main page
                     for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
                     {
@@ -135,12 +138,19 @@ namespace MsgToPdfConverter.Services
                         currentOutputPage++;
                         Console.WriteLine($"[PDF-INSERT] Copied main page {mainPage} to output page {currentOutputPage}");
 
-                        // Insert all embedded objects whose PageNumber == mainPage (immediately after this page)
+                        // Insert all embedded objects whose original PageNumber == mainPage (immediately after this page)
                         while (nextObjIdx < objectsByPage.Count && objectsByPage[nextObjIdx].PageNumber == mainPage)
                         {
                             var obj = objectsByPage[nextObjIdx];
+                            int pagesBefore = currentOutputPage;
+                            
                             // Insert PDF or MSG directly, do NOT add separator/grey page
+                            int beforeInsert = currentOutputPage;
                             currentOutputPage = InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage);
+                            
+                            int pagesInserted = currentOutputPage - beforeInsert;
+                            Console.WriteLine($"[PDF-INSERT] Inserted {pagesInserted} pages for {Path.GetFileName(obj.FilePath)}, currentOutputPage now: {currentOutputPage}");
+                            
                             nextObjIdx++;
                         }
                     }
