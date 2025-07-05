@@ -97,32 +97,31 @@ namespace MsgToPdfConverter.Services
                 Console.WriteLine($"  - {Path.GetFileName(obj.FilePath)} -> after page {obj.PageNumber} (order: {obj.DocumentOrderIndex})");
             }
 
-            // FIX: Correct page assignments based on document structure
-            // docx on page 7, xlsx on page 8, pdf on page 9, msg on page 10
-            foreach (var obj in objectsByPage)
-            {
-                string fileName = Path.GetFileName(obj.FilePath);
-                
-                // Fix SMC JV.pdf - should be on page 9, not page 8
-                if (fileName.Contains("SMC JV") && obj.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (obj.PageNumber != 9)
-                    {
-                        Console.WriteLine($"[PDF-INSERT] CORRECTING PAGE: Moving {fileName} from page {obj.PageNumber} to page 9");
-                        obj.PageNumber = 9;
-                    }
-                }
-                
-                // Fix MSG file - should be on page 10, not page 9
-                if (obj.FilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (obj.PageNumber != 10)
-                    {
-                        Console.WriteLine($"[PDF-INSERT] CORRECTING PAGE: Moving {fileName} from page {obj.PageNumber} to page 10");
-                        obj.PageNumber = 10;
-                    }
-                }
-            }
+            // REMOVE: Hardcoded corrections for SMC JV.pdf and .msg files
+            // The following block is removed:
+            // foreach (var obj in objectsByPage)
+            // {
+            //     string fileName = Path.GetFileName(obj.FilePath);
+            //     if (fileName.Contains("SMC JV") && obj.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            //     {
+            //         if (obj.PageNumber != 9)
+            //         {
+            //             Console.WriteLine($"[PDF-INSERT] CORRECTING PAGE: Moving {fileName} from page {obj.PageNumber} to page 9");
+            //             obj.PageNumber = 9;
+            //         }
+            //     }
+            //     if (obj.FilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+            //     {
+            //         if (obj.PageNumber != 10)
+            //         {
+            //             Console.WriteLine($"[PDF-INSERT] CORRECTING PAGE: Moving {fileName} from page {obj.PageNumber} to page 10");
+            //             obj.PageNumber = 10;
+            //         }
+            //     }
+            // }
+            
+            // Remove all hardcoded page corrections and related logs
+            // Only use extracted page numbers and document order for insertion
             
             // Log the corrected insertion plan
             Console.WriteLine($"[PDF-INSERT] Corrected insertion plan:");
@@ -131,45 +130,7 @@ namespace MsgToPdfConverter.Services
                 Console.WriteLine($"  - {Path.GetFileName(obj.FilePath)} -> after page {obj.PageNumber} (order: {obj.DocumentOrderIndex})");
             }
 
-            // SPECIAL FIX: If a PDF file is named "SMC JV.pdf" and is on page 30, move it to page 31
-            // This is to ensure it appears after Appendix 3 which spans multiple pages
-            foreach (var obj in objectsByPage)
-            {
-                if (obj.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) && 
-                    Path.GetFileName(obj.FilePath).Contains("SMC JV") && 
-                    obj.PageNumber == 30)
-                {
-                    Console.WriteLine($"[PDF-INSERT] SPECIAL ADJUSTMENT: Moving {Path.GetFileName(obj.FilePath)} from page 30 to page 31 to place it after Appendix 3");
-                    obj.PageNumber = 31;
-                }
-            }
 
-            // FIX: Correct page assignments based on document structure
-            // docx on page 7, xlsx on page 8, pdf on page 9, msg on page 10
-            foreach (var obj in objectsByPage)
-            {
-                string fileName = Path.GetFileName(obj.FilePath);
-                
-                // Fix SMC JV.pdf - should be on page 9, not page 8
-                if (fileName.Contains("SMC JV") && obj.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (obj.PageNumber != 9)
-                    {
-                        Console.WriteLine($"[PDF-INSERT] CORRECTING PAGE: Moving {fileName} from page {obj.PageNumber} to page 9");
-                        obj.PageNumber = 9;
-                    }
-                }
-                
-                // Fix MSG file - should be on page 10, not page 9
-                if (obj.FilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (obj.PageNumber != 10)
-                    {
-                        Console.WriteLine($"[PDF-INSERT] CORRECTING PAGE: Moving {fileName} from page {obj.PageNumber} to page 10");
-                        obj.PageNumber = 10;
-                    }
-                }
-            }
 
             try
             {
