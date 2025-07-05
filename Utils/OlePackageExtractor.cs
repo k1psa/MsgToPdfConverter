@@ -501,7 +501,6 @@ namespace MsgToPdfConverter.Utils
             if (ext == ".pdf" && data.Length >= 4)
             {
                 bool isPdf = data[0] == 0x25 && data[1] == 0x50 && data[2] == 0x44 && data[3] == 0x46; // %PDF
-                if (isPdf) Console.WriteLine($"[DEBUG] PDF signature check: {isPdf}");
                 return isPdf;
             }
             
@@ -510,7 +509,6 @@ namespace MsgToPdfConverter.Utils
             {
                 bool isMsg = data[0] == 0xD0 && data[1] == 0xCF && data[2] == 0x11 && data[3] == 0xE0 &&
                             data[4] == 0xA1 && data[5] == 0xB1 && data[6] == 0x1A && data[7] == 0xE1;
-                Console.WriteLine($"[DEBUG] MSG signature check: {isMsg} (first 8 bytes: {string.Join(" ", data.Take(8).Select(b => b.ToString("X2")))})");
                 return isMsg;
             }
             
@@ -520,7 +518,6 @@ namespace MsgToPdfConverter.Utils
             bool allSame = data.Take(Math.Min(100, data.Length)).All(b => b == firstByte);
             if (allSame && firstByte == 0)
             {
-                Console.WriteLine($"[DEBUG] File signature check failed: all zeros");
                 return false;
             }
             

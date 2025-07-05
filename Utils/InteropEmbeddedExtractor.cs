@@ -546,22 +546,21 @@ namespace MsgToPdfConverter.Utils
                 {
                     int? sourceIdx = null;
                     int? pageFromShape = null;
-                    if (packageShapeCounter < packageInlineShapes.Count)
-                    {
-                        sourceIdx = packageInlineShapes[packageShapeCounter].Index;
-                        pageFromShape = packageInlineShapes[packageShapeCounter].Page;
-                        packageShapeCounter++;
-                    }
                     try
                     {
                         var bytes = File.ReadAllBytes(obj.FilePath);
                         var pkg = MsgToPdfConverter.Utils.OlePackageExtractor.ExtractPackage(bytes);
-                        if (pkg != null)
+                        if (pkg != null && pkg.Data != null && pkg.Data.Length > 0)
                         {
+                            if (packageShapeCounter < packageInlineShapes.Count)
+                            {
+                                sourceIdx = packageInlineShapes[packageShapeCounter].Index;
+                                pageFromShape = packageInlineShapes[packageShapeCounter].Page;
+                                packageShapeCounter++; // increment ONLY for real file
+                            }
                             string realFilePath = Path.Combine(Path.GetDirectoryName(obj.FilePath), pkg.FileName);
                             File.WriteAllBytes(realFilePath, pkg.Data);
                             Console.WriteLine($"[InteropExtractor] OLE bin extracted: {realFilePath} (from {obj.FilePath})");
-                            // Add new ExtractedObjectInfo for the real file, using the correct Package InlineShape index and page
                             var newObj = new ExtractedObjectInfo {
                                 FilePath = realFilePath,
                                 PageNumber = pageFromShape ?? -1,
@@ -619,6 +618,7 @@ namespace MsgToPdfConverter.Utils
                                 }
                             }
                         }
+                        // else: do NOT increment packageShapeCounter
                     }
                     catch (Exception ex)
                     {
@@ -1236,8 +1236,6 @@ namespace MsgToPdfConverter.Utils
                     Console.WriteLine($"[InteropExtractor] Actual file signature:  {actualSignature}");
                     return false;
                 }
-                
-                Console.WriteLine($"[InteropExtractor] MSG OLE signature check passed");
                 
                 // Try to open with MsgReader as additional validation
                 try
