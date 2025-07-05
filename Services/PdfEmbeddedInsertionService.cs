@@ -163,6 +163,10 @@ namespace MsgToPdfConverter.Services
                 {
                     return InsertMsgFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
                 }
+                else if (obj.FilePath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+                {
+                    return InsertDocxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
+                }
                 else
                 {
                     // Only for unsupported types, add a placeholder
@@ -253,6 +257,38 @@ namespace MsgToPdfConverter.Services
             return currentPage;
         }
 
+        // Insert DOCX file without separator/grey page
+        private static int InsertDocxFile_NoSeparator(string docxPath, PdfDocument outputPdf, int currentPage)
+        {
+            Console.WriteLine($"[PDF-INSERT] Converting and inserting DOCX: {Path.GetFileName(docxPath)} after page {currentPage}");
+            try
+            {
+                string tempPdfPath = Path.Combine(Path.GetTempPath(), $"docx_temp_{Guid.NewGuid()}.pdf");
+                try
+                {
+                    bool converted = TryConvertDocxToPdf(docxPath, tempPdfPath);
+                    if (converted && File.Exists(tempPdfPath))
+                    {
+                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "DOCX");
+                    }
+                    else
+                    {
+                        currentPage = InsertPlaceholderForFile(docxPath, outputPdf, currentPage, "DOCX");
+                    }
+                }
+                finally
+                {
+                    if (File.Exists(tempPdfPath)) { try { File.Delete(tempPdfPath); } catch { } }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PDF-INSERT] Error processing DOCX {docxPath}: {ex.Message}");
+                currentPage = InsertErrorPlaceholder(docxPath, outputPdf, currentPage, ex.Message);
+            }
+            return currentPage;
+        }
+
         /// <summary>
         /// Attempts to convert MSG to PDF using the main HTML-to-PDF pipeline (DinkToPdf/HtmlToPdfWorker)
         /// </summary>
@@ -301,6 +337,49 @@ namespace MsgToPdfConverter.Services
             catch (Exception ex)
             {
                 Console.WriteLine($"[PDF-INSERT] Failed to convert MSG to PDF: {ex.Message}\n{ex}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Attempts to convert DOCX to PDF using Word Interop
+        /// </summary>
+        private static bool TryConvertDocxToPdf(string docxPath, string outputPdfPath)
+        {
+            try
+            {
+                Console.WriteLine($"[PDF-INSERT] Converting DOCX to PDF (Interop): {docxPath} -> {outputPdfPath}");
+                
+                Microsoft.Office.Interop.Word.Application wordApp = null;
+                Microsoft.Office.Interop.Word.Document doc = null;
+                
+                try
+                {
+                    wordApp = new Microsoft.Office.Interop.Word.Application { Visible = false, DisplayAlerts = Microsoft.Office.Interop.Word.WdAlertLevel.wdAlertsNone };
+                    doc = wordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
+                    
+                    doc.SaveAs2(outputPdfPath, Microsoft.Office.Interop.Word.WdSaveFormat.wdFormatPDF);
+                    
+                    if (File.Exists(outputPdfPath) && new FileInfo(outputPdfPath).Length > 0)
+                    {
+                        Console.WriteLine($"[PDF-INSERT] Successfully converted DOCX to PDF: {outputPdfPath}");
+                        return true;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[PDF-INSERT] DOCX conversion failed: output file not created or empty");
+                        return false;
+                    }
+                }
+                finally
+                {
+                    if (doc != null) { try { doc.Close(false); } catch { } }
+                    if (wordApp != null) { try { wordApp.Quit(false); } catch { } }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PDF-INSERT] Failed to convert DOCX to PDF: {ex.Message}");
                 return false;
             }
         }

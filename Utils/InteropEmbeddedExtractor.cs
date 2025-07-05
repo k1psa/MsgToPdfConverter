@@ -310,10 +310,30 @@ namespace MsgToPdfConverter.Utils
                 }
             }
 
-            // Fallback: If no objects were extracted, try Open XML SDK extraction for .docx
-            if (!interopSuccess && docxPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+            // Always run OpenXML fallback for Package objects and missing/failed objects
+            var existingFiles = new HashSet<string>(results.Where(r => File.Exists(r.FilePath)).Select(r => r.FilePath), StringComparer.OrdinalIgnoreCase);
+            int openXmlDocOrderIndex = docOrderIndex;
+            
+            // Remove invalid/missing files from results before OpenXML fallback
+            var validResults = new List<ExtractedObjectInfo>();
+            foreach (var result in results)
             {
-                Console.WriteLine("[InteropExtractor] Interop failed or found no objects, using OpenXml fallback...");
+                if (File.Exists(result.FilePath) && new FileInfo(result.FilePath).Length > 0)
+                {
+                    validResults.Add(result);
+                    Console.WriteLine($"[InteropExtractor] Validated: {result.FilePath} (size: {new FileInfo(result.FilePath).Length} bytes)");
+                }
+                else
+                {
+                    Console.WriteLine($"[InteropExtractor] Removed invalid extraction: {result.FilePath} (file missing or empty)");
+                }
+            }
+            results = validResults;
+            
+            // Always run OpenXML fallback for .docx files to catch Package objects
+            if (docxPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine("[InteropExtractor] Running OpenXml fallback to extract missing objects...");
                 Console.WriteLine("[InteropExtractor] Attempting to determine document order of embedded objects via OpenXml.");
 
                 // --- Improved: Parse document.xml for embedded object order, including nested r:id ---
