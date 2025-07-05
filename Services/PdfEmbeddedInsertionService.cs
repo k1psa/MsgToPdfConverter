@@ -82,8 +82,8 @@ namespace MsgToPdfConverter.Services
                 .ThenBy(obj => obj.DocumentOrderIndex)
                 .ToList();
 
-            // Log the insertion plan
-            Console.WriteLine($"[PDF-INSERT] Insertion plan:");
+            // Log the insertion plan BEFORE adjustments
+            Console.WriteLine($"[PDF-INSERT] Initial insertion plan:");
             foreach (var obj in objectsByPage)
             {
                 Console.WriteLine($"  - {Path.GetFileName(obj.FilePath)} -> after page {obj.PageNumber} (order: {obj.DocumentOrderIndex})");
@@ -120,6 +120,13 @@ namespace MsgToPdfConverter.Services
 
                     // Re-sort after potential adjustments
                     objectsByPage = objectsByPage.OrderBy(obj => obj.PageNumber).ThenBy(obj => obj.DocumentOrderIndex).ToList();
+                    
+                    // Log the final insertion plan AFTER adjustments
+                    Console.WriteLine($"[PDF-INSERT] Final insertion plan:");
+                    foreach (var obj in objectsByPage)
+                    {
+                        Console.WriteLine($"  - {Path.GetFileName(obj.FilePath)} -> after page {obj.PageNumber} (order: {obj.DocumentOrderIndex})");
+                    }
 
                     // For each main PDF page, copy the page, then insert any embedded objects whose PageNumber == current main page
                     for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
@@ -172,6 +179,10 @@ namespace MsgToPdfConverter.Services
                 else if (obj.FilePath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
                 {
                     return InsertDocxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
+                }
+                else if (obj.FilePath.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+                {
+                    return InsertXlsxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
                 }
                 else
                 {
@@ -240,10 +251,20 @@ namespace MsgToPdfConverter.Services
                 string tempPdfPath = Path.Combine(Path.GetTempPath(), $"msg_temp_{Guid.NewGuid()}.pdf");
                 try
                 {
-                    bool converted = TryConvertMsgToPdf(msgPath, tempPdfPath);
+                    var (converted, attachmentFiles) = TryConvertMsgToPdfWithAttachments(msgPath, tempPdfPath);
                     if (converted && File.Exists(tempPdfPath))
                     {
                         currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "MSG");
+                        
+                        // Insert extracted attachments after the MSG content
+                        foreach (var attachmentPath in attachmentFiles)
+                        {
+                            if (File.Exists(attachmentPath))
+                            {
+                                Console.WriteLine($"[PDF-INSERT] Inserting MSG attachment: {Path.GetFileName(attachmentPath)}");
+                                currentPage = InsertAttachmentFile(attachmentPath, outputPdf, currentPage);
+                            }
+                        }
                     }
                     else
                     {
@@ -291,6 +312,38 @@ namespace MsgToPdfConverter.Services
             {
                 Console.WriteLine($"[PDF-INSERT] Error processing DOCX {docxPath}: {ex.Message}");
                 currentPage = InsertErrorPlaceholder(docxPath, outputPdf, currentPage, ex.Message);
+            }
+            return currentPage;
+        }
+
+        // Insert XLSX file without separator/grey page
+        private static int InsertXlsxFile_NoSeparator(string xlsxPath, PdfDocument outputPdf, int currentPage)
+        {
+            Console.WriteLine($"[PDF-INSERT] Converting and inserting XLSX: {Path.GetFileName(xlsxPath)} after page {currentPage}");
+            try
+            {
+                string tempPdfPath = Path.Combine(Path.GetTempPath(), $"xlsx_temp_{Guid.NewGuid()}.pdf");
+                try
+                {
+                    bool converted = TryConvertXlsxToPdf(xlsxPath, tempPdfPath);
+                    if (converted && File.Exists(tempPdfPath))
+                    {
+                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "XLSX");
+                    }
+                    else
+                    {
+                        currentPage = InsertPlaceholderForFile(xlsxPath, outputPdf, currentPage, "XLSX");
+                    }
+                }
+                finally
+                {
+                    if (File.Exists(tempPdfPath)) { try { File.Delete(tempPdfPath); } catch { } }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PDF-INSERT] Error processing XLSX {xlsxPath}: {ex.Message}");
+                currentPage = InsertErrorPlaceholder(xlsxPath, outputPdf, currentPage, ex.Message);
             }
             return currentPage;
         }
@@ -348,62 +401,141 @@ namespace MsgToPdfConverter.Services
         }
 
         /// <summary>
-        /// Attempts to convert DOCX to PDF using Word Interop
+        /// Attempts to convert MSG to PDF using the main HTML-to-PDF pipeline and extracts attachments
         /// </summary>
-        private static bool TryConvertDocxToPdf(string docxPath, string outputPdfPath)
+        private static (bool success, List<string> attachmentFiles) TryConvertMsgToPdfWithAttachments(string msgPath, string outputPdfPath)
         {
+            var attachmentFiles = new List<string>();
             try
             {
-                Console.WriteLine($"[PDF-INSERT] Converting DOCX to PDF (Interop): {docxPath} -> {outputPdfPath}");
-                
-                Microsoft.Office.Interop.Word.Application wordApp = null;
-                Microsoft.Office.Interop.Word.Document doc = null;
-                
-                try
+                Console.WriteLine($"[PDF-INSERT] Converting MSG to PDF with attachments: {msgPath} -> {outputPdfPath}");
+                using (var msg = new MsgReader.Outlook.Storage.Message(msgPath))
                 {
-                    wordApp = new Microsoft.Office.Interop.Word.Application { Visible = false, DisplayAlerts = Microsoft.Office.Interop.Word.WdAlertLevel.wdAlertsNone };
-                    doc = wordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
-                    
-                    doc.SaveAs2(outputPdfPath, Microsoft.Office.Interop.Word.WdSaveFormat.wdFormatPDF);
-                    
-                    if (File.Exists(outputPdfPath) && new FileInfo(outputPdfPath).Length > 0)
+                    // Extract attachments to temp files
+                    if (msg.Attachments != null && msg.Attachments.Count > 0)
                     {
-                        Console.WriteLine($"[PDF-INSERT] Successfully converted DOCX to PDF: {outputPdfPath}");
-                        return true;
+                        var inlineContentIds = GetInlineContentIds(msg.BodyHtml ?? "");
+                        
+                        foreach (var attachment in msg.Attachments)
+                        {
+                            if (attachment is MsgReader.Outlook.Storage.Attachment fileAttachment)
+                            {
+                                // Skip inline images and signature files
+                                if (!string.IsNullOrEmpty(fileAttachment.ContentId) && 
+                                    inlineContentIds.Contains(fileAttachment.ContentId.Trim('<', '>', '"', '\'', ' ')))
+                                    continue;
+                                    
+                                if (string.IsNullOrEmpty(fileAttachment.FileName))
+                                    continue;
+                                    
+                                var ext = Path.GetExtension(fileAttachment.FileName)?.ToLowerInvariant();
+                                if (new[] { ".p7s", ".p7m", ".smime", ".asc", ".sig" }.Contains(ext))
+                                    continue;
+                                
+                                string tempAttachmentPath = Path.Combine(Path.GetTempPath(), 
+                                    $"msg_attachment_{Guid.NewGuid()}_{fileAttachment.FileName}");
+                                
+                                try
+                                {
+                                    File.WriteAllBytes(tempAttachmentPath, fileAttachment.Data);
+                                    attachmentFiles.Add(tempAttachmentPath);
+                                    Console.WriteLine($"[PDF-INSERT] Extracted MSG attachment: {fileAttachment.FileName} -> {tempAttachmentPath}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[PDF-INSERT] Failed to extract attachment {fileAttachment.FileName}: {ex.Message}");
+                                }
+                            }
+                            else if (attachment is MsgReader.Outlook.Storage.Message nestedMsg)
+                            {
+                                string tempMsgPath = Path.Combine(Path.GetTempPath(), 
+                                    $"msg_nested_{Guid.NewGuid()}_{(nestedMsg.Subject ?? "email").Replace("/", "_").Replace("\\", "_")}.msg");
+                                
+                                try
+                                {
+                                    nestedMsg.Save(tempMsgPath);
+                                    attachmentFiles.Add(tempMsgPath);
+                                    Console.WriteLine($"[PDF-INSERT] Extracted nested MSG: {nestedMsg.Subject} -> {tempMsgPath}");
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"[PDF-INSERT] Failed to extract nested MSG {nestedMsg.Subject}: {ex.Message}");
+                                }
+                            }
+                        }
                     }
-                    else
-                    {
-                        Console.WriteLine($"[PDF-INSERT] DOCX conversion failed: output file not created or empty");
-                        return false;
-                    }
-                }
-                finally
-                {
-                    if (doc != null) { try { doc.Close(false); } catch { } }
-                    if (wordApp != null) { try { wordApp.Quit(false); } catch { } }
+                    
+                    // Convert the main MSG to PDF
+                    bool converted = TryConvertMsgToPdf(msgPath, outputPdfPath);
+                    return (converted, attachmentFiles);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Failed to convert DOCX to PDF: {ex.Message}");
-                return false;
+                Console.WriteLine($"[PDF-INSERT] Failed to convert MSG with attachments: {ex.Message}");
+                
+                // Clean up any extracted attachment files on error
+                foreach (var file in attachmentFiles)
+                {
+                    try { if (File.Exists(file)) File.Delete(file); } catch { }
+                }
+                
+                return (false, new List<string>());
             }
         }
 
-        // Simple HTML tag stripper for fallback
-        private static string StripHtml(string html)
+        /// <summary>
+        /// Helper method to get inline content IDs from HTML body
+        /// </summary>
+        private static List<string> GetInlineContentIds(string htmlBody)
         {
-            if (string.IsNullOrEmpty(html)) return string.Empty;
-            var array = new char[html.Length];
-            int arrayIndex = 0;
-            bool inside = false;
-            foreach (char let in html)
+            var contentIds = new List<string>();
+            if (string.IsNullOrEmpty(htmlBody)) return contentIds;
+            
+            var cidMatches = System.Text.RegularExpressions.Regex.Matches(htmlBody, @"cid:([^""'\s>]+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            foreach (System.Text.RegularExpressions.Match match in cidMatches)
             {
-                if (let == '<') { inside = true; continue; }
-                if (let == '>') { inside = false; continue; }
-                if (!inside) array[arrayIndex++] = let;
+                if (match.Groups.Count > 1)
+                {
+                    contentIds.Add(match.Groups[1].Value.Trim());
+                }
             }
-            return new string(array, 0, arrayIndex);
+            return contentIds;
+        }
+
+        /// <summary>
+        /// Inserts an attachment file based on its type
+        /// </summary>
+        private static int InsertAttachmentFile(string attachmentPath, PdfDocument outputPdf, int currentPage)
+        {
+            try
+            {
+                var ext = Path.GetExtension(attachmentPath)?.ToLowerInvariant();
+                
+                switch (ext)
+                {
+                    case ".pdf":
+                        return InsertPdfFile_NoSeparator(attachmentPath, outputPdf, currentPage, "Attachment");
+                    case ".docx":
+                        return InsertDocxFile_NoSeparator(attachmentPath, outputPdf, currentPage);
+                    case ".xlsx":
+                        return InsertXlsxFile_NoSeparator(attachmentPath, outputPdf, currentPage);
+                    case ".msg":
+                        return InsertMsgFile_NoSeparator(attachmentPath, outputPdf, currentPage);
+                    default:
+                        return InsertPlaceholderForFile(attachmentPath, outputPdf, currentPage, $"Attachment ({ext})");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PDF-INSERT] Error inserting attachment {attachmentPath}: {ex.Message}");
+                return InsertErrorPlaceholder(attachmentPath, outputPdf, currentPage, ex.Message);
+            }
+            finally
+            {
+                // Clean up temp attachment file
+                try { if (File.Exists(attachmentPath)) File.Delete(attachmentPath); } catch { }
+            }
         }
 
         /// <summary>
@@ -562,6 +694,92 @@ namespace MsgToPdfConverter.Services
         {
             // Route all calls to the new no-separator version
             return InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage);
+        }
+
+        /// <summary>
+        /// Attempts to convert DOCX to PDF using Word Interop
+        /// </summary>
+        private static bool TryConvertDocxToPdf(string docxPath, string outputPdfPath)
+        {
+            try
+            {
+                Console.WriteLine($"[PDF-INSERT] Converting DOCX to PDF (Interop): {docxPath} -> {outputPdfPath}");
+                
+                Microsoft.Office.Interop.Word.Application wordApp = null;
+                Microsoft.Office.Interop.Word.Document doc = null;
+                
+                try
+                {
+                    wordApp = new Microsoft.Office.Interop.Word.Application { Visible = false, DisplayAlerts = Microsoft.Office.Interop.Word.WdAlertLevel.wdAlertsNone };
+                    doc = wordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
+                    
+                    doc.SaveAs2(outputPdfPath, Microsoft.Office.Interop.Word.WdSaveFormat.wdFormatPDF);
+                    
+                    if (File.Exists(outputPdfPath) && new FileInfo(outputPdfPath).Length > 0)
+                    {
+                        Console.WriteLine($"[PDF-INSERT] Successfully converted DOCX to PDF: {outputPdfPath}");
+                        return true;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[PDF-INSERT] DOCX conversion failed: output file not created or empty");
+                        return false;
+                    }
+                }
+                finally
+                {
+                    if (doc != null) { try { doc.Close(false); } catch { } }
+                    if (wordApp != null) { try { wordApp.Quit(false); } catch { } }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PDF-INSERT] Failed to convert DOCX to PDF: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Attempts to convert XLSX to PDF using Excel Interop
+        /// </summary>
+        private static bool TryConvertXlsxToPdf(string xlsxPath, string outputPdfPath)
+        {
+            try
+            {
+                Console.WriteLine($"[PDF-INSERT] Converting XLSX to PDF (Interop): {xlsxPath} -> {outputPdfPath}");
+                
+                Microsoft.Office.Interop.Excel.Application excelApp = null;
+                Microsoft.Office.Interop.Excel.Workbook workbook = null;
+                
+                try
+                {
+                    excelApp = new Microsoft.Office.Interop.Excel.Application { Visible = false, DisplayAlerts = false };
+                    workbook = excelApp.Workbooks.Open(xlsxPath, ReadOnly: true);
+                    
+                    workbook.ExportAsFixedFormat(Microsoft.Office.Interop.Excel.XlFixedFormatType.xlTypePDF, outputPdfPath);
+                    
+                    if (File.Exists(outputPdfPath) && new FileInfo(outputPdfPath).Length > 0)
+                    {
+                        Console.WriteLine($"[PDF-INSERT] Successfully converted XLSX to PDF: {outputPdfPath}");
+                        return true;
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[PDF-INSERT] XLSX conversion failed: output file not created or empty");
+                        return false;
+                    }
+                }
+                finally
+                {
+                    if (workbook != null) { try { workbook.Close(false); } catch { } }
+                    if (excelApp != null) { try { excelApp.Quit(); } catch { } }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PDF-INSERT] Failed to convert XLSX to PDF: {ex.Message}");
+                return false;
+            }
         }
     }
 }

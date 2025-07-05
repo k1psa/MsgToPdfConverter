@@ -730,11 +730,25 @@ namespace MsgToPdfConverter.Utils
             // Map common OLE ProgIDs to file extensions
             if (string.IsNullOrEmpty(progId)) return ".bin";
             progId = progId.ToLowerInvariant();
-            if (progId.Contains("pdf")) return ".pdf";
-            if (progId.Contains("excel")) return ".xlsx";
-            if (progId.Contains("word")) return ".docx";
+            
+            // PDF files
+            if (progId.Contains("pdf") || progId.Contains("acrobat")) return ".pdf";
+            
+            // Excel files - handle various ProgIDs
+            if (progId.Contains("excel") || progId.Contains("sheet") || progId.Contains("workbook")) return ".xlsx";
+            
+            // Word files
+            if (progId.Contains("word") || progId.Contains("document")) return ".docx";
+            
+            // PowerPoint files
+            if (progId.Contains("powerpoint") || progId.Contains("presentation")) return ".pptx";
+            
+            // Package objects (could be anything)
             if (progId.Contains("package")) return ".bin";
-            if (progId.Contains("powerpoint")) return ".pptx";
+            
+            // MSG files
+            if (progId.Contains("msg") || progId.Contains("outlook")) return ".msg";
+            
             return ".bin";
         }
         
