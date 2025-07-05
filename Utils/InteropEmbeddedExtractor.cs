@@ -5,6 +5,7 @@ using Microsoft.Office.Interop.Word;
 using DocumentFormat.OpenXml.Packaging;
 using System.Linq;
 using System.Xml.Linq;
+using MsgReader;
 
 namespace MsgToPdfConverter.Utils
 {
@@ -509,7 +510,27 @@ namespace MsgToPdfConverter.Utils
                             string realFilePath = Path.Combine(Path.GetDirectoryName(obj.FilePath), pkg.FileName);
                             File.WriteAllBytes(realFilePath, pkg.Data);
                             Console.WriteLine($"[InteropExtractor] OLE bin extracted: {realFilePath} (from {obj.FilePath})");
-                            obj.FilePath = realFilePath;
+                            
+                            // Validate MSG files
+                            if (realFilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (ValidateMsgFile(realFilePath))
+                                {
+                                    Console.WriteLine($"[InteropExtractor] MSG file validated successfully: {realFilePath}");
+                                    obj.FilePath = realFilePath;
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[InteropExtractor] MSG file validation failed, removing: {realFilePath}");
+                                    results.Remove(obj);
+                                    try { File.Delete(realFilePath); } catch { }
+                                    continue;
+                                }
+                            }
+                            else
+                            {
+                                obj.FilePath = realFilePath;
+                            }
                         }
                     }
                     catch (Exception ex)
@@ -520,7 +541,7 @@ namespace MsgToPdfConverter.Utils
             }
 
             // --- Find ACTUAL page numbers using Word Interop if fallback was used ---
-            if (results.Count > 0 && results.All(o => o.PageNumber == -1))
+            if (results.Count > 0 && results.Any(o => o.PageNumber == -1))
             {
                 Console.WriteLine($"[InteropExtractor] Finding actual page numbers for {results.Count} objects using Word Interop");
                 
@@ -534,51 +555,65 @@ namespace MsgToPdfConverter.Utils
                     // Get the actual page numbers from the InlineShapes we found earlier
                     Console.WriteLine($"[InteropExtractor] Document has {pageDoc.InlineShapes.Count} InlineShapes");
                     
-                    for (int i = 0; i < results.Count && i < pageDoc.InlineShapes.Count; i++)
+                    int shapeIndex = 0;
+                    for (int i = 0; i < results.Count; i++)
                     {
+                        // Skip objects that already have valid page numbers
+                        if (results[i].PageNumber > 0)
+                        {
+                            Console.WriteLine($"[InteropExtractor] Object {i+1} already has page {results[i].PageNumber}, skipping");
+                            continue;
+                        }
+                        
                         try
                         {
-                            var shape = pageDoc.InlineShapes[i + 1]; // 1-based indexing
-                            if (shape.Type == WdInlineShapeType.wdInlineShapeEmbeddedOLEObject)
+                            // Find the next available InlineShape
+                            while (shapeIndex < pageDoc.InlineShapes.Count)
                             {
-                                int actualPage = -1;
-                                
-                                // Try multiple methods to get the page number
-                                try
+                                shapeIndex++;
+                                var shape = pageDoc.InlineShapes[shapeIndex]; // 1-based indexing
+                                if (shape.Type == WdInlineShapeType.wdInlineShapeEmbeddedOLEObject)
                                 {
-                                    actualPage = (int)shape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
-                                    if (actualPage <= 0)
+                                    int actualPage = -1;
+                                    
+                                    // Try multiple methods to get the page number
+                                    try
                                     {
-                                        actualPage = (int)shape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
+                                        actualPage = (int)shape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
+                                        if (actualPage <= 0)
+                                        {
+                                            actualPage = (int)shape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
+                                        }
+                                        if (actualPage <= 0)
+                                        {
+                                            // Try using the range start
+                                            var startRange = pageDoc.Range(shape.Range.Start, shape.Range.Start);
+                                            actualPage = (int)startRange.get_Information(WdInformation.wdActiveEndPageNumber);
+                                        }
                                     }
-                                    if (actualPage <= 0)
+                                    catch (Exception pageEx)
                                     {
-                                        // Try using the range start
-                                        var startRange = pageDoc.Range(shape.Range.Start, shape.Range.Start);
-                                        actualPage = (int)startRange.get_Information(WdInformation.wdActiveEndPageNumber);
+                                        Console.WriteLine($"[InteropExtractor] Could not get page for shape {shapeIndex}: {pageEx.Message}");
                                     }
-                                }
-                                catch (Exception pageEx)
-                                {
-                                    Console.WriteLine($"[InteropExtractor] Could not get page for shape {i+1}: {pageEx.Message}");
-                                }
-                                
-                                if (actualPage > 0)
-                                {
-                                    results[i].PageNumber = actualPage;
-                                    Console.WriteLine($"[InteropExtractor] Object {i+1} found on actual page {actualPage}");
-                                }
-                                else
-                                {
-                                    // Fallback: use simple sequential assignment
-                                    results[i].PageNumber = i + 1;
-                                    Console.WriteLine($"[InteropExtractor] Object {i+1} assigned to fallback page {i+1}");
+                                    
+                                    if (actualPage > 0)
+                                    {
+                                        results[i].PageNumber = actualPage;
+                                        Console.WriteLine($"[InteropExtractor] Object {i+1} found on actual page {actualPage}");
+                                    }
+                                    else
+                                    {
+                                        // Fallback: use simple sequential assignment
+                                        results[i].PageNumber = i + 1;
+                                        Console.WriteLine($"[InteropExtractor] Object {i+1} assigned to fallback page {i+1}");
+                                    }
+                                    break; // Found a shape for this object
                                 }
                             }
                         }
                         catch (Exception shapeEx)
                         {
-                            Console.WriteLine($"[InteropExtractor] Error processing shape {i+1}: {shapeEx.Message}");
+                            Console.WriteLine($"[InteropExtractor] Error processing shape for object {i+1}: {shapeEx.Message}");
                             results[i].PageNumber = i + 1; // Fallback
                         }
                     }
@@ -613,6 +648,13 @@ namespace MsgToPdfConverter.Utils
         // Attempts to save the OLE object to a file, if possible
         private static void SaveOleObjectToFile(OLEFormat ole, string outFile)
         {
+            // Handle Word documents with enhanced extraction
+            if (ole.ProgID != null && ole.ProgID.ToLowerInvariant().Contains("word"))
+            {
+                SaveEmbeddedWordDocument(ole, outFile);
+                return;
+            }
+            
             // Only certain ProgIDs support direct saving; for others, try to save the object if it's a known type
             if (ole.ProgID != null && ole.ProgID.ToLowerInvariant().Contains("pdf"))
             {
@@ -633,7 +675,7 @@ namespace MsgToPdfConverter.Utils
             }
             else
             {
-                // For Excel, Word, etc., try SaveCopyAs if available
+                // For Excel, etc., try SaveCopyAs if available
                 try
                 {
                     dynamic obj = ole.Object;
@@ -773,6 +815,159 @@ namespace MsgToPdfConverter.Utils
             }
             
             return estimatedPage;
+        }
+
+        /// <summary>
+        /// Enhanced method to save embedded Word documents using multiple strategies
+        /// </summary>
+        private static bool SaveEmbeddedWordDocument(OLEFormat ole, string outFile)
+        {
+            Console.WriteLine($"[InteropExtractor] Attempting enhanced Word document extraction to: {outFile}");
+            
+            try
+            {
+                dynamic obj = ole.Object;
+                if (obj == null)
+                {
+                    Console.WriteLine($"[InteropExtractor] Could not access embedded Word object");
+                    return false;
+                }
+                
+                // Method 1: Try SaveAs2
+                try
+                {
+                    obj.SaveAs2(outFile, WdSaveFormat.wdFormatDocumentDefault);
+                    if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
+                    {
+                        Console.WriteLine($"[InteropExtractor] Word document saved using SaveAs2");
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[InteropExtractor] SaveAs2 failed: {ex.Message}");
+                }
+                
+                // Method 2: Try SaveAs
+                try
+                {
+                    obj.SaveAs(outFile);
+                    if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
+                    {
+                        Console.WriteLine($"[InteropExtractor] Word document saved using SaveAs");
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[InteropExtractor] SaveAs failed: {ex.Message}");
+                }
+                
+                // Method 3: Try SaveCopyAs
+                try
+                {
+                    obj.SaveCopyAs(outFile);
+                    if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
+                    {
+                        Console.WriteLine($"[InteropExtractor] Word document saved using SaveCopyAs");
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[InteropExtractor] SaveCopyAs failed: {ex.Message}");
+                }
+                
+                // Method 4: Create new document and copy content
+                try
+                {
+                    var wordApp = new Application { Visible = false, DisplayAlerts = WdAlertLevel.wdAlertsNone };
+                    var newDoc = wordApp.Documents.Add();
+                    
+                    // Try to select all content and copy
+                    var range = obj.Content;
+                    range.Copy();
+                    newDoc.Content.Paste();
+                    newDoc.SaveAs2(outFile, WdSaveFormat.wdFormatDocumentDefault);
+                    
+                    newDoc.Close(false);
+                    wordApp.Quit(false);
+                    
+                    if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
+                    {
+                        Console.WriteLine($"[InteropExtractor] Word document saved using content copy method");
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[InteropExtractor] Content copy method failed: {ex.Message}");
+                }
+                
+                Console.WriteLine($"[InteropExtractor] All Word document extraction methods failed");
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[InteropExtractor] Enhanced Word extraction failed: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Validates if an extracted MSG file is a valid OLE structured storage file
+        /// </summary>
+        private static bool ValidateMsgFile(string msgPath)
+        {
+            try
+            {
+                if (!File.Exists(msgPath) || new FileInfo(msgPath).Length == 0)
+                {
+                    Console.WriteLine($"[InteropExtractor] MSG validation failed: file missing or empty");
+                    return false;
+                }
+                
+                // Check OLE signature
+                var bytes = File.ReadAllBytes(msgPath);
+                if (bytes.Length < 8)
+                {
+                    Console.WriteLine($"[InteropExtractor] MSG validation failed: file too small");
+                    return false;
+                }
+                
+                // OLE files start with signature: D0 CF 11 E0 A1 B1 1A E1
+                var oleSignature = new byte[] { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
+                for (int i = 0; i < 8; i++)
+                {
+                    if (bytes[i] != oleSignature[i])
+                    {
+                        Console.WriteLine($"[InteropExtractor] MSG validation failed: invalid OLE signature");
+                        return false;
+                    }
+                }
+                
+                // Try to open with MsgReader as additional validation
+                try
+                {
+                    using (var msg = new MsgReader.Outlook.Storage.Message(msgPath))
+                    {
+                        // Basic validation - just try to access subject
+                        var subject = msg.Subject ?? "";
+                        Console.WriteLine($"[InteropExtractor] MSG validation passed: subject='{subject.Substring(0, Math.Min(50, subject.Length))}'");
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[InteropExtractor] MSG validation failed: MsgReader error: {ex.Message}");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[InteropExtractor] MSG validation error: {ex.Message}");
+                return false;
+            }
         }
     }
 }

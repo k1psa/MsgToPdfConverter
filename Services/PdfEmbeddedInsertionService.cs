@@ -76,9 +76,9 @@ namespace MsgToPdfConverter.Services
             Console.WriteLine($"[PDF-INSERT] Inserting {validObjects.Count} embedded files into {mainPdfPath}");
 
             // Sort embedded objects by PageNumber (synthetic or real), then by DocumentOrderIndex for tie-breaking
+            // Note: Objects with PageNumber = -1 will be assigned to the last page
             var objectsByPage = validObjects
-                .Where(obj => obj.PageNumber > 0)
-                .OrderBy(obj => obj.PageNumber)
+                .OrderBy(obj => obj.PageNumber == -1 ? int.MaxValue : obj.PageNumber)
                 .ThenBy(obj => obj.DocumentOrderIndex)
                 .ToList();
 
@@ -109,6 +109,12 @@ namespace MsgToPdfConverter.Services
                         {
                             Console.WriteLine($"[PDF-INSERT] Warning: Object {Path.GetFileName(obj.FilePath)} requests insertion after page {obj.PageNumber}, but main PDF only has {mainPageCount} pages. Adjusting to page {mainPageCount}.");
                             obj.PageNumber = mainPageCount;
+                        }
+                        else if (obj.PageNumber == -1)
+                        {
+                            // Objects with PageNumber = -1 should be inserted after the last page
+                            obj.PageNumber = mainPageCount;
+                            Console.WriteLine($"[PDF-INSERT] Object {Path.GetFileName(obj.FilePath)} has no page number, inserting after last page {mainPageCount}.");
                         }
                     }
 
