@@ -21,6 +21,8 @@ namespace MsgToPdfConverter.Utils
             public int PageNumber { get; set; } // 1-based page number
             public string OleClass { get; set; }
             public int DocumentOrderIndex { get; set; } // Order in document flow
+            public int? SourceInlineShapeIndex { get; set; } // NEW: Index of InlineShape this object is mapped to (1-based)
+            public int? MatchedInlineShapeIndex { get; set; } // Used for improved Package mapping
         }
 
         /// <summary>
@@ -494,11 +496,62 @@ namespace MsgToPdfConverter.Utils
                 }
             }
 
-            // After extracting .bin OLE packages, extract real files from them using OpenMcdf
+            // --- After extracting .bin OLE packages, extract real files from them using OpenMcdf ---
+            // Build a list of InlineShapes with ProgID "Package" and their page numbers
+            var packageInlineShapes = new List<(int Index, int Page)>();
+            Application pkgWordApp = null;
+            Document pkgDoc = null;
+            try
+            {
+                pkgWordApp = new Application { Visible = false, DisplayAlerts = WdAlertLevel.wdAlertsNone };
+                pkgDoc = pkgWordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
+                for (int idx = 1; idx <= pkgDoc.InlineShapes.Count; idx++)
+                {
+                    var shape = pkgDoc.InlineShapes[idx];
+                    string progId = "";
+                    try { progId = shape.OLEFormat?.ProgID ?? ""; } catch { }
+                    if ((progId ?? "").ToLower().Contains("package"))
+                    {
+                        int page = -1;
+                        try
+                        {
+                            page = (int)shape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
+                            if (page <= 0)
+                                page = (int)shape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
+                            if (page <= 0)
+                            {
+                                var startRange = pkgDoc.Range(shape.Range.Start, shape.Range.Start);
+                                page = (int)startRange.get_Information(WdInformation.wdActiveEndPageNumber);
+                            }
+                        }
+                        catch { }
+                        packageInlineShapes.Add((idx, page));
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[InteropExtractor] Error building Package InlineShape list: {ex.Message}");
+            }
+            finally
+            {
+                if (pkgDoc != null) { try { pkgDoc.Close(false); } catch { } }
+                if (pkgWordApp != null) { try { pkgWordApp.Quit(false); } catch { } }
+            }
+            // Now, when extracting real files from .bin, assign page from the correct Package InlineShape
+            int packageShapeCounter = 0;
             foreach (var obj in results.ToList())
             {
-                if (obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
+                if (obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase) && (obj.OleClass ?? "").ToLower().Contains("package"))
                 {
+                    int? sourceIdx = null;
+                    int? pageFromShape = null;
+                    if (packageShapeCounter < packageInlineShapes.Count)
+                    {
+                        sourceIdx = packageInlineShapes[packageShapeCounter].Index;
+                        pageFromShape = packageInlineShapes[packageShapeCounter].Page;
+                        packageShapeCounter++;
+                    }
                     try
                     {
                         var bytes = File.ReadAllBytes(obj.FilePath);
@@ -508,13 +561,21 @@ namespace MsgToPdfConverter.Utils
                             string realFilePath = Path.Combine(Path.GetDirectoryName(obj.FilePath), pkg.FileName);
                             File.WriteAllBytes(realFilePath, pkg.Data);
                             Console.WriteLine($"[InteropExtractor] OLE bin extracted: {realFilePath} (from {obj.FilePath})");
-                            
-                            // Validate MSG files with enhanced debugging
+                            // Add new ExtractedObjectInfo for the real file, using the correct Package InlineShape index and page
+                            var newObj = new ExtractedObjectInfo {
+                                FilePath = realFilePath,
+                                PageNumber = pageFromShape ?? -1,
+                                OleClass = Path.GetExtension(realFilePath).ToLower() == ".msg" ? "Package" : obj.OleClass,
+                                DocumentOrderIndex = obj.DocumentOrderIndex,
+                                SourceInlineShapeIndex = sourceIdx,
+                                MatchedInlineShapeIndex = sourceIdx
+                            };
+                            results.Add(newObj);
+                            // --- Validate MSG files with enhanced debugging ---
                             if (realFilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
                             {
                                 Console.WriteLine($"[InteropExtractor] Validating MSG file: {realFilePath}");
                                 Console.WriteLine($"[InteropExtractor] MSG file size: {new FileInfo(realFilePath).Length} bytes");
-                                
                                 // Debug: Show first 32 bytes of the MSG file
                                 try
                                 {
@@ -527,29 +588,23 @@ namespace MsgToPdfConverter.Utils
                                 {
                                     Console.WriteLine($"[InteropExtractor] Could not read MSG bytes for debugging: {ex.Message}");
                                 }
-                                
                                 if (ValidateMsgFile(realFilePath))
                                 {
                                     Console.WriteLine($"[InteropExtractor] MSG file validated successfully: {realFilePath}");
-                                    obj.FilePath = realFilePath;
+                                    newObj.FilePath = realFilePath;
                                 }
                                 else
                                 {
                                     Console.WriteLine($"[InteropExtractor] MSG file validation failed, trying fallback validation...");
-                                    
-                                    // Try alternative validation for MSG files that might be in non-standard format
                                     bool fallbackValid = TryFallbackMsgValidation(realFilePath);
-                                    
                                     if (fallbackValid)
                                     {
                                         Console.WriteLine($"[InteropExtractor] MSG file validated with fallback method: {realFilePath}");
-                                        obj.FilePath = realFilePath;
+                                        newObj.FilePath = realFilePath;
                                     }
                                     else
                                     {
                                         Console.WriteLine($"[InteropExtractor] MSG file validation failed completely, removing: {realFilePath}");
-                                        
-                                        // Debug: Keep the corrupted file for analysis
                                         var debugPath = realFilePath + ".corrupted";
                                         try
                                         {
@@ -557,16 +612,11 @@ namespace MsgToPdfConverter.Utils
                                             Console.WriteLine($"[InteropExtractor] Corrupted MSG saved for analysis: {debugPath}");
                                         }
                                         catch { }
-                                        
-                                        results.Remove(obj);
+                                        results.Remove(newObj);
                                         try { File.Delete(realFilePath); } catch { }
                                         continue;
                                     }
                                 }
-                            }
-                            else
-                            {
-                                obj.FilePath = realFilePath;
                             }
                         }
                     }
@@ -580,86 +630,94 @@ namespace MsgToPdfConverter.Utils
             // --- Find ACTUAL page numbers using Word Interop if fallback was used ---
             if (results.Count > 0 && results.Any(o => o.PageNumber == -1))
             {
-                Console.WriteLine($"[InteropExtractor] Finding actual page numbers for {results.Count} objects using Word Interop");
-                
+                Console.WriteLine($"[InteropExtractor] Finding actual page numbers for {results.Count} objects using Word Interop (robust mapping)");
                 Application pageWordApp = null;
                 Document pageDoc = null;
                 try
                 {
                     pageWordApp = new Application { Visible = false, DisplayAlerts = WdAlertLevel.wdAlertsNone };
                     pageDoc = pageWordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
-                    
-                    // Get the actual page numbers from the InlineShapes we found earlier
-                    Console.WriteLine($"[InteropExtractor] Document has {pageDoc.InlineShapes.Count} InlineShapes");
-                    
-                    int shapeIndex = 0;
-                    for (int i = 0; i < results.Count; i++)
+
+                    // Build InlineShape metadata list
+                    var inlineShapeMeta = new List<(int Index, string ProgId, int Page)>();
+                    for (int idx = 1; idx <= pageDoc.InlineShapes.Count; idx++)
                     {
-                        // Skip objects that already have valid page numbers
-                        if (results[i].PageNumber > 0)
-                        {
-                            Console.WriteLine($"[InteropExtractor] Object {i+1} already has page {results[i].PageNumber}, skipping");
-                            continue;
-                        }
-                        
+                        var shape = pageDoc.InlineShapes[idx];
+                        string progId = "";
+                        try { progId = shape.OLEFormat?.ProgID ?? ""; } catch { }
+                        int page = -1;
                         try
                         {
-                            // Find the next available InlineShape
-                            while (shapeIndex < pageDoc.InlineShapes.Count)
+                            page = (int)shape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
+                            if (page <= 0)
+                                page = (int)shape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
+                            if (page <= 0)
                             {
-                                shapeIndex++;
-                                var shape = pageDoc.InlineShapes[shapeIndex]; // 1-based indexing
-                                if (shape.Type == WdInlineShapeType.wdInlineShapeEmbeddedOLEObject)
-                                {
-                                    int actualPage = -1;
-                                    
-                                    // Try multiple methods to get the page number
-                                    try
-                                    {
-                                        actualPage = (int)shape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
-                                        if (actualPage <= 0)
-                                        {
-                                            actualPage = (int)shape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
-                                        }
-                                        if (actualPage <= 0)
-                                        {
-                                            // Try using the range start
-                                            var startRange = pageDoc.Range(shape.Range.Start, shape.Range.Start);
-                                            actualPage = (int)startRange.get_Information(WdInformation.wdActiveEndPageNumber);
-                                        }
-                                    }
-                                    catch (Exception pageEx)
-                                    {
-                                        Console.WriteLine($"[InteropExtractor] Could not get page for shape {shapeIndex}: {pageEx.Message}");
-                                    }
-                                    
-                                    if (actualPage > 0)
-                                    {
-                                        results[i].PageNumber = actualPage;
-                                        Console.WriteLine($"[InteropExtractor] Object {i+1} found on actual page {actualPage}");
-                                    }
-                                    else
-                                    {
-                                        // Fallback: use simple sequential assignment
-                                        results[i].PageNumber = i + 1;
-                                        Console.WriteLine($"[InteropExtractor] Object {i+1} assigned to fallback page {i+1}");
-                                    }
-                                    break; // Found a shape for this object
-                                }
+                                var startRange = pageDoc.Range(shape.Range.Start, shape.Range.Start);
+                                page = (int)startRange.get_Information(WdInformation.wdActiveEndPageNumber);
                             }
                         }
-                        catch (Exception shapeEx)
+                        catch { }
+                        inlineShapeMeta.Add((idx, progId, page));
+                        Console.WriteLine($"[InteropExtractor] InlineShapeMeta: idx={idx}, ProgID={progId}, page={page}");
+                    }
+
+                    // --- Robust mapping for Package objects (bin and real files) ---
+                    // Build a list of all Package InlineShapes
+                    var packageShapes = inlineShapeMeta.Where(m => (m.ProgId ?? "").ToLower().Contains("package")).ToList();
+                    int packageShapePtr = 0;
+                    // Map all .bin and real files extracted from .bin to the next Package InlineShape
+                    foreach (var obj in results.Where(r => (r.OleClass ?? "").ToLower().Contains("package") && r.PageNumber == -1))
+                    {
+                        if (packageShapes.Count == 0)
                         {
-                            Console.WriteLine($"[InteropExtractor] Error processing shape for object {i+1}: {shapeEx.Message}");
-                            results[i].PageNumber = i + 1; // Fallback
+                            Console.WriteLine($"[InteropExtractor] Robust mapping (Package): No Package InlineShapes found for {Path.GetFileName(obj.FilePath)}");
+                            continue;
+                        }
+                        int useIdx = packageShapePtr < packageShapes.Count ? packageShapePtr : packageShapes.Count - 1;
+                        obj.PageNumber = packageShapes[useIdx].Page > 0 ? packageShapes[useIdx].Page : packageShapes[useIdx].Index;
+                        obj.SourceInlineShapeIndex = packageShapes[useIdx].Index;
+                        obj.MatchedInlineShapeIndex = packageShapes[useIdx].Index;
+                        Console.WriteLine($"[InteropExtractor] Robust mapping (Package): Object {Path.GetFileName(obj.FilePath)} (OleClass={obj.OleClass}) -> InlineShape {packageShapes[useIdx].Index} (ProgID={packageShapes[useIdx].ProgId}) assigned to page {obj.PageNumber}");
+                        packageShapePtr++;
+                    }
+
+                    // --- Robust mapping for all other objects ---
+                    var unmappedResults = results.Where(r => r.PageNumber == -1 && !((r.OleClass ?? "").ToLower().Contains("package"))).ToList();
+                    var mapped = new HashSet<int>();
+                    foreach (var obj in unmappedResults)
+                    {
+                        int foundIdx = -1;
+                        for (int i = 0; i < inlineShapeMeta.Count; i++)
+                        {
+                            if (mapped.Contains(i)) continue;
+                            bool progIdMatch = false;
+                            if (string.IsNullOrEmpty(obj.OleClass) && string.IsNullOrEmpty(inlineShapeMeta[i].ProgId))
+                                progIdMatch = true;
+                            else if (!string.IsNullOrEmpty(obj.OleClass) && !string.IsNullOrEmpty(inlineShapeMeta[i].ProgId))
+                                progIdMatch = string.Equals(obj.OleClass, inlineShapeMeta[i].ProgId, StringComparison.OrdinalIgnoreCase);
+                            if (progIdMatch)
+                            {
+                                foundIdx = i;
+                                break;
+                            }
+                        }
+                        if (foundIdx != -1)
+                        {
+                            obj.PageNumber = inlineShapeMeta[foundIdx].Page > 0 ? inlineShapeMeta[foundIdx].Page : (foundIdx + 1);
+                            mapped.Add(foundIdx);
+                            Console.WriteLine($"[InteropExtractor] Robust mapping: Object {Path.GetFileName(obj.FilePath)} (OleClass={obj.OleClass}) -> InlineShape {inlineShapeMeta[foundIdx].Index} (ProgID={inlineShapeMeta[foundIdx].ProgId}) assigned to page {obj.PageNumber}");
+                        }
+                        else
+                        {
+                            obj.PageNumber = obj.DocumentOrderIndex + 1;
+                            Console.WriteLine($"[InteropExtractor] Robust mapping: Object {Path.GetFileName(obj.FilePath)} (OleClass={obj.OleClass}) could not be matched, assigned fallback page {obj.PageNumber}");
                         }
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[InteropExtractor] Page detection failed: {ex.Message}. Using simple assignment.");
-                    
-                    // Final fallback: simple sequential assignment
+                    Console.WriteLine($"[InteropExtractor] Page detection failed (robust mapping): {ex.Message}. Using simple assignment.");
                     for (int i = 0; i < results.Count; i++)
                     {
                         results[i].PageNumber = i + 1;
