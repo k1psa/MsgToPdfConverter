@@ -44,7 +44,19 @@ namespace MsgToPdfConverter
                     MessageBoxButton.OK,
                     MessageBoxImage.Error);
                 Environment.Exit(1);
-            }            // Normal WPF mode
+            }
+            // Check for Microsoft Office (Word and Excel) before starting WPF
+            else if (!IsOfficeInstalled())
+            {
+                MessageBox.Show(
+                    "Microsoft Office (Word and Excel) is required to convert Office documents.\n\n" +
+                    "Please install Microsoft Office and try again.",
+                    "Microsoft Office Not Found",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+                Environment.Exit(1);
+            }
+            // Normal WPF mode
             else
             {
                 var app = new App();
@@ -73,6 +85,23 @@ namespace MsgToPdfConverter
             catch
             {
                 return false; // Assume not installed if we can't check
+            }
+        }
+
+        private static bool IsOfficeInstalled()
+        {
+            // Check for Word and Excel registry keys
+            try
+            {
+                using (var wordKey = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey("Word.Application"))
+                using (var excelKey = Microsoft.Win32.Registry.ClassesRoot.OpenSubKey("Excel.Application"))
+                {
+                    return wordKey != null && excelKey != null;
+                }
+            }
+            catch
+            {
+                return false;
             }
         }
     }
