@@ -55,15 +55,6 @@ for /d %%d in (*) do (
         )    )
 )
 
-REM Remove unwanted GemBox libraries that may have been copied
-if exist "libraries\GemBox.Document.dll" (
-    echo Removing GemBox.Document.dll...
-    del "libraries\GemBox.Document.dll" 2>nul
-)
-if exist "libraries\GemBox.Spreadsheet.dll" (
-    echo Removing GemBox.Spreadsheet.dll...
-    del "libraries\GemBox.Spreadsheet.dll" 2>nul
-)
 
 REM Keep the main exe and config in root
 echo.

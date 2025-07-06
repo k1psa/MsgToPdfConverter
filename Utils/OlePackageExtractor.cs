@@ -14,7 +14,7 @@ namespace MsgToPdfConverter.Utils
         // New: original OLE stream name for mapping
         public string OriginalStreamName { get; set; }
         // Optional: hash for robust mapping
-        public string DataHash => Data != null ? BitConverter.ToString(System.Security.Cryptography.SHA1.Create().ComputeHash(Data)).Replace("-", "") : null;
+        public string DataHash => Data != null ? BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(Data)).Replace("-", "") : null;
         // New: internal name for embedded Office files (Word/Excel)
         public string EmbeddedOfficeName { get; set; }
     }

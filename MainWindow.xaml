@@ -4,7 +4,7 @@
         xmlns:local="clr-namespace:MsgToPdfConverter"
         xmlns:utils="clr-namespace:MsgToPdfConverter.Utils"
         Title="MSG to PDF Converter"
-        Height="370"
+        Height="400"
         Width="525">
     <Window.DataContext>
         <local:MainWindowViewModel/>

@@ -199,9 +199,15 @@ namespace MsgToPdfConverter.Services
                                 if (entry.FullName.EndsWith("/") || string.IsNullOrEmpty(entry.Name))
                                     continue; // Skip directories
 
-                                string zfExt = Path.GetExtension(entry.Name).ToLowerInvariant();
-                                string zf = Path.Combine(tempDir, Guid.NewGuid() + "_" + entry.Name);
+                                // Sanitize entry.Name to prevent path traversal
+                                string safeEntryName = Path.GetFileName(entry.Name);
+                                string zfExt = Path.GetExtension(safeEntryName).ToLowerInvariant();
+                                string zf = Path.Combine(tempDir, Guid.NewGuid() + "_" + safeEntryName);
                                 string zfPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zipfile.pdf");
+
+                                // Validate that zf is within tempDir to prevent path traversal
+                                if (!Path.GetFullPath(zf).StartsWith(Path.GetFullPath(tempDir), StringComparison.OrdinalIgnoreCase))
+                                    throw new InvalidOperationException("Unsafe file path detected.");
 
                                 using (var entryStream = entry.Open())
                                 using (var outputStream = new FileStream(zf, FileMode.Create))
@@ -212,7 +218,7 @@ namespace MsgToPdfConverter.Services
                                 if (zfExt == ".pdf")
                                 {
                                     string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                                    PdfService.AddHeaderPdf(headerPdf, $"{headerText} (ZIP: {entry.Name})");
+                                    PdfService.AddHeaderPdf(headerPdf, $"{headerText} (ZIP: {safeEntryName})");
                                     string mergedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
                                     PdfAppendTest.AppendPdfs(new List<string> { headerPdf, zf }, mergedPdf);
                                     zipPdfFiles.Add(mergedPdf);
@@ -223,7 +229,7 @@ namespace MsgToPdfConverter.Services
                                     if (OfficeConversionService.TryConvertOfficeToPdf(zf, zfPdf))
                                     {
                                         string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                                        PdfService.AddHeaderPdf(headerPdf, $"{headerText} (ZIP: {entry.Name})");
+                                        PdfService.AddHeaderPdf(headerPdf, $"{headerText} (ZIP: {safeEntryName})");
                                         string mergedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
                                         PdfAppendTest.AppendPdfs(new List<string> { headerPdf, zfPdf }, mergedPdf);
                                         zipPdfFiles.Add(mergedPdf);
@@ -232,13 +238,13 @@ namespace MsgToPdfConverter.Services
                                     }
                                     else
                                     {
-                                        PdfService.AddPlaceholderPdf(zfPdf, $"Could not convert attachment: {Path.GetFileName(zf)}");
+                                        PdfService.AddPlaceholderPdf(zfPdf, $"Could not convert attachment: {safeEntryName}");
                                         Console.WriteLine($"[ATTACH] ZIP Office failed to convert: {zf}");
                                     }
                                 }
                                 else
                                 {
-                                    PdfService.AddPlaceholderPdf(zfPdf, $"Unsupported attachment: {Path.GetFileName(zf)}");
+                                    PdfService.AddPlaceholderPdf(zfPdf, $"Unsupported attachment: {safeEntryName}");
                                     zipPdfFiles.Add(zfPdf);
                                     Console.WriteLine($"[ATTACH] ZIP unsupported: {zf}");
                                 }
