@@ -168,6 +168,11 @@ namespace MsgToPdfConverter.Utils
                         {
                             info.Data = TrimToZipSignature(info.Data);
                         }
+                        // --- MSG signature trimming for .msg files ---
+                        if (Path.GetExtension(info.FileName).Equals(".msg", StringComparison.OrdinalIgnoreCase))
+                        {
+                            info.Data = TrimToOleSignature(info.Data);
+                        }
                         return info;
                     }
                     catch (Exception ex)
@@ -225,6 +230,11 @@ namespace MsgToPdfConverter.Utils
                             if (ext == ".zip")
                             {
                                 fileData = TrimToZipSignature(fileData);
+                            }
+                            // --- MSG signature trimming for .msg files ---
+                            if (ext == ".msg")
+                            {
+                                fileData = TrimToOleSignature(fileData);
                             }
                             return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = foundStreamName, EmbeddedOfficeName = officeName };
                         }
@@ -581,6 +591,34 @@ namespace MsgToPdfConverter.Utils
                 }
             }
             Console.WriteLine("[DEBUG] ZIP signature not found, returning original data");
+            return data;
+        }
+
+        // --- Helper for MSG signature trimming ---
+        private static byte[] TrimToOleSignature(byte[] data)
+        {
+            byte[] sig = new byte[] { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
+            if (data == null || data.Length < sig.Length)
+                return data;
+            for (int i = 0; i <= data.Length - sig.Length; i++)
+            {
+                bool match = true;
+                for (int j = 0; j < sig.Length; j++)
+                {
+                    if (data[i + j] != sig[j])
+                    {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match)
+                {
+                    if (i == 0) return data;
+                    Console.WriteLine($"[DEBUG] Trimming {i} bytes before OLE signature");
+                    return data.Skip(i).ToArray();
+                }
+            }
+            Console.WriteLine("[DEBUG] OLE signature not found, returning original data");
             return data;
         }
     }
