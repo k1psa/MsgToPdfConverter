@@ -265,6 +265,50 @@ namespace MsgToPdfConverter.Services
                 {
                     return InsertXlsxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
                 }
+                else if (obj.FilePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    // --- ZIP HANDLING ---
+                    Console.WriteLine($"[PDF-INSERT] *** ZIP PROCESSING START *** Extracting and inserting ZIP: {Path.GetFileName(obj.FilePath)} after page {currentOutputPage}");
+                    try
+                    {
+                        var zipEntries = ZipHelper.ExtractZipEntries(obj.FilePath);
+                        foreach (var entry in zipEntries)
+                        {
+                            // Save each entry to a temp file
+                            string tempFile = Path.Combine(Path.GetTempPath(), $"zip_entry_{Guid.NewGuid()}_{entry.FileName}");
+                            File.WriteAllBytes(tempFile, entry.Data);
+                            string ext = Path.GetExtension(entry.FileName).ToLowerInvariant();
+                            if (ext == ".pdf")
+                            {
+                                currentOutputPage = InsertPdfFile_NoSeparator(tempFile, outputPdf, currentOutputPage, "ZIP-PDF");
+                            }
+                            else if (ext == ".docx")
+                            {
+                                currentOutputPage = InsertDocxFile_NoSeparator(tempFile, outputPdf, currentOutputPage);
+                            }
+                            else if (ext == ".xlsx")
+                            {
+                                currentOutputPage = InsertXlsxFile_NoSeparator(tempFile, outputPdf, currentOutputPage);
+                            }
+                            else if (ext == ".msg")
+                            {
+                                currentOutputPage = InsertMsgFile_NoSeparator(tempFile, outputPdf, currentOutputPage);
+                            }
+                            else
+                            {
+                                currentOutputPage = InsertPlaceholderForFile(tempFile, outputPdf, currentOutputPage, $"ZIP Entry ({ext})");
+                            }
+                            try { File.Delete(tempFile); } catch { }
+                        }
+                        Console.WriteLine($"[PDF-INSERT] *** ZIP PROCESSING COMPLETE *** {zipEntries.Count} entries processed from {Path.GetFileName(obj.FilePath)}");
+                    }
+                    catch (Exception zipEx)
+                    {
+                        Console.WriteLine($"[PDF-INSERT] Error processing ZIP {obj.FilePath}: {zipEx.Message}");
+                        currentOutputPage = InsertErrorPlaceholder(obj.FilePath, outputPdf, currentOutputPage, zipEx.Message);
+                    }
+                    return currentOutputPage;
+                }
                 else
                 {
                     // Only for unsupported types, add a placeholder

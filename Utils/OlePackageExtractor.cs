@@ -163,6 +163,11 @@ namespace MsgToPdfConverter.Utils
                     {
                         var info = ParseOle10Native(data);
                         info.OriginalStreamName = foundStreamName;
+                        // --- ZIP signature trimming for .zip files ---
+                        if (Path.GetExtension(info.FileName).Equals(".zip", StringComparison.OrdinalIgnoreCase))
+                        {
+                            info.Data = TrimToZipSignature(info.Data);
+                        }
                         return info;
                     }
                     catch (Exception ex)
@@ -216,6 +221,11 @@ namespace MsgToPdfConverter.Utils
                             {
                                 Console.WriteLine($"[DEBUG] Embedded Office file internal name: {officeName}");
                             }
+                            // --- ZIP signature trimming for .zip files ---
+                            if (ext == ".zip")
+                            {
+                                fileData = TrimToZipSignature(fileData);
+                            }
                             return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = foundStreamName, EmbeddedOfficeName = officeName };
                         }
                     }
@@ -243,259 +253,86 @@ namespace MsgToPdfConverter.Utils
         private static OlePackageInfo ParseOle10Native(byte[] data)
         {
             Console.WriteLine($"[DEBUG] ParseOle10Native: data length = {data.Length}");
-            
-            // Dump first 100 bytes as hex for debugging
             var hexDump = string.Join(" ", data.Take(Math.Min(100, data.Length)).Select(b => b.ToString("X2")));
             Console.WriteLine($"[DEBUG] First 100 bytes: {hexDump}");
-            
             using (var br = new BinaryReader(new MemoryStream(data)))
             {
                 try
                 {
-                    // Ole10Native format has several variants, try different approaches
-                    
-                    // Approach 1: Standard Ole10Native format
                     uint totalSize = br.ReadUInt32();
                     Console.WriteLine($"[DEBUG] Ole10Native total size: {totalSize}");
-                    
-                    // Read type/format field
                     uint typeField = br.ReadUInt32();
                     Console.WriteLine($"[DEBUG] Ole10Native type field: {typeField}");
-                    
-                    // Read filename (null-terminated string)
                     string fileName = ReadNullTerminatedString(br);
                     Console.WriteLine($"[DEBUG] Ole10Native filename: '{fileName}'");
-                    
-                    // Read file path (null-terminated string)
                     string filePath = ReadNullTerminatedString(br);
                     Console.WriteLine($"[DEBUG] Ole10Native filepath: '{filePath}'");
-                    
-                    // Skip any additional fields (some Ole10Native variants have extra data)
-                    // Look for the next size field that indicates the actual data
-                    long currentPos = br.BaseStream.Position;
-                    Console.WriteLine($"[DEBUG] Current position after strings: {currentPos}");
-                    
-                    // Try to find the data size field - it should be near the end before the actual data
-                    // Sometimes there are additional null bytes or other fields
+                    long afterHeader = br.BaseStream.Position;
+                    // Try to find a plausible data size field
                     uint dataSize = 0;
                     bool foundDataSize = false;
-                    
-                    // Save current position to try multiple approaches
                     long searchStartPos = br.BaseStream.Position;
-                    
-                    // Approach 1: Look for the most common Ole10Native pattern
-                    // After filename and filepath, there might be some padding, then a size field
-                    
-                    // The Ole10Native format typically has these fields after the strings:
-                    // [4 bytes - temporary path length] [temporary path] [4 bytes - data size] [actual data]
-                    // Let's try to find the actual data by looking for file signatures
-                    
-                    // First, try the traditional approach with size fields
                     for (int skip = 0; skip <= 32 && searchStartPos + skip + 4 < br.BaseStream.Length - 4; skip += 4)
                     {
                         br.BaseStream.Position = searchStartPos + skip;
                         uint candidate = br.ReadUInt32();
                         long remaining = br.BaseStream.Length - br.BaseStream.Position;
-                        
-                        // Check if this looks like a valid data size
                         if (candidate > 0 && candidate <= remaining)
                         {
-                            // Look ahead to see if the data at this position looks like a valid file
                             long checkPos = br.BaseStream.Position;
                             if (checkPos + candidate <= br.BaseStream.Length)
                             {
                                 byte[] testData = br.ReadBytes(Math.Min(16, (int)candidate));
-                                br.BaseStream.Position = checkPos; // Reset position
-                                
-                                // Check if it looks like a valid file (PDF starts with %PDF, MSG with OLE signature)
+                                br.BaseStream.Position = checkPos;
                                 bool looksValid = ValidateFileSignature(testData, fileName);
-                                
                                 if (looksValid && candidate >= 100 && candidate <= 104857600)
                                 {
                                     dataSize = candidate;
                                     foundDataSize = true;
+                                    afterHeader = checkPos;
                                     Console.WriteLine($"[DEBUG] Found validated data size: {dataSize} at skip {skip}");
                                     break;
                                 }
                             }
                         }
                     }
-                    
-                    // Approach 2: If traditional approach fails, scan for file signatures directly
-                    if (!foundDataSize)
+                    // If not found or dataSize is suspiciously small, fallback for non-MSG files
+                    string ext = Path.GetExtension(fileName).ToLowerInvariant();
+                    if (!foundDataSize || (dataSize < 1024 && ext != ".msg" && ext != ".pdf"))
                     {
-                        Console.WriteLine("[DEBUG] Traditional approach failed, scanning for file signatures...");
-                        br.BaseStream.Position = searchStartPos;
-                        
-                        // For MSG files, scan more extensively since they can be deeply embedded
-                        int maxScanDistance = fileName?.EndsWith(".msg", StringComparison.OrdinalIgnoreCase) == true ? 1000 : 200;
-                        
-                        // Scan up to maxScanDistance bytes ahead looking for file signatures
-                        for (int offset = 0; offset < Math.Min(maxScanDistance, br.BaseStream.Length - searchStartPos - 16); offset++)
-                        {
-                            br.BaseStream.Position = searchStartPos + offset;
-                            byte[] testBytes = br.ReadBytes(16);
-                            
-                            if (ValidateFileSignature(testBytes, fileName))
-                            {
-                                Console.WriteLine($"[DEBUG] Found file signature at offset {offset} from current position");
-                                dataSize = (uint)(br.BaseStream.Length - (searchStartPos + offset));
-                                foundDataSize = true;
-                                br.BaseStream.Position = searchStartPos + offset; // Position at start of data
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // Approach 3: For MSG files specifically, try alternative parsing methods
-                    if (!foundDataSize && fileName?.EndsWith(".msg", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        Console.WriteLine("[DEBUG] Trying MSG-specific parsing approaches...");
-                        br.BaseStream.Position = searchStartPos;
-                        
-                        // Sometimes MSG files are wrapped in additional layers
-                        // Try reading different size fields and looking for OLE signatures
-                        for (int attemptOffset = 0; attemptOffset < Math.Min(500, br.BaseStream.Length - searchStartPos - 20); attemptOffset += 4)
-                        {
-                            br.BaseStream.Position = searchStartPos + attemptOffset;
-                            
-                            // Try reading as if there's a size field here
-                            if (br.BaseStream.Position + 4 < br.BaseStream.Length)
-                            {
-                                uint candidateSize = br.ReadUInt32();
-                                long remainingAfterSize = br.BaseStream.Length - br.BaseStream.Position;
-                                
-                                // Check if this size makes sense and if the data after it looks like OLE
-                                if (candidateSize > 100 && candidateSize <= remainingAfterSize && candidateSize <= 104857600)
-                                {
-                                    byte[] testData = br.ReadBytes(Math.Min(8, (int)candidateSize));
-                                    br.BaseStream.Position -= testData.Length; // Reset
-                                    
-                                    // Check for OLE signature specifically for MSG
-                                    if (testData.Length >= 8 && 
-                                        testData[0] == 0xD0 && testData[1] == 0xCF && testData[2] == 0x11 && testData[3] == 0xE0 &&
-                                        testData[4] == 0xA1 && testData[5] == 0xB1 && testData[6] == 0x1A && testData[7] == 0xE1)
-                                    {
-                                        Console.WriteLine($"[DEBUG] Found MSG OLE signature at offset {attemptOffset} with size {candidateSize}");
-                                        dataSize = candidateSize;
-                                        foundDataSize = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    if (!foundDataSize)
-                    {
-                        Console.WriteLine("[DEBUG] Could not find data size field, using remaining data");
-                        // Fallback: use all remaining data after trying to skip potential headers
-                        br.BaseStream.Position = searchStartPos;
-                        
-                        // Skip what looks like it might be padding or additional fields
-                        long dataStartPos = searchStartPos;
-                        if (br.BaseStream.Length - searchStartPos > 12)
-                        {
-                            // Try skipping 4, 8, or 12 bytes to account for potential fields
-                            dataStartPos = searchStartPos + 4;
-                        }
-                        
-                        br.BaseStream.Position = dataStartPos;
+                        Console.WriteLine("[DEBUG] Fallback: using all remaining bytes after header as file data");
+                        br.BaseStream.Position = afterHeader;
                         dataSize = (uint)(br.BaseStream.Length - br.BaseStream.Position);
-                        Console.WriteLine($"[DEBUG] Using fallback data size: {dataSize} from position {dataStartPos}");
                     }
-                    
-                    // Read the actual file data
+                    else
+                    {
+                        br.BaseStream.Position = afterHeader;
+                    }
                     byte[] fileData = br.ReadBytes((int)dataSize);
                     Console.WriteLine($"[DEBUG] Read {fileData.Length} bytes of file data");
-                    
-                    // Validate the data by checking for known file signatures
                     bool isValidData = ValidateFileData(fileData, fileName);
                     Console.WriteLine($"[DEBUG] Initial validation result: {isValidData}");
-                    
-                    if (!isValidData && foundDataSize)
-                    {
-                        Console.WriteLine("[DEBUG] Data validation failed, trying fallback approach");
-                        // Try using all remaining data instead
-                        br.BaseStream.Position = searchStartPos;
-                        fileData = br.ReadBytes((int)(br.BaseStream.Length - br.BaseStream.Position));
-                        Console.WriteLine($"[DEBUG] Fallback: Read {fileData.Length} bytes");
-                        isValidData = ValidateFileData(fileData, fileName);
-                        Console.WriteLine($"[DEBUG] Fallback validation result: {isValidData}");
-                    }
-                    
-                    // For MSG files specifically, if still not valid, try additional fallback methods
-                    if (!isValidData && fileName?.EndsWith(".msg", StringComparison.OrdinalIgnoreCase) == true)
-                    {
-                        Console.WriteLine("[DEBUG] MSG file still not valid, trying progressive fallbacks");
-                        
-                        // Try different starting positions by skipping potential wrapper headers
-                        int[] skipOffsets = { 8, 12, 16, 20, 24, 32, 64, 128 };
-                        foreach (int skipOffset in skipOffsets)
-                        {
-                            if (searchStartPos + skipOffset < br.BaseStream.Length - 100)
-                            {
-                                br.BaseStream.Position = searchStartPos + skipOffset;
-                                byte[] testData = br.ReadBytes(8);
-                                
-                                // Check for OLE signature at this position
-                                if (testData.Length >= 8 && 
-                                    testData[0] == 0xD0 && testData[1] == 0xCF && testData[2] == 0x11 && testData[3] == 0xE0 &&
-                                    testData[4] == 0xA1 && testData[5] == 0xB1 && testData[6] == 0x1A && testData[7] == 0xE1)
-                                {
-                                    Console.WriteLine($"[DEBUG] Found MSG OLE signature at skip offset {skipOffset}");
-                                    br.BaseStream.Position = searchStartPos + skipOffset;
-                                    fileData = br.ReadBytes((int)(br.BaseStream.Length - br.BaseStream.Position));
-                                    isValidData = true;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        // If still not valid, save the raw data anyway with detailed logging for analysis
-                        if (!isValidData)
-                        {
-                            Console.WriteLine($"[DEBUG] MSG file validation failed completely. Raw data length: {fileData.Length}");
-                            if (fileData.Length > 0)
-                            {
-                                var first32 = string.Join(" ", fileData.Take(32).Select(b => b.ToString("X2")));
-                                Console.WriteLine($"[DEBUG] First 32 bytes of invalid MSG data: {first32}");
-                                
-                                // Return the data anyway - it might be a variant that can still be processed
-                                // We'll add a marker to the filename to indicate it needs validation
-                                fileName = "UNVALIDATED_" + fileName;
-                                Console.WriteLine($"[DEBUG] Returning unvalidated MSG data as: {fileName}");
-                            }
-                        }
-                    }
-                    
-                    // Clean up filename - remove invalid characters
                     if (string.IsNullOrEmpty(fileName))
                     {
                         fileName = "Ole10Native_file.bin";
                     }
                     else
                     {
-                        // Remove invalid path characters
                         fileName = string.Join("_", fileName.Split(Path.GetInvalidFileNameChars()));
                         if (string.IsNullOrEmpty(fileName))
                         {
                             fileName = "Ole10Native_file.bin";
                         }
                     }
-                    
-                    string ext = Path.GetExtension(fileName).ToLowerInvariant();
-                    string contentType = ext == ".pdf" ? "application/pdf" : 
+                    string contentType = ext == ".pdf" ? "application/pdf" :
                                         ext == ".msg" ? "application/vnd.ms-outlook" :
                                         "application/octet-stream";
-                    
                     Console.WriteLine($"[DEBUG] Ole10Native extracted file: {fileName}, size: {fileData.Length}, contentType: {contentType}, validated: {isValidData}");
                     return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = "Ole10Native" };
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[DEBUG] Ole10Native parsing failed: {ex.Message}");
-                    // Last resort: just return the raw data
                     string fallbackName = "Ole10Native_raw.bin";
                     return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data, OriginalStreamName = "Ole10Native" };
                 }
@@ -724,6 +561,27 @@ namespace MsgToPdfConverter.Utils
             }
             catch { }
             return null;
+        }
+
+        /// <summary>
+        /// Trims leading bytes before the ZIP file signature (0x50 0x4B 0x03 0x04), if present.
+        /// Returns the original data if the signature is not found.
+        /// </summary>
+        private static byte[] TrimToZipSignature(byte[] data)
+        {
+            if (data == null || data.Length < 4)
+                return data;
+            for (int i = 0; i <= data.Length - 4; i++)
+            {
+                if (data[i] == 0x50 && data[i + 1] == 0x4B && data[i + 2] == 0x03 && data[i + 3] == 0x04)
+                {
+                    if (i == 0) return data;
+                    Console.WriteLine($"[DEBUG] Trimming {i} bytes before ZIP signature");
+                    return data.Skip(i).ToArray();
+                }
+            }
+            Console.WriteLine("[DEBUG] ZIP signature not found, returning original data");
+            return data;
         }
     }
 }
