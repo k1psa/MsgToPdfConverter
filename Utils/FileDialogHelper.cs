@@ -13,8 +13,8 @@ namespace MsgToPdfConverter.Utils
 
             using (var dialog = new System.Windows.Forms.OpenFileDialog())
             {
-                dialog.Title = "Select .msg Files or Folders (type folder path in filename)";
-                dialog.Filter = "Outlook Message Files (*.msg)|*.msg|All Files (*.*)|*.*";
+                dialog.Title = "Select Files or Folders for Conversion (type folder path in filename)";
+                dialog.Filter = "All Supported Files (*.msg;*.pdf;*.doc;*.docx;*.xls;*.xlsx;*.zip;*.7z;*.jpg;*.jpeg;*.png;*.bmp;*.gif)|*.msg;*.pdf;*.doc;*.docx;*.xls;*.xlsx;*.zip;*.7z;*.jpg;*.jpeg;*.png;*.bmp;*.gif|All Files (*.*)|*.*";
                 dialog.FilterIndex = 1;
                 dialog.Multiselect = true;
                 dialog.CheckFileExists = false;
@@ -35,16 +35,21 @@ namespace MsgToPdfConverter.Utils
                             cleanPath = Path.GetDirectoryName(selectedPath);
                         }
 
+                        string[] supportedExtensions = new[] { ".msg", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".7z", ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
+
                         if (Directory.Exists(cleanPath))
                         {
-                            // It's a directory - add all .msg files recursively
-                            var msgFiles = Directory.GetFiles(cleanPath, "*.msg", SearchOption.AllDirectories);
-                            result.AddRange(msgFiles);
+                            // It's a directory - add all supported files recursively
+                            foreach (var ext in supportedExtensions)
+                            {
+                                var files = Directory.GetFiles(cleanPath, "*" + ext, SearchOption.AllDirectories);
+                                result.AddRange(files);
+                            }
                         }
                         else if (File.Exists(selectedPath))
                         {
                             // It's a file
-                            if (Path.GetExtension(selectedPath).ToLowerInvariant() == ".msg")
+                            if (Array.Exists(supportedExtensions, e => e == Path.GetExtension(selectedPath).ToLowerInvariant()))
                             {
                                 result.Add(selectedPath);
                             }
@@ -55,8 +60,11 @@ namespace MsgToPdfConverter.Utils
                             string folderPath = Path.GetDirectoryName(selectedPath);
                             if (Directory.Exists(folderPath))
                             {
-                                var msgFiles = Directory.GetFiles(folderPath, "*.msg", SearchOption.AllDirectories);
-                                result.AddRange(msgFiles);
+                                foreach (var ext in supportedExtensions)
+                                {
+                                    var files = Directory.GetFiles(folderPath, "*" + ext, SearchOption.AllDirectories);
+                                    result.AddRange(files);
+                                }
                             }
                         }
                     }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Windows;
 
 namespace MsgToPdfConverter.Services
@@ -16,173 +17,122 @@ namespace MsgToPdfConverter.Services
         public OutlookImportResult ExtractMsgFilesFromDragDrop(IDataObject data, string outputFolder, Func<string, string> sanitizeFileName)
         {
             var result = new OutlookImportResult();
-            string[] fileNames = null;
-            if (data.GetDataPresent("FileGroupDescriptorW"))
+            
+            System.Diagnostics.Debug.WriteLine("[OutlookImportService] Starting extraction...");
+            
+            // Skip all the complex stream extraction - go directly to Outlook Interop like attachments do
+            try
             {
-                using (var stream = (MemoryStream)data.GetData("FileGroupDescriptorW"))
+                var outlookApp = System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application") as Microsoft.Office.Interop.Outlook.Application;
+                if (outlookApp != null)
                 {
-                    fileNames = GetFileNamesFromFileGroupDescriptorW(stream);
+                    System.Diagnostics.Debug.WriteLine("[OutlookImportService] Outlook app found");
+                    var explorer = outlookApp.ActiveExplorer();
+                    if (explorer != null && explorer.Selection != null && explorer.Selection.Count > 0)
+                    {
+                        System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Found {explorer.Selection.Count} selected items");
+                        
+                        // Process each selected email
+                        for (int i = 1; i <= explorer.Selection.Count; i++)
+                        {
+                            var mailItem = explorer.Selection[i] as Microsoft.Office.Interop.Outlook.MailItem;
+                            if (mailItem != null)
+                            {
+                                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Processing email: {mailItem.Subject}");
+                                
+                                string safeSubject = sanitizeFileName(mailItem.Subject ?? "untitled");
+                                string fileName = safeSubject + ".msg";
+                                string destPath = Path.Combine(outputFolder, fileName);
+                                int counter = 1;
+                                while (File.Exists(destPath))
+                                {
+                                    string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
+                                    string uniqueFileName = $"{nameWithoutExt}_{counter}.msg";
+                                    destPath = Path.Combine(outputFolder, uniqueFileName);
+                                    counter++;
+                                }
+                                
+                                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Saving to: {destPath}");
+                                mailItem.SaveAs(destPath, Microsoft.Office.Interop.Outlook.OlSaveAsType.olMSG);
+                                result.ExtractedFiles.Add(destPath);
+                                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Successfully saved: {destPath}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        System.Diagnostics.Debug.WriteLine("[OutlookImportService] No explorer or selection found");
+                    }
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine("[OutlookImportService] Outlook app not found");
                 }
             }
-            else if (data.GetDataPresent("FileGroupDescriptor"))
+            catch (Exception ex)
             {
-                using (var stream = (MemoryStream)data.GetData("FileGroupDescriptor"))
+                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Exception: {ex.Message}");
+                // If Interop fails, add to skipped
+                result.SkippedFiles.Add("Email could not be extracted: " + ex.Message);
+            }
+            
+            System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Extraction complete. Found {result.ExtractedFiles.Count} files, skipped {result.SkippedFiles.Count}");
+            return result;
+        }
+
+        public OutlookImportResult ExtractAttachmentsFromDragDrop(IDataObject data, string outputFolder, Func<string, string> sanitizeFileName)
+        {
+            var result = new OutlookImportResult();
+            try
+            {
+                // Only support FileGroupDescriptorW (Unicode)
+                if (data.GetDataPresent("FileGroupDescriptorW"))
                 {
-                    fileNames = GetFileNamesFromFileGroupDescriptor(stream);
+                    var fileGroupStream = (MemoryStream)data.GetData("FileGroupDescriptorW");
+                    fileGroupStream.Position = 0;
+                    var fileNames = GetFileNamesFromFileGroupDescriptorW(fileGroupStream);
+                    for (int i = 0; i < fileNames.Length; i++)
+                    {
+                        string originalName = fileNames[i];
+                        string safeName = sanitizeFileName(Path.GetFileName(originalName));
+                        string destPath = Path.Combine(outputFolder, safeName);
+                        int counter = 1;
+                        while (File.Exists(destPath))
+                        {
+                            string nameWithoutExt = Path.GetFileNameWithoutExtension(safeName);
+                            string ext = Path.GetExtension(safeName);
+                            string uniqueFileName = $"{nameWithoutExt}_{counter}{ext}";
+                            destPath = Path.Combine(outputFolder, uniqueFileName);
+                            counter++;
+                        }
+                        // The actual file data is in the FileContents stream
+                        string fileContentsFormat = i == 0 ? "FileContents" : $"FileContents{i}";
+                        if (data.GetDataPresent(fileContentsFormat))
+                        {
+                            using (var fileStream = (MemoryStream)data.GetData(fileContentsFormat))
+                            using (var outStream = File.Create(destPath))
+                            {
+                                fileStream.WriteTo(outStream);
+                            }
+                            result.ExtractedFiles.Add(destPath);
+                            System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Saved attachment: {destPath}");
+                        }
+                        else
+                        {
+                            result.SkippedFiles.Add(originalName);
+                            System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Skipped (no file data): {originalName}");
+                        }
+                    }
+                }
+                else
+                {
+                    result.SkippedFiles.Add("No FileGroupDescriptorW present");
                 }
             }
-            if (fileNames == null || fileNames.Length == 0)
-                return result;
-            var usedFilenames = new HashSet<string>();
-            for (int i = 0; i < fileNames.Length; i++)
+            catch (Exception ex)
             {
-                string fileName = fileNames[i];
-                if (!fileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-                    fileName += ".msg";
-                fileName = sanitizeFileName(fileName);
-                string destPath = Path.Combine(outputFolder, fileName);
-                int counter = 1;
-                while (File.Exists(destPath) || usedFilenames.Contains(Path.GetFileName(destPath)))
-                {
-                    string nameWithoutExt = Path.GetFileNameWithoutExtension(fileName);
-                    string extension = Path.GetExtension(fileName);
-                    string uniqueFileName = $"{nameWithoutExt}_{counter}{extension}";
-                    destPath = Path.Combine(outputFolder, uniqueFileName);
-                    counter++;
-                }
-                usedFilenames.Add(Path.GetFileName(destPath));
-                bool success = false;
-                // Try indexed format first for multiple files
-                if (fileNames.Length > 1)
-                {
-                    string indexedFormat = $"FileContents{i}";
-                    if (data.GetDataPresent(indexedFormat))
-                    {
-                        try
-                        {
-                            using (var fileStream = (MemoryStream)data.GetData(indexedFormat))
-                            {
-                                if (fileStream != null && fileStream.Length > 0)
-                                {
-                                    using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
-                                    {
-                                        fileStream.Position = 0;
-                                        fileStream.WriteTo(fs);
-                                    }
-                                    result.ExtractedFiles.Add(destPath);
-                                    success = true;
-                                }
-                            }
-                        }
-                        catch { }
-                    }
-                }
-                // Try non-indexed format as fallback
-                if (!success && data.GetDataPresent("FileContents"))
-                {
-                    try
-                    {
-                        using (var fileStream = (MemoryStream)data.GetData("FileContents"))
-                        {
-                            if (fileStream != null && fileStream.Length > 0)
-                            {
-                                using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
-                                {
-                                    fileStream.Position = 0;
-                                    fileStream.WriteTo(fs);
-                                }
-                                result.ExtractedFiles.Add(destPath);
-                                success = true;
-                            }
-                        }
-                    }
-                    catch { }
-                }
-                // Try alternate Outlook formats (rare)
-                if (!success)
-                {
-                    string[] altFormats = { "RenPrivateItem", "Attachment" };
-                    foreach (var alt in altFormats)
-                    {
-                        if (data.GetDataPresent(alt))
-                        {
-                            try
-                            {
-                                using (var fileStream = (MemoryStream)data.GetData(alt))
-                                using (var fs = new FileStream(destPath, FileMode.Create, FileAccess.Write))
-                                {
-                                    fileStream.WriteTo(fs);
-                                }
-                                result.ExtractedFiles.Add(destPath);
-                                success = true;
-                                break;
-                            }
-                            catch { }
-                        }
-                    }
-                }
-                // Try FileDrop as a last resort
-                if (!success && data.GetDataPresent(DataFormats.FileDrop))
-                {
-                    try
-                    {
-                        string[] dropped = (string[])data.GetData(DataFormats.FileDrop);
-                        foreach (var path in dropped)
-                        {
-                            if (File.Exists(path) && Path.GetExtension(path).ToLowerInvariant() == ".msg")
-                            {
-                                File.Copy(path, destPath, true);
-                                result.ExtractedFiles.Add(destPath);
-                                success = true;
-                                break;
-                            }
-                        }
-                    }
-                    catch { }
-                }
-                // Try Outlook Interop fallback
-                if (!success)
-                {
-                    try
-                    {
-                        var outlookApp = System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application") as Microsoft.Office.Interop.Outlook.Application;
-                        if (outlookApp != null)
-                        {
-                            var explorer = outlookApp.ActiveExplorer();
-                            if (explorer != null && explorer.Selection != null && explorer.Selection.Count > 0)
-                            {
-                                int selectionIndex = Math.Min(i + 1, explorer.Selection.Count);
-                                var mailItem = explorer.Selection[selectionIndex] as Microsoft.Office.Interop.Outlook.MailItem;
-                                if (mailItem != null)
-                                {
-                                    string safeSubject = sanitizeFileName(mailItem.Subject ?? "untitled");
-                                    string interopFileName = safeSubject;
-                                    if (!interopFileName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-                                        interopFileName += ".msg";
-                                    string interopDestPath = Path.Combine(outputFolder, interopFileName);
-                                    int interopCounter = 1;
-                                    while (File.Exists(interopDestPath) || usedFilenames.Contains(Path.GetFileName(interopDestPath)))
-                                    {
-                                        string nameWithoutExt = Path.GetFileNameWithoutExtension(interopFileName);
-                                        string extension = Path.GetExtension(interopFileName);
-                                        string uniqueFileName = $"{nameWithoutExt}_{interopCounter}{extension}";
-                                        interopDestPath = Path.Combine(outputFolder, uniqueFileName);
-                                        interopCounter++;
-                                    }
-                                    usedFilenames.Add(Path.GetFileName(interopDestPath));
-                                    mailItem.SaveAs(interopDestPath, Microsoft.Office.Interop.Outlook.OlSaveAsType.olMSG);
-                                    result.ExtractedFiles.Add(interopDestPath);
-                                    success = true;
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                }
-                if (!success)
-                {
-                    result.SkippedFiles.Add(fileName);
-                }
+                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Exception extracting attachment: {ex.Message}");
+                result.SkippedFiles.Add("Attachment could not be extracted: " + ex.Message);
             }
             return result;
         }

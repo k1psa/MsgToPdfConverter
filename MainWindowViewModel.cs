@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
 using System.Collections.Generic;
+using System.Linq;
 using MsgToPdfConverter.Services;
 using MsgToPdfConverter.Utils;
 
@@ -18,7 +19,7 @@ namespace MsgToPdfConverter
         private string _selectedOutputFolder;
         private bool _isConverting;
         private bool _cancellationRequested;
-        private bool _deleteMsgAfterConversion;
+        private bool _deleteFilesAfterConversion;
         private bool _isPinned;
         private int _progressValue;
         private int _progressMax;
@@ -65,7 +66,7 @@ namespace MsgToPdfConverter
         public string SelectedOutputFolder { get => _selectedOutputFolder; set { _selectedOutputFolder = value; OnPropertyChanged(nameof(SelectedOutputFolder)); } }
         public bool IsConverting { get => _isConverting; set { _isConverting = value; OnPropertyChanged(nameof(IsConverting)); (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged(); } }
         public bool CancellationRequested { get => _cancellationRequested; set { _cancellationRequested = value; OnPropertyChanged(nameof(CancellationRequested)); } }
-        public bool DeleteMsgAfterConversion { get => _deleteMsgAfterConversion; set { _deleteMsgAfterConversion = value; OnPropertyChanged(nameof(DeleteMsgAfterConversion)); } }
+        public bool DeleteFilesAfterConversion { get => _deleteFilesAfterConversion; set { _deleteFilesAfterConversion = value; OnPropertyChanged(nameof(DeleteFilesAfterConversion)); } }
         public bool IsPinned { get => _isPinned; set { _isPinned = value; OnPropertyChanged(nameof(IsPinned)); } }
         public int ProgressValue { get => _progressValue; set { _progressValue = value; OnPropertyChanged(nameof(ProgressValue)); } }
         public int ProgressMax { get => _progressMax; set { _progressMax = value; OnPropertyChanged(nameof(ProgressMax)); } }
@@ -164,7 +165,7 @@ namespace MsgToPdfConverter
         {
             if (IsConverting) return;
             Console.WriteLine($"Starting conversion for {SelectedFiles.Count} files. Output folder: {SelectedOutputFolder}");
-            Console.WriteLine($"[DEBUG] Passing DeleteMsgAfterConversion: {DeleteMsgAfterConversion}");
+            Console.WriteLine($"[DEBUG] Passing DeleteMsgAfterConversion: {DeleteFilesAfterConversion}");
             IsConverting = true;
             ProgressValue = 0;
             ProgressMax = SelectedFiles.Count;
@@ -175,12 +176,13 @@ namespace MsgToPdfConverter
                 List<string> generatedPdfs = new List<string>();
                 var result = await Task.Run(() =>
                 {
-                    var res = conversionService.ConvertMsgFilesWithAttachments(
+                    var res = conversionService.ConvertFilesWithAttachments(
                         new System.Collections.Generic.List<string>(SelectedFiles),
                         SelectedOutputFolder,
                         AppendAttachments,
                         false, // always ignore extractOriginalOnly
-                        DeleteMsgAfterConversion,
+                        DeleteFilesAfterConversion,
+                        CombineAllPdfs, // <--- pass combineAllPdfs
                         _emailService,
                         _attachmentService,
                         (processed, total, progress, statusText) =>
@@ -199,9 +201,25 @@ namespace MsgToPdfConverter
                 if (CombineAllPdfs && !string.IsNullOrEmpty(CombinedPdfOutputPath) && generatedPdfs.Count > 0)
                 {
                     PdfAppendTest.AppendPdfs(generatedPdfs, CombinedPdfOutputPath);
+                    // Always delete intermediate PDFs after combining
                     foreach (var pdf in generatedPdfs)
                     {
-                        try { if (File.Exists(pdf)) File.Delete(pdf); } catch { }
+                        bool isOriginal = SelectedFiles.Any(f => string.Equals(f, pdf, StringComparison.OrdinalIgnoreCase));
+                        if (!isOriginal)
+                        {
+                            try { if (File.Exists(pdf)) File.Delete(pdf); } catch { }
+                        }
+                    }
+                    // Optionally delete original source files if requested
+                    if (DeleteFilesAfterConversion)
+                    {
+                        foreach (var src in SelectedFiles)
+                        {
+                            if (!string.Equals(src, CombinedPdfOutputPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                try { if (File.Exists(src)) FileService.MoveFileToRecycleBin(src); } catch { }
+                            }
+                        }
                     }
                     statusMessage = $"{generatedPdfs.Count} file(s) have been combined into {System.IO.Path.GetFileName(CombinedPdfOutputPath)}";
                 }
@@ -237,14 +255,14 @@ namespace MsgToPdfConverter
 
         private void OpenOptions(object parameter)
         {
-            var optionsWindow = new OptionsWindow(DeleteMsgAfterConversion, Properties.Settings.Default.CloseButtonBehavior ?? "Ask")
+            var optionsWindow = new OptionsWindow(DeleteFilesAfterConversion, Properties.Settings.Default.CloseButtonBehavior ?? "Ask")
             {
                 Owner = Application.Current.MainWindow
             };
             if (optionsWindow.ShowDialog() == true)
             {
-                DeleteMsgAfterConversion = optionsWindow.DeleteMsgAfterConversion;
-                Console.WriteLine($"[DEBUG] DeleteMsgAfterConversion set to: {DeleteMsgAfterConversion}");
+                DeleteFilesAfterConversion = optionsWindow.DeleteFilesAfterConversion;
+                Console.WriteLine($"[DEBUG] DeleteFilesAfterConversion set to: {DeleteFilesAfterConversion}");
             }
         }
 
@@ -272,9 +290,22 @@ namespace MsgToPdfConverter
             }
         }
 
+        // Move a file in the SelectedFiles collection from oldIndex to newIndex
+        public void MoveFile(int oldIndex, int newIndex)
+        {
+            if (oldIndex < 0 || newIndex < 0 || oldIndex == newIndex || oldIndex >= _selectedFiles.Count || newIndex >= _selectedFiles.Count)
+                return;
+            var item = _selectedFiles[oldIndex];
+            _selectedFiles.RemoveAt(oldIndex);
+            _selectedFiles.Insert(newIndex, item);
+        }
+
         // Drag-and-drop support for ListBox
         public void HandleDrop(IDataObject data)
         {
+            Console.WriteLine("[DEBUG] HandleDrop called!");
+            Console.WriteLine($"[DEBUG] Available data formats: {string.Join(", ", data.GetFormats())}");
+            
             // 1. Standard file/folder drop
             if (data.GetDataPresent(DataFormats.FileDrop))
             {
@@ -297,58 +328,108 @@ namespace MsgToPdfConverter
                 return;
             }
 
-            // 2. Outlook email drag-and-drop support
+            // 2. Outlook drag-and-drop: distinguish between attachment and email
             if (data.GetDataPresent("FileGroupDescriptorW") || data.GetDataPresent("FileGroupDescriptor"))
             {
+                Console.WriteLine("[DEBUG] Outlook drag-and-drop detected!");
                 try
                 {
-                    string outputFolder = !string.IsNullOrEmpty(SelectedOutputFolder)
-                        ? SelectedOutputFolder
-                        : null;
-                    var mainWindow = Application.Current.MainWindow;
-                    if (string.IsNullOrEmpty(outputFolder))
+                    // Try to get the filename from the drop (for attachments)
+                    string[] formats = data.GetFormats();
+                    bool isAttachment = false;
+                    string attachmentName = null;
+                    if (data.GetDataPresent("FileGroupDescriptorW"))
                     {
-                        if (IsPinned && mainWindow != null) mainWindow.Topmost = false;
-                        outputFolder = FileDialogHelper.OpenFolderDialog();
-                        if (IsPinned && mainWindow != null) mainWindow.Topmost = true;
+                        // Try to extract the filename from the FileGroupDescriptorW stream
+                        var stream = (System.IO.MemoryStream)data.GetData("FileGroupDescriptorW");
+                        if (stream != null)
+                        {
+                            byte[] fileGroupDescriptor = new byte[stream.Length];
+                            stream.Read(fileGroupDescriptor, 0, fileGroupDescriptor.Length);
+                            // The filename is a Unicode string starting at offset 76
+                            int nameStart = 76;
+                            int nameLength = fileGroupDescriptor.Length - nameStart;
+                            string name = System.Text.Encoding.Unicode.GetString(fileGroupDescriptor, nameStart, nameLength);
+                            int nullIndex = name.IndexOf('\0');
+                            if (nullIndex > 0)
+                                name = name.Substring(0, nullIndex);
+                            attachmentName = name;
+                            // If the filename is not .msg, treat as attachment
+                            if (!string.IsNullOrEmpty(name) && !name.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                                isAttachment = true;
+                        }
                     }
-                    if (string.IsNullOrEmpty(outputFolder))
-                        return;
-
-                    var result = _outlookImportService.ExtractMsgFilesFromDragDrop(
-                        data,
-                        outputFolder,
-                        FileService.SanitizeFileName);
-
-                    var updated = _fileListService.AddFiles(new System.Collections.Generic.List<string>(_selectedFiles), result.ExtractedFiles);
-                    _selectedFiles.Clear();
-                    foreach (var file in updated)
-                        _selectedFiles.Add(file);
-
-                    if (result.SkippedFiles.Count > 0)
+                    if (isAttachment && !string.IsNullOrEmpty(attachmentName))
                     {
-                        MessageBox.Show(
-                            $"Some emails could not be added due to missing data from Outlook.\n\nPossible reasons:\n- The email is protected or encrypted\n- Outlook security settings\n- Outlook version limitations\n- The email is a meeting request or special item\n\nTry dragging the email(s) to a folder first, then add the .msg file.\n\nSkipped:\n{string.Join("\n", result.SkippedFiles)}",
-                            "Outlook Drag-and-Drop",
-                            MessageBoxButton.OK,
-                            MessageBoxImage.Warning);
+                        Console.WriteLine($"[DEBUG] Detected Outlook attachment drop: {attachmentName}");
+                        string outputFolder = !string.IsNullOrEmpty(SelectedOutputFolder) ? SelectedOutputFolder : null;
+                        var mainWindow = Application.Current.MainWindow;
+                        if (string.IsNullOrEmpty(outputFolder))
+                        {
+                            if (IsPinned && mainWindow != null) mainWindow.Topmost = false;
+                            outputFolder = FileDialogHelper.OpenFolderDialog();
+                            if (IsPinned && mainWindow != null) mainWindow.Topmost = true;
+                        }
+                        if (string.IsNullOrEmpty(outputFolder))
+                            return;
+                        // Save the attachment file
+                        var result = _outlookImportService.ExtractAttachmentsFromDragDrop(data, outputFolder, FileService.SanitizeFileName);
+                        var updated = _fileListService.AddFiles(new System.Collections.Generic.List<string>(_selectedFiles), result.ExtractedFiles);
+                        _selectedFiles.Clear();
+                        foreach (var file in updated)
+                            _selectedFiles.Add(file);
+                        if (result.ExtractedFiles.Count > 0)
+                        {
+                            Console.WriteLine($"[DEBUG] Successfully added {result.ExtractedFiles.Count} attachment(s) to the list:");
+                            foreach (var file in result.ExtractedFiles)
+                                Console.WriteLine($"[DEBUG] - {Path.GetFileName(file)}");
+                        }
+                        if (result.SkippedFiles.Count > 0)
+                        {
+                            Console.WriteLine($"[DEBUG] Skipped files: {string.Join(", ", result.SkippedFiles)}");
+                        }
+                        return;
+                    }
+                    // Otherwise, treat as email
+                    Console.WriteLine("[DEBUG] Detected Outlook email drop (saving as .msg)");
+                    string outputFolderEmail = !string.IsNullOrEmpty(SelectedOutputFolder) ? SelectedOutputFolder : null;
+                    var mainWindowEmail = Application.Current.MainWindow;
+                    if (string.IsNullOrEmpty(outputFolderEmail))
+                    {
+                        if (IsPinned && mainWindowEmail != null) mainWindowEmail.Topmost = false;
+                        outputFolderEmail = FileDialogHelper.OpenFolderDialog();
+                        if (IsPinned && mainWindowEmail != null) mainWindowEmail.Topmost = true;
+                    }
+                    if (string.IsNullOrEmpty(outputFolderEmail))
+                        return;
+                    var resultEmail = _outlookImportService.ExtractMsgFilesFromDragDrop(
+                        data,
+                        outputFolderEmail,
+                        FileService.SanitizeFileName);
+                    var updatedEmail = _fileListService.AddFiles(new System.Collections.Generic.List<string>(_selectedFiles), resultEmail.ExtractedFiles);
+                    _selectedFiles.Clear();
+                    foreach (var file in updatedEmail)
+                        _selectedFiles.Add(file);
+                    if (resultEmail.ExtractedFiles.Count > 0)
+                    {
+                        Console.WriteLine($"[DEBUG] Successfully added {resultEmail.ExtractedFiles.Count} email(s) to the list:");
+                        foreach (var file in resultEmail.ExtractedFiles)
+                            Console.WriteLine($"[DEBUG] - {Path.GetFileName(file)}");
+                    }
+                    if (resultEmail.SkippedFiles.Count > 0)
+                    {
+                        Console.WriteLine($"[DEBUG] Skipped files: {string.Join(", ", resultEmail.SkippedFiles)}");
                     }
                 }
                 catch (Exception ex)
                 {
-                    MessageBox.Show($"Error processing Outlook email drop: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                    Console.WriteLine($"[DEBUG] Error processing Outlook drop: {ex.Message}");
                 }
                 return;
             }
 
             // 3. If all else fails, inform the user
-            MessageBox.Show(
-                "Could not extract email from Outlook drag-and-drop.\n\n" +
-                "This may be due to Outlook version or security settings.\n" +
-                "Try dragging the email to a folder first, then add the .msg file.",
-                "Outlook Drag-and-Drop Not Supported",
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
+            Console.WriteLine("[DEBUG] Could not extract email or attachment from Outlook drag-and-drop.");
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

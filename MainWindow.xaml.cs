@@ -1,5 +1,6 @@
 using System;
 using System.Windows;
+using System.Windows.Media;
 
 namespace MsgToPdfConverter
 {
@@ -55,9 +56,59 @@ namespace MsgToPdfConverter
         // Drag-and-drop event handlers delegate to ViewModel
         private void FilesListBox_Drop(object sender, DragEventArgs e)
         {
-            Console.WriteLine("FilesListBox_Drop event triggered");
-            _viewModel.HandleDrop(e.Data);
+            Console.WriteLine("[DEBUG] FilesListBox_Drop event triggered");
+            
+            var listBox = sender as System.Windows.Controls.ListBox;
+            var droppedData = e.Data.GetData(typeof(string)) as string;
+            var target = GetObjectDataFromPoint(listBox, e.GetPosition(listBox)) as string;
+            
+            // Check if this is an external drop (files, folders, or Outlook emails)
+            bool isExternalDrop = e.Data.GetDataPresent(DataFormats.FileDrop) ||
+                                  e.Data.GetDataPresent("FileGroupDescriptorW") ||
+                                  e.Data.GetDataPresent("FileGroupDescriptor");
+            
+            if (isExternalDrop)
+            {
+                Console.WriteLine("[DEBUG] External drop detected, calling ViewModel.HandleDrop");
+                _viewModel.HandleDrop(e.Data);
+                return;
+            }
+            
+            // Handle internal reordering only if it's not an external drop
+            if (droppedData != null && target != null && droppedData != target)
+            {
+                int oldIndex = listBox.Items.IndexOf(droppedData);
+                int newIndex = listBox.Items.IndexOf(target);
+                _viewModel.MoveFile(oldIndex, newIndex);
+                listBox.SelectedItem = droppedData;
+            }
+            else if (droppedData != null && target == null)
+            {
+                // Dropped in empty space: move to end
+                int oldIndex = listBox.Items.IndexOf(droppedData);
+                int newIndex = listBox.Items.Count - 1;
+                if (oldIndex != newIndex)
+                {
+                    _viewModel.MoveFile(oldIndex, newIndex);
+                    listBox.SelectedItem = droppedData;
+                }
+            }
         }
+
+        private object GetObjectDataFromPoint(System.Windows.Controls.ListBox source, Point point)
+        {
+            var element = source.InputHitTest(point) as UIElement;
+            while (element != null)
+            {
+                if (element is System.Windows.Controls.ListBoxItem)
+                {
+                    return ((System.Windows.Controls.ListBoxItem)element).DataContext;
+                }
+                element = VisualTreeHelper.GetParent(element) as UIElement;
+            }
+            return null;
+        }
+
         private void FilesListBox_DragEnter(object sender, DragEventArgs e)
         {
             Console.WriteLine("FilesListBox_DragEnter event triggered");
@@ -109,7 +160,8 @@ namespace MsgToPdfConverter
             {
                 e.Cancel = true;
                 this.Hide();
-                _trayIcon.Visible = true;
+                if (_trayIcon != null)
+                    _trayIcon.Visible = true;
                 return;
             }
             else if (behavior == "Ask")
@@ -121,7 +173,8 @@ namespace MsgToPdfConverter
                     Properties.Settings.Default.Save();
                     e.Cancel = true;
                     this.Hide();
-                    _trayIcon.Visible = true;
+                    if (_trayIcon != null)
+                        _trayIcon.Visible = true;
                     return;
                 }
                 else if (result == MessageBoxResult.No)
@@ -136,8 +189,16 @@ namespace MsgToPdfConverter
                     return;
                 }
             }
-            _trayIcon.Visible = false;
-            _trayIcon.Dispose();
+            if (_trayIcon != null)
+            {
+                try
+                {
+                    _trayIcon.Visible = false;
+                    _trayIcon.Dispose();
+                }
+                catch { }
+                _trayIcon = null;
+            }
             base.OnClosing(e);
         }
 
@@ -155,9 +216,18 @@ namespace MsgToPdfConverter
         {
             this.Dispatcher.Invoke(() =>
             {
-                _trayIcon.Visible = false;
-                _trayIcon.Dispose();
+                if (_trayIcon != null)
+                {
+                    try
+                    {
+                        _trayIcon.Visible = false;
+                        _trayIcon.Dispose();
+                    }
+                    catch { }
+                    _trayIcon = null;
+                }
                 this.Close();
+                Application.Current.Shutdown();
             });
         }
 
@@ -174,19 +244,38 @@ namespace MsgToPdfConverter
         private void OpenOptionsWindow()
         {
             // Load current settings
-            bool deleteMsg = Properties.Settings.Default["DeleteMsgAfterConversion"] is bool d ? d : false;
+            bool deleteFiles = Properties.Settings.Default["DeleteMsgAfterConversion"] is bool d ? d : false;
             string closeBehavior = Properties.Settings.Default.CloseButtonBehavior ?? "Ask";
-            var options = new OptionsWindow(deleteMsg, closeBehavior);
+            var options = new OptionsWindow(deleteFiles, closeBehavior);
             options.Owner = this;
             if (options.ShowDialog() == true)
             {
-                Properties.Settings.Default["DeleteMsgAfterConversion"] = options.DeleteMsgAfterConversion;
+                Properties.Settings.Default["DeleteMsgAfterConversion"] = options.DeleteFilesAfterConversion;
                 Properties.Settings.Default.CloseButtonBehavior = options.CloseButtonBehavior;
                 Properties.Settings.Default.Save();
             }
         }
 
-        // Example: Add a menu item or button to call OpenOptionsWindow()
-        // You can call OpenOptionsWindow() from your main menu or settings button.
+        // For drag-and-drop reordering
+        private Point _dragStartPoint;
+        private void FilesListBox_PreviewMouseLeftButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+        {
+            _dragStartPoint = e.GetPosition(null);
+        }
+
+        private void FilesListBox_PreviewMouseMove(object sender, System.Windows.Input.MouseEventArgs e)
+        {
+            if (e.LeftButton == System.Windows.Input.MouseButtonState.Pressed)
+            {
+                var pos = e.GetPosition(null);
+                if (Math.Abs(pos.X - _dragStartPoint.X) > SystemParameters.MinimumHorizontalDragDistance ||
+                    Math.Abs(pos.Y - _dragStartPoint.Y) > SystemParameters.MinimumVerticalDragDistance)
+                {
+                    var listBox = sender as System.Windows.Controls.ListBox;
+                    if (listBox?.SelectedItem == null) return;
+                    DragDrop.DoDragDrop(listBox, listBox.SelectedItem, DragDropEffects.Move);
+                }
+            }
+        }
     }
 }

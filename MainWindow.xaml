@@ -31,13 +31,14 @@
         </Grid.RowDefinitions>
         <TextBlock FontSize="16"
                    FontWeight="Bold"
-                   Text="Select .msg Files or Folders to Convert to PDF"
+                   Text="Select files or folders to convert to PDF"
                    Margin="0,0,0,10"
                    Grid.Row="0"/>
+
         <StackPanel Orientation="Horizontal"
                     Grid.Row="1"
                     Margin="0,0,0,10">
-            <Button Content="Add .msg Files or Folders"
+            <Button Content="Add Files or Folders"
                     Command="{Binding SelectFilesCommand}"
                     Width="200"
                     Margin="0,0,10,0"/>
@@ -63,7 +64,9 @@
                  KeyDown="FilesListBox_KeyDown"
                  Drop="FilesListBox_Drop"
                  DragEnter="FilesListBox_DragEnter"
-                 DragOver="FilesListBox_DragOver">
+                 DragOver="FilesListBox_DragOver"
+                 PreviewMouseLeftButtonDown="FilesListBox_PreviewMouseLeftButtonDown"
+                 PreviewMouseMove="FilesListBox_PreviewMouseMove">
             <ListBox.Style>
                 <Style TargetType="ListBox">
                     <Style.Triggers>
@@ -75,12 +78,18 @@
                                         <Border Background="{TemplateBinding Background}"
                                                 BorderBrush="{TemplateBinding BorderBrush}"
                                                 BorderThickness="{TemplateBinding BorderThickness}">
-                                            <TextBlock Text="Drop .msg files or folders here, or use the button above"
-                                                       Foreground="Gray"
-                                                       FontStyle="Italic"
-                                                       HorizontalAlignment="Center"
-                                                       VerticalAlignment="Center"
-                                                       Margin="10"/>
+                                            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Margin="10">
+                                                <TextBlock Text="Drop compatible files or folders here, or use the button above"
+                                                           Foreground="Gray"
+                                                           FontStyle="Italic"
+                                                           HorizontalAlignment="Center"
+                                                           Margin="0,0,0,2"/>
+                                                <TextBlock Text="(supports: .msg, .pdf, .doc, .docx, .xls, .xlsx, .zip, .7z, .jpg, .jpeg, .png, .bmp, .gif)"
+                                                           Foreground="Gray"
+                                                           FontStyle="Italic"
+                                                           FontSize="11"
+                                                           HorizontalAlignment="Center"/>
+                                            </StackPanel>
                                         </Border>
                                     </ControlTemplate>
                                 </Setter.Value>
@@ -91,17 +100,17 @@
             </ListBox.Style>
         </ListBox>
         <StackPanel Orientation="Horizontal"
-                    Grid.Row="4"
+                    Grid.Row="5"
                     Margin="0,0,0,10">
             <CheckBox Content="Append attachments as PDF at the end"
                       IsChecked="{Binding AppendAttachments}"
                       Margin="0,0,10,0"/>
-            <CheckBox Content="Combine all .msg into one PDF file"
+            <CheckBox Content="Combine all files into a single PDF file"
                       IsChecked="{Binding CombineAllPdfs}"
                       Margin="0,0,0,0"/>
         </StackPanel>
         <StackPanel Orientation="Horizontal"
-                    Grid.Row="7"
+                    Grid.Row="6"
                     Margin="0,0,0,10">
             <Button Content="Select Output Folder"
                     Command="{Binding SelectOutputFolderCommand}"
@@ -111,11 +120,11 @@
                     Command="{Binding ClearOutputFolderCommand}"
                     Width="50"
                     Margin="0,0,10,0"/>
-            <TextBlock Text="{Binding SelectedOutputFolder, TargetNullValue=(Default: Same as .msg file)}"
+            <TextBlock Text="{Binding SelectedOutputFolder, TargetNullValue=(Default: Same as file)}"
                        VerticalAlignment="Center"/>
         </StackPanel>
         <StackPanel Orientation="Vertical"
-                    Grid.Row="8"
+                    Grid.Row="7"
                     Margin="0,0,0,10">
             <StackPanel Orientation="Horizontal">
                 <Button Content="Convert to PDF"
@@ -140,7 +149,7 @@
                      Maximum="{Binding ProgressMax}"
                      Value="{Binding ProgressValue}"
                      Visibility="{Binding IsConverting, Converter={StaticResource BoolToVisibilityConverter}}"
-                     Grid.Row="10"/>
+                     Grid.Row="9"/>
         <Button Content="📌"
                 VerticalAlignment="Bottom"
                 HorizontalAlignment="Right"

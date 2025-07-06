@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.WindowsDesktop">
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net48</TargetFramework>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <PackageReference Include="DinkToPdf" Version="1.0.8" />
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.3.0" />
     <PackageReference Include="Microsoft.Office.Interop.Excel" Version="15.0.4795.1001" />
     <PackageReference Include="Microsoft.Office.Interop.Word" Version="15.0.4797.1004" />
     <PackageReference Include="Microsoft.VisualBasic" Version="10.3.0" />
@@ -31,6 +32,7 @@
     <PackageReference Include="Microsoft.Office.Interop.Outlook" Version="15.0.4797.1003" />
     <PackageReference Include="SharpCompress" Version="0.40.0" />
     <PackageReference Include="System.Drawing.Common" Version="6.0.0" />
+    <!-- Removed COM reference for Microsoft.Office.Core (office.dll) -->
     <None Update="PdfAppendTestInput.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

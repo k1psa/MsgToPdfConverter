@@ -11,8 +11,21 @@ namespace MsgToPdfConverter
         [STAThread]
         public static void Main(string[] args)
         {
+            // Validation test mode: test page ordering logic
+            if (args != null && args.Length >= 1 && args[0] == "--validate")
+            {
+                ValidationTest.TestPageOrderingLogic();
+                return;
+            }
+            // Test mode: test embedded extraction
+            else if (args != null && args.Length >= 1 && args[0] == "--test")
+            {
+                string testFile = args.Length > 1 ? args[1] : "a.docx";
+                TestExtraction.TestEmbeddedExtraction(testFile);
+                return;
+            }
             // Worker mode: do not start WPF
-            if (args != null && args.Length == 3 && args[0] == "--html2pdf")
+            else if (args != null && args.Length == 3 && args[0] == "--html2pdf")
             {
                 string htmlPath = args[1];
                 string pdfPath = args[2];
