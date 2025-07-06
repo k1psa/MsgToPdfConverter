@@ -18,6 +18,13 @@ namespace MsgToPdfConverter.Services
     public static class PdfEmbeddedInsertionService
     {
         private static EmailConverterService _emailConverterService = new EmailConverterService();
+        // --- Add static AttachmentService for 7z/zip recursive extraction ---
+        private static AttachmentService _attachmentService = new AttachmentService(
+            (path, text, _) => PdfService.AddHeaderPdf(path, text),
+            OfficeConversionService.TryConvertOfficeToPdf,
+            PdfAppendTest.AppendPdfs,
+            _emailConverterService
+        );
 
         /// <summary>
         /// Inserts extracted embedded files into the main PDF document after the pages where they were found
@@ -306,6 +313,39 @@ namespace MsgToPdfConverter.Services
                     {
                         Console.WriteLine($"[PDF-INSERT] Error processing ZIP {obj.FilePath}: {zipEx.Message}");
                         currentOutputPage = InsertErrorPlaceholder(obj.FilePath, outputPdf, currentOutputPage, zipEx.Message);
+                    }
+                    return currentOutputPage;
+                }
+                else if (obj.FilePath.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
+                {
+                    // --- 7Z HANDLING ---
+                    Console.WriteLine($"[PDF-INSERT] *** 7Z PROCESSING START *** Extracting and inserting 7Z: {Path.GetFileName(obj.FilePath)} after page {currentOutputPage}");
+                    try
+                    {
+                        string tempDir = Path.GetTempPath();
+                        var allTempFiles = new List<string>();
+                        string headerText = $"Extracted from {Path.GetFileName(obj.FilePath)}";
+                        var parentChain = new List<string>();
+                        string currentItem = Path.GetFileName(obj.FilePath);
+                        // Recursively process 7z and get the resulting PDF (may be a merged PDF of all contents)
+                        string resultPdf = _attachmentService.Process7zAttachmentWithHierarchy(
+                            obj.FilePath, tempDir, headerText, allTempFiles, parentChain, currentItem, false);
+                        if (!string.IsNullOrEmpty(resultPdf) && File.Exists(resultPdf))
+                        {
+                            currentOutputPage = InsertPdfFile_NoSeparator(resultPdf, outputPdf, currentOutputPage, "7Z-PDF");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[PDF-INSERT] 7Z processing failed or returned no PDF, adding placeholder for {obj.FilePath}");
+                            currentOutputPage = InsertPlaceholderForFile(obj.FilePath, outputPdf, currentOutputPage, "7Z");
+                        }
+                        // Cleanup temp files
+                        foreach (var f in allTempFiles) { try { File.Delete(f); } catch { } }
+                    }
+                    catch (Exception sevenZEx)
+                    {
+                        Console.WriteLine($"[PDF-INSERT] Error processing 7Z {obj.FilePath}: {sevenZEx.Message}");
+                        currentOutputPage = InsertErrorPlaceholder(obj.FilePath, outputPdf, currentOutputPage, sevenZEx.Message);
                     }
                     return currentOutputPage;
                 }

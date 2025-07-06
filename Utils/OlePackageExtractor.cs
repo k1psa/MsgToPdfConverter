@@ -22,8 +22,9 @@ namespace MsgToPdfConverter.Utils
     public static class OlePackageExtractor
     {
         /// <summary>
-        /// Extracts the real embedded file (e.g. PDF, ZIP, 7Z, MSG, etc.) from an OLEObject .bin (as found in .docx embeddings).
-        /// Handles signature trimming and edge cases for ZIP, 7Z, and MSG files, and attempts to extract the correct file data for insertion into the output PDF.
+        /// Extracts the real embedded file (e.g. PDF, ZIP, 7Z, MSG, XLS, XLSX, etc.) from an OLEObject .bin (as found in .docx embeddings).
+        /// Handles signature trimming and edge cases for ZIP, 7Z, MSG, XLS, and XLSX files, and attempts to extract the correct file data for insertion into the output PDF.
+        /// For Excel files: trims to OLE signature for .xls and ZIP signature for .xlsx if needed.
         /// </summary>
         /// <param name="oleObjectBytes">The bytes of the OLEObject .bin</param>
         /// <returns>OlePackageInfo with file name, content type, and data, or null if not found</returns>
@@ -179,6 +180,16 @@ namespace MsgToPdfConverter.Utils
                         {
                             info.Data = TrimToOleSignature(info.Data);
                         }
+                        // --- XLS signature trimming for .xls files ---
+                        if (Path.GetExtension(info.FileName).Equals(".xls", StringComparison.OrdinalIgnoreCase))
+                        {
+                            info.Data = TrimToOleSignature(info.Data);
+                        }
+                        // --- XLSX signature trimming for .xlsx files ---
+                        if (Path.GetExtension(info.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+                        {
+                            info.Data = TrimToZipSignature(info.Data);
+                        }
                         return info;
                     }
                     catch (Exception ex)
@@ -246,6 +257,16 @@ namespace MsgToPdfConverter.Utils
                             if (ext == ".msg")
                             {
                                 fileData = TrimToOleSignature(fileData);
+                            }
+                            // --- XLS signature trimming for .xls files ---
+                            if (ext == ".xls")
+                            {
+                                fileData = TrimToOleSignature(fileData);
+                            }
+                            // --- XLSX signature trimming for .xlsx files ---
+                            if (ext == ".xlsx")
+                            {
+                                fileData = TrimToZipSignature(fileData);
                             }
                             return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = foundStreamName, EmbeddedOfficeName = officeName };
                         }

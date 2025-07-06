@@ -61,21 +61,23 @@ namespace MsgToPdfConverter.Utils
                         Console.WriteLine($"[InteropExtractor] Timeout reached, stopping extraction after {i-1} shapes");
                         break;
                     }
-                    
+                    object ish = null;
+                    object ole = null;
                     try
                     {
-                        var ish = doc.InlineShapes[i];
-                        Console.WriteLine($"[InteropExtractor] Processing InlineShape {i}/{maxShapesToProcess}: Type={ish.Type}, OLE ProgID={ish.OLEFormat?.ProgID}");
-                        if (ish.Type == WdInlineShapeType.wdInlineShapeEmbeddedOLEObject)
+                        ish = doc.InlineShapes[i];
+                        var inlineShape = ish as InlineShape;
+                        Console.WriteLine($"[InteropExtractor] Processing InlineShape {i}/{maxShapesToProcess}: Type={inlineShape?.Type}, OLE ProgID={inlineShape?.OLEFormat?.ProgID}");
+                        if (inlineShape != null && inlineShape.Type == WdInlineShapeType.wdInlineShapeEmbeddedOLEObject)
                         {
                             found++;
-                            var ole = ish.OLEFormat;
-                            string ext = GetExtensionFromProgID(ole.ProgID);
+                            ole = inlineShape.OLEFormat;
+                            string ext = GetExtensionFromProgID((ole as OLEFormat)?.ProgID);
                             string outFile = Path.Combine(outputDir, $"Embedded_{counter}{ext}");
                             counter++;
                             try
                             {
-                                if ((ole.ProgID != null && ole.ProgID.ToLowerInvariant() == "package"))
+                                if ((ole as OLEFormat)?.ProgID != null && (ole as OLEFormat).ProgID.ToLowerInvariant() == "package")
                                 {
                                     // Special handling for OLE Package: use DoVerb to activate and try to save
                                     Console.WriteLine($"[InteropExtractor] Attempting to extract OLE Package object");
@@ -83,11 +85,12 @@ namespace MsgToPdfConverter.Utils
                                     {
                                         // Try different approaches for Package objects
                                         bool saved = false;
-                                        
+
                                         // Method 1: Try to get the object and use reflection carefully
                                         try
                                         {
-                                            var obj = ole.Object;
+                                            var oleFormatObj = ole as OLEFormat;
+                                            var obj = oleFormatObj != null ? oleFormatObj.Object : null;
                                             if (obj != null)
                                             {
                                                 var type = obj.GetType();
@@ -151,20 +154,20 @@ namespace MsgToPdfConverter.Utils
                                 else
                                 {
                                     // Try to save the embedded object if possible
-                                    SaveOleObjectToFile(ole, outFile);
+                                    SaveOleObjectToFile(ole as OLEFormat, outFile);
                                 }
                                 // Try multiple robust methods to get page number
                                 int page = 0;
                                 try
                                 {
-                                    page = (int)ish.Range.get_Information(WdInformation.wdActiveEndPageNumber);
+                                    page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
                                     if (page <= 0)
                                     {
-                                        page = (int)ish.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
+                                        page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
                                     }
                                     if (page <= 0)
                                     {
-                                        var range = ish.Range;
+                                        var range = inlineShape.Range;
                                         range.Select();
                                         page = (int)range.get_Information(WdInformation.wdActiveEndPageNumber);
                                     }
@@ -174,9 +177,9 @@ namespace MsgToPdfConverter.Utils
                                     Console.WriteLine($"[InteropExtractor] Could not determine page number: {pageEx.Message}");
                                 }
                                 if (page <= 0) page = -1;
-                                results.Add(new ExtractedObjectInfo { FilePath = outFile, PageNumber = page, OleClass = ole.ProgID, DocumentOrderIndex = docOrderIndex });
+                                results.Add(new ExtractedObjectInfo { FilePath = outFile, PageNumber = page, OleClass = (ole as OLEFormat)?.ProgID, DocumentOrderIndex = docOrderIndex });
                                 docOrderIndex++;
-                                Console.WriteLine($"[InteropExtractor] Extracted: {outFile} (page {page}, ProgID={ole.ProgID}, Order={docOrderIndex-1})");
+                                Console.WriteLine($"[InteropExtractor] Extracted: {outFile} (page {page}, ProgID={(ole as OLEFormat)?.ProgID}, Order={docOrderIndex-1})");
                             }
                             catch (Exception ex)
                             {
@@ -187,6 +190,19 @@ namespace MsgToPdfConverter.Utils
                     catch (Exception ex)
                     {
                         Console.WriteLine($"[InteropExtractor] Error processing InlineShape: {ex.Message}");
+                    }
+                    finally
+                    {
+                        if (ole != null)
+                        {
+                            try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(ole); Console.WriteLine("[InteropExtractor] Released OLEFormat COM object"); } catch (Exception ex) { Console.WriteLine($"[InteropExtractor] Error releasing OLEFormat: {ex.Message}"); }
+                            ole = null;
+                        }
+                        if (ish != null)
+                        {
+                            try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(ish); Console.WriteLine("[InteropExtractor] Released InlineShape COM object"); } catch (Exception ex) { Console.WriteLine($"[InteropExtractor] Error releasing InlineShape: {ex.Message}"); }
+                            ish = null;
+                        }
                     }
                 }
                 Console.WriteLine($"[InteropExtractor] Embedded OLE InlineShapes found: {found}");
@@ -223,7 +239,7 @@ namespace MsgToPdfConverter.Utils
                             Console.WriteLine($"[InteropExtractor] Stopped processing shapes at limit {MAX_SHAPES_TO_PROCESS}");
                             break;
                         }
-                        
+                        object ole = null;
                         try
                         {
                             // Add timeout for each shape processing to prevent hanging
@@ -243,11 +259,11 @@ namespace MsgToPdfConverter.Utils
                                 
                                 if (hasOleFormat)
                                 {
-                                    var ole = shape.OLEFormat;
-                                    string ext = GetExtensionFromProgID(ole.ProgID);
+                                    ole = shape.OLEFormat;
+                                    string ext = GetExtensionFromProgID((ole as OLEFormat)?.ProgID);
                                     string outFile = Path.Combine(outputDir, $"Embedded_Floating_{counter}{ext}");
                                     counter++;
-                                    SaveOleObjectToFile(ole, outFile);
+                                    SaveOleObjectToFile(ole as OLEFormat, outFile);
                                     int page = -1;
                                     try
                                     {
@@ -258,9 +274,9 @@ namespace MsgToPdfConverter.Utils
                                         Console.WriteLine($"[InteropExtractor] Could not determine page number for floating shape: {pageEx.Message}");
                                     }
                                     if (page <= 0) page = -1;
-                                    results.Add(new ExtractedObjectInfo { FilePath = outFile, PageNumber = page, OleClass = ole.ProgID, DocumentOrderIndex = docOrderIndex });
+                                    results.Add(new ExtractedObjectInfo { FilePath = outFile, PageNumber = page, OleClass = (ole as OLEFormat)?.ProgID, DocumentOrderIndex = docOrderIndex });
                                     docOrderIndex++;
-                                    Console.WriteLine($"[InteropExtractor] Extracted floating OLE: {outFile} (page {page}, ProgID={ole.ProgID}, Order={docOrderIndex-1})");
+                                    Console.WriteLine($"[InteropExtractor] Extracted floating OLE: {outFile} (page {page}, ProgID={(ole as OLEFormat)?.ProgID}, Order={docOrderIndex-1})");
                                     floatingFound++;
                                 }
                             });
@@ -276,6 +292,15 @@ namespace MsgToPdfConverter.Utils
                         {
                             Console.WriteLine($"[InteropExtractor] Error extracting floating OLE from shape {processedShapes}: {ex.Message}");
                         }
+                        finally
+                        {
+                            if (ole != null)
+                            {
+                                try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(ole); Console.WriteLine("[InteropExtractor] Released Shape.OLEFormat COM object"); } catch (Exception ex) { Console.WriteLine($"[InteropExtractor] Error releasing Shape.OLEFormat: {ex.Message}"); }
+                                ole = null;
+                            }
+                            try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shape); Console.WriteLine("[InteropExtractor] Released Shape COM object"); } catch (Exception ex) { Console.WriteLine($"[InteropExtractor] Error releasing Shape: {ex.Message}"); }
+                        }
                     }
                 }
                 Console.WriteLine($"[InteropExtractor] Embedded OLE floating Shapes found: {floatingFound}");
@@ -287,6 +312,7 @@ namespace MsgToPdfConverter.Utils
                     try 
                     {
                         doc.Close(false);
+                        System.Runtime.InteropServices.Marshal.FinalReleaseComObject(doc);
                         doc = null;
                     }
                     catch (Exception ex)
@@ -299,6 +325,7 @@ namespace MsgToPdfConverter.Utils
                     try
                     {
                         wordApp.Quit(false);
+                        System.Runtime.InteropServices.Marshal.FinalReleaseComObject(wordApp);
                         wordApp = null;
                         // Give Word time to fully close and release file locks
                         System.Threading.Thread.Sleep(2000);
@@ -337,6 +364,48 @@ namespace MsgToPdfConverter.Utils
             // Always run OpenXML fallback for .docx files to catch Package objects
             if (docxPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
             {
+                // Check if file is locked before OpenXml fallback
+                bool fileLocked = false;
+                try
+                {
+                    using (var fs = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.None))
+                    {
+                        // File is not locked
+                        fileLocked = false;
+                    }
+                }
+                catch (IOException ex)
+                {
+                    fileLocked = true;
+                    Console.WriteLine($"[InteropExtractor] File is still locked before OpenXml fallback: {ex.Message}");
+                }
+                if (fileLocked)
+                {
+                    Console.WriteLine("[InteropExtractor] Waiting for file lock to clear before OpenXml fallback...");
+                    int retriesOpenXml = 0;
+                    while (fileLocked && retriesOpenXml < 10)
+                    {
+                        System.Threading.Thread.Sleep(500);
+                        retriesOpenXml++;
+                        try
+                        {
+                            using (var fs = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.None))
+                            {
+                                fileLocked = false;
+                                Console.WriteLine($"[InteropExtractor] File lock cleared after {retriesOpenXml} retries");
+                            }
+                        }
+                        catch (IOException)
+                        {
+                            fileLocked = true;
+                        }
+                    }
+                    if (fileLocked)
+                    {
+                        Console.WriteLine("[InteropExtractor] File is still locked after retries. OpenXml fallback may fail.");
+                    }
+                }
+
                 Console.WriteLine("[InteropExtractor] Running OpenXml fallback to extract missing objects...");
                 Console.WriteLine("[InteropExtractor] Attempting to determine document order of embedded objects via OpenXml.");
 
@@ -1173,8 +1242,9 @@ namespace MsgToPdfConverter.Utils
                 {
                     if (workbook != null)
                     {
-                        workbook.Close(false);
-                        System.Runtime.InteropServices.Marshal.ReleaseComObject(workbook);
+                        try { workbook.Close(false); } catch { }
+                        try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(workbook); } catch { }
+                        workbook = null;
                     }
                 }
                 catch (Exception ex)
@@ -1186,21 +1256,24 @@ namespace MsgToPdfConverter.Utils
                 {
                     if (excelApp != null)
                     {
-                        // Close all workbooks without saving
-                        while (excelApp.Workbooks.Count > 0)
+                        try
                         {
-                            excelApp.Workbooks[1].Close(false);
+                            // Close all workbooks without saving
+                            while (excelApp.Workbooks.Count > 0)
+                            {
+                                try { excelApp.Workbooks[1].Close(false); } catch { break; }
+                            }
+                            excelApp.Quit();
                         }
-                        
-                        excelApp.Quit();
-                        System.Runtime.InteropServices.Marshal.ReleaseComObject(excelApp);
+                        catch { }
+                        try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(excelApp); } catch { }
+                        excelApp = null;
                     }
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[InteropExtractor] Error closing Excel application: {ex.Message}");
                 }
-                
                 // Force garbage collection to help clean up COM objects
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
