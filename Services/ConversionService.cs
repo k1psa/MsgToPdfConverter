@@ -181,11 +181,27 @@ namespace MsgToPdfConverter.Services
                                 PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf);
                                 GC.Collect();
                                 GC.WaitForPendingFinalizers();
+                                // Build list of files to protect: all user-selected source files and all output files
+                                var filesToProtect = new HashSet<string>(selectedFiles.Select(f => Path.GetFullPath(f).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant()));
+                                filesToProtect.Add(Path.GetFullPath(pdfFilePath).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
+                                filesToProtect.Add(Path.GetFullPath(mergedPdf).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
+                                if (generatedPdfs != null)
+                                {
+                                    foreach (var genPdf in generatedPdfs)
+                                    {
+                                        filesToProtect.Add(Path.GetFullPath(genPdf).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
+                                    }
+                                }
+                                Console.WriteLine("[DEBUG] Protected files:");
+                                foreach (var prot in filesToProtect) Console.WriteLine($"  {prot}");
+                                // DEBUG: Print temp and protected files before cleanup
+                                AttachmentService.DebugPrintTempAndProtectedFiles(allTempFiles, filesToProtect);
                                 foreach (var f in allTempFiles)
                                 {
                                     try
                                     {
-                                        if (System.IO.File.Exists(f) && !string.Equals(f, mergedPdf, StringComparison.OrdinalIgnoreCase) && !string.Equals(f, pdfFilePath, StringComparison.OrdinalIgnoreCase))
+                                        var normF = Path.GetFullPath(f).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant();
+                                        if (System.IO.File.Exists(f) && !filesToProtect.Contains(normF))
                                         {
                                             FileService.RobustDeleteFile(f);
                                         }

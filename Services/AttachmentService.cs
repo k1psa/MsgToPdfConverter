@@ -1161,6 +1161,35 @@ namespace MsgToPdfConverter.Services
         }
 
         /// <summary>
+        /// Debug helper: Print the contents of the temp file list and files to protect before cleanup
+        /// </summary>
+        public static void DebugPrintTempAndProtectedFiles(IEnumerable<string> allTempFiles, IEnumerable<string> filesToProtect = null)
+        {
+            Console.WriteLine("[DEBUG] --- Temp file cleanup about to run ---");
+            Console.WriteLine($"[DEBUG] allTempFiles ({(allTempFiles == null ? 0 : allTempFiles.Count())}):");
+            if (allTempFiles != null)
+            {
+                foreach (var f in allTempFiles)
+                {
+                    Console.WriteLine($"[DEBUG]   TEMP: {f}");
+                }
+            }
+            if (filesToProtect != null)
+            {
+                Console.WriteLine($"[DEBUG] filesToProtect ({filesToProtect.Count()}):");
+                foreach (var f in filesToProtect)
+                {
+                    Console.WriteLine($"[DEBUG]   PROTECT: {f}");
+                }
+            }
+            else
+            {
+                Console.WriteLine("[DEBUG] filesToProtect: (none provided)");
+            }
+            Console.WriteLine("[DEBUG] --- End of temp/protected file debug ---");
+        }
+
+        /// <summary>
         /// Determines if an attachment is likely a signature image or decorative element that should be skipped
         /// </summary>
         public bool IsLikelySignatureImage(Storage.Attachment attachment)
