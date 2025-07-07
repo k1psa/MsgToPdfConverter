@@ -146,7 +146,8 @@ namespace MsgToPdfConverter.Services
                 int count = reader.ReadInt32();
                 for (int i = 0; i < count; i++)
                 {
-                    stream.Position = 4 + i * 592 + 76;
+                    // Offset changed from 76 to 72 to fix filename truncation
+                    stream.Position = 4 + i * 592 + 72;
                     var nameBytes = reader.ReadBytes(520);
                     string name = System.Text.Encoding.Unicode.GetString(nameBytes).TrimEnd('\0');
                     fileNames.Add(name);
