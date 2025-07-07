@@ -378,7 +378,15 @@ namespace MsgToPdfConverter.Services
                     // Centralized deletion logic for all file types
                     if (deleteFilesAfterConversion && conversionSucceeded && !combineAllPdfs) // <--- updated condition
                     {
-                        if (System.IO.File.Exists(filePath))
+                        bool isPdf = string.Equals(Path.GetExtension(filePath), ".pdf", StringComparison.OrdinalIgnoreCase);
+                        bool sameFolder = string.Equals(Path.GetDirectoryName(filePath)?.TrimEnd(Path.DirectorySeparatorChar),
+                                                        (selectedOutputFolder ?? Path.GetDirectoryName(filePath))?.TrimEnd(Path.DirectorySeparatorChar),
+                                                        StringComparison.OrdinalIgnoreCase);
+                        if (isPdf && sameFolder)
+                        {
+                            Console.WriteLine($"[DELETE] Skipping deletion of source PDF in output folder: {filePath}");
+                        }
+                        else if (System.IO.File.Exists(filePath))
                         {
                             Console.WriteLine($"[DELETE] Attempting to delete: {filePath}");
                             try { FileService.MoveFileToRecycleBin(filePath); } catch (Exception ex) { Console.WriteLine($"[DELETE] Failed: {ex.Message}"); }
@@ -398,7 +406,7 @@ namespace MsgToPdfConverter.Services
             Storage.Message msg = new Storage.Message(msgFilePath);
             string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
             
-            // Generate unique PDF filename to avoid conflicts when files have same base name but different extensions
+            // Generate unique PDF filename to avoid conflicts when files have the same base name but different extensions
             string uniquePdfName = GenerateUniquePdfFileName(msgFilePath, outputDir, selectedFiles);
             string baseName = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName);
             string pdfFilePath = System.IO.Path.Combine(outputDir, $"{baseName} - {datePart}.pdf");
