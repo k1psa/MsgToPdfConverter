@@ -119,7 +119,7 @@ namespace MsgToPdfConverter.Services
         /// <summary>
         /// Appends attachments as PDFs to the main email PDF
         /// </summary>
-        public static void AppendAttachmentsToPdf(string mainPdfPath, List<Storage.Attachment> attachments, SynchronizedConverter converter)
+        public static void AppendAttachmentsToPdf(string mainPdfPath, List<Storage.Attachment> attachments, SynchronizedConverter converter, bool deleteSourcePdf)
         {
             if (attachments == null || attachments.Count == 0)
                 return;
@@ -301,9 +301,18 @@ namespace MsgToPdfConverter.Services
                 string mergedMainPdf = Path.Combine(tempDir, Guid.NewGuid() + "_final_merged.pdf");
                 PdfAppendTest.AppendPdfs(tempPdfFiles, mergedMainPdf);
 
-                // Replace the original main PDF with the merged version
-                File.Delete(mainPdfPath);
-                File.Move(mergedMainPdf, mainPdfPath);
+                // Only delete/replace the original main PDF if it is a PDF and deleteSourcePdf is true
+                string ext = Path.GetExtension(mainPdfPath)?.ToLowerInvariant();
+                if (ext == ".pdf" && deleteSourcePdf)
+                {
+                    File.Delete(mainPdfPath);
+                    File.Move(mergedMainPdf, mainPdfPath);
+                }
+                else
+                {
+                    // If not deleting, just copy the merged PDF to the output location, do not delete the source
+                    File.Copy(mergedMainPdf, mainPdfPath, true);
+                }
 
                 // Clean up temp files
                 foreach (var tempFile in tempPdfFiles.Skip(1)) // Skip the first one which was the original main PDF

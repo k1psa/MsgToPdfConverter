@@ -315,12 +315,20 @@ namespace MsgToPdfConverter.Services
                             {
                                 if (System.IO.File.Exists(outputPdf))
                                     System.IO.File.Delete(outputPdf);
-                                System.IO.File.Move(finalPdf, outputPdf);
-                                Console.WriteLine($"[DEBUG] Moved {finalPdf} to {outputPdf}");
+                                if (deleteFilesAfterConversion)
+                                {
+                                    System.IO.File.Move(finalPdf, outputPdf);
+                                    Console.WriteLine($"[DEBUG] Moved {finalPdf} to {outputPdf}");
+                                }
+                                else
+                                {
+                                    System.IO.File.Copy(finalPdf, outputPdf, true);
+                                    Console.WriteLine($"[DEBUG] Copied {finalPdf} to {outputPdf}");
+                                }
                             }
                             catch (Exception moveEx)
                             {
-                                Console.WriteLine($"[ERROR] Failed to move file: {moveEx.Message}");
+                                Console.WriteLine($"[ERROR] Failed to move/copy file: {moveEx.Message}");
                                 outputPdf = finalPdf;
                             }
                         }
