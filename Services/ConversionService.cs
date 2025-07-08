@@ -262,7 +262,10 @@ namespace MsgToPdfConverter.Services
                         {
                             // Only convert the email body (no attachments)
                             updateFileProgress?.Invoke(0, 100);
-                            var result = ConvertSingleMsgFile(filePath, dir, appendAttachments, extractOriginalOnly, emailService, attachmentService, generatedPdfs, selectedFiles);
+                            
+                            // Add intermediate progress updates for better UX
+                            updateFileProgress?.Invoke(25, 100); // Loading MSG file
+                            var result = ConvertSingleMsgFileWithProgress(filePath, dir, appendAttachments, extractOriginalOnly, emailService, attachmentService, generatedPdfs, selectedFiles, updateFileProgress);
                             if (result) { 
                                 success++; 
                                 conversionSucceeded = true; 
@@ -472,6 +475,60 @@ namespace MsgToPdfConverter.Services
                 throw new Exception($"HtmlToPdfWorker failed");
             generatedPdfs?.Add(pdfFilePath);
             return true;
+        }
+
+        private bool ConvertSingleMsgFileWithProgress(string msgFilePath, string outputDir, bool appendAttachments, bool extractOriginalOnly, EmailConverterService emailService, AttachmentService attachmentService, List<string> generatedPdfs, List<string> selectedFiles, Action<int, int> updateFileProgress)
+        {
+            try
+            {
+                updateFileProgress?.Invoke(10, 100); // Starting MSG processing
+                
+                Storage.Message msg = new Storage.Message(msgFilePath);
+                updateFileProgress?.Invoke(30, 100); // MSG file loaded
+                
+                string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
+                
+                // Generate unique PDF filename to avoid conflicts when files have the same base name but different extensions
+                string uniquePdfName = GenerateUniquePdfFileName(msgFilePath, outputDir, selectedFiles);
+                string baseName = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName);
+                string pdfFilePath = System.IO.Path.Combine(outputDir, $"{baseName} - {datePart}.pdf");
+                if (System.IO.File.Exists(pdfFilePath))
+                    System.IO.File.Delete(pdfFilePath);
+                
+                updateFileProgress?.Invoke(50, 100); // Converting to HTML
+                var htmlResult = emailService.BuildEmailHtmlWithInlineImages(msg, false);
+                string htmlWithHeader = htmlResult.Html;
+                var tempHtmlPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid() + ".html");
+                System.IO.File.WriteAllText(tempHtmlPath, htmlWithHeader, System.Text.Encoding.UTF8);
+                
+                updateFileProgress?.Invoke(70, 100); // Starting PDF conversion
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
+                    Arguments = $"--html2pdf \"{tempHtmlPath}\" \"{pdfFilePath}\"",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                var proc = System.Diagnostics.Process.Start(psi);
+                
+                updateFileProgress?.Invoke(85, 100); // PDF conversion in progress
+                proc.WaitForExit();
+                System.IO.File.Delete(tempHtmlPath);
+                
+                if (proc.ExitCode != 0)
+                    throw new Exception($"HtmlToPdfWorker failed");
+                
+                updateFileProgress?.Invoke(95, 100); // PDF conversion completed
+                generatedPdfs?.Add(pdfFilePath);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in ConvertSingleMsgFileWithProgress: {ex.Message}");
+                return false;
+            }
         }
 
         /// <summary>
