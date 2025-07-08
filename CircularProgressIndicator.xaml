@@ -7,27 +7,27 @@
         <!-- Background circle -->
         <Ellipse x:Name="BackgroundCircle" 
                  Stroke="#E0E0E0" 
-                 StrokeThickness="2" 
+                 StrokeThickness="3" 
                  Fill="Transparent" 
-                 Width="14" 
-                 Height="14"
+                 Width="16" 
+                 Height="16"
                  HorizontalAlignment="Center"
                  VerticalAlignment="Center"/>
         <!-- Foreground progress arc -->
         <Path x:Name="ProgressPath" 
               Stroke="#2196F3" 
-              StrokeThickness="2" 
+              StrokeThickness="3" 
               Fill="Transparent"
-              Width="14" 
-              Height="14"
+              Width="16" 
+              Height="16"
               HorizontalAlignment="Center"
               VerticalAlignment="Center">
             <Path.Data>
                 <PathGeometry x:Name="ProgressGeometry">
-                    <PathFigure x:Name="ProgressFigure" StartPoint="7,0">
+                    <PathFigure x:Name="ProgressFigure" StartPoint="8,0">
                         <ArcSegment x:Name="ProgressArc" 
-                                    Point="7,0" 
-                                    Size="7,7" 
+                                    Point="8,0" 
+                                    Size="8,8" 
                                     SweepDirection="Clockwise" 
                                     IsLargeArc="False"/>
                     </PathFigure>

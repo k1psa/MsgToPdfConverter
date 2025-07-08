@@ -224,8 +224,8 @@ namespace MsgToPdfConverter.Services
                 {
                     allPdfFiles.Add(attPdf);
                 }
-                // Progress tick for each attachment (if not handled inside)
-                // (But ProcessSingleAttachmentWithHierarchy should call progressTick for every file inside ZIP/7z)
+                // Ensure progress tick for each attachment (if not handled inside)
+                progressTick?.Invoke();
             }
 
             // Process nested MSG files recursively (this will handle both their body content and attachments)
@@ -252,12 +252,6 @@ namespace MsgToPdfConverter.Services
                 {
                     // Return PDF directly without header
                     finalAttachmentPdf = attPath;
-                    // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    // _addHeaderPdf(headerPdf, headerText, null);
-                    // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    // _appendPdfs(new List<string> { headerPdf, attPath }, finalAttachmentPdf);
-                    // allTempFiles.Add(headerPdf);
-                    // allTempFiles.Add(finalAttachmentPdf);
                 }
                 else if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".gif")
                 {
@@ -290,26 +284,25 @@ namespace MsgToPdfConverter.Services
                         // Return converted PDF directly without header
                         finalAttachmentPdf = attPdf;
                         allTempFiles.Add(attPdf);
-                        // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                        // _addHeaderPdf(headerPdf, headerText, null);
-                        // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                        // _appendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
-                        // allTempFiles.Add(headerPdf);
-                        // allTempFiles.Add(attPdf);
-                        // allTempFiles.Add(finalAttachmentPdf);
+                        // --- Embedded OLE/Package extraction progress ---
+                        if (File.Exists(attPath))
+                        {
+                            // Only call ExtractEmbeddedObjectsWithProgress here, do NOT call progressTick (not available in this method)
+                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, null);
+                            // embeddedCount is the number of OLE/Package objects found and processed
+                        }
                     }
                     else
                     {
                         finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                        _addHeaderPdf(finalAttachmentPdf, headerText + "\n(Conversion failed)", null);
+                        _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Conversion failed)", null);
                         allTempFiles.Add(finalAttachmentPdf);
+                        // No progressTick here
                     }
                 }
                 else if (ext == ".zip")
                 {
-                    // Use hierarchy-aware ZIP processing with empty parent chain for legacy calls
-                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false);
-                    // Add the final ZIP PDF to temp files for cleanup after it's merged into main output
+                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, null);
                     if (finalAttachmentPdf != null)
                     {
                         allTempFiles.Add(finalAttachmentPdf);
@@ -317,9 +310,7 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (ext == ".7z")
                 {
-                    // Use hierarchy-aware 7z processing with empty parent chain for legacy calls
-                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false);
-                    // Add the final 7z PDF to temp files for cleanup after it's merged into main output
+                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, null);
                     if (finalAttachmentPdf != null)
                     {
                         allTempFiles.Add(finalAttachmentPdf);
@@ -328,7 +319,7 @@ namespace MsgToPdfConverter.Services
                 else
                 {
                     finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                    _addHeaderPdf(finalAttachmentPdf, headerText + "\n(Unsupported type)", null);
+                    _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Unsupported file type)", null);
                     allTempFiles.Add(finalAttachmentPdf);
                 }
             }
@@ -336,7 +327,7 @@ namespace MsgToPdfConverter.Services
             {
                 Console.WriteLine($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
                 finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                _addHeaderPdf(finalAttachmentPdf, headerText + $"\n(Error: {ex.Message})", null);
+                _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Processing error: {ex.Message})", null);
                 allTempFiles.Add(finalAttachmentPdf);
             }
 
@@ -418,12 +409,6 @@ namespace MsgToPdfConverter.Services
                             {
                                 // Return PDF directly without header
                                 entryPdf = entryPath;
-                                // string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_header.pdf");
-                                // CreateHierarchyHeaderPdf(zipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
-                                // entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_merged.pdf");
-                                // _appendPdfs(new List<string> { entryHeaderPdf, entryPath }, entryPdf);
-                                // allTempFiles.Add(entryHeaderPdf);
-                                // allTempFiles.Add(entryPdf);
                             }
                             else if (entryExt == ".jpg" || entryExt == ".jpeg" || entryExt == ".png" || entryExt == ".bmp" || entryExt == ".gif")
                             {
@@ -710,12 +695,6 @@ namespace MsgToPdfConverter.Services
                             {
                                 // Return PDF directly without header
                                 entryPdf = entryPath;
-                                // string entryHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_header.pdf");
-                                // CreateHierarchyHeaderPdf(sevenZipEntryParentChain, currentFileName, $"Attachment {fileIndex}/{fileCount} - {currentFileName}", entryHeaderPdf);
-                                // entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_merged.pdf");
-                                // _appendPdfs(new List<string> { entryHeaderPdf, entryPath }, entryPdf);
-                                // allTempFiles.Add(entryHeaderPdf);
-                                // allTempFiles.Add(entryPdf);
                             }
                             else if (entryExt == ".jpg" || entryExt == ".jpeg" || entryExt == ".png" || entryExt == ".bmp" || entryExt == ".gif")
                             {
@@ -985,27 +964,24 @@ namespace MsgToPdfConverter.Services
                         // Return converted PDF directly without header
                         finalAttachmentPdf = attPdf;
                         allTempFiles.Add(attPdf);
-                        // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                        // CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
-                        // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                        // _appendPdfs(new List<string> { headerPdf, attPdf }, finalAttachmentPdf);
-                        // allTempFiles.Add(headerPdf);
-                        // allTempFiles.Add(attPdf);
-                        // allTempFiles.Add(finalAttachmentPdf);
+                        // --- Embedded OLE/Package extraction progress ---
+                        if (File.Exists(attPath))
+                        {
+                            // Call ExtractEmbeddedObjectsWithProgress with the actual progressTick callback
+                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, progressTick);
+                            // embeddedCount is the number of OLE/Package objects found and processed
+                        }
                     }
                     else
                     {
-                        // Create simple text PDF for conversion failure
                         finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                        _addHeaderPdf(finalAttachmentPdf, $"File: {currentItem}\n(Conversion failed)", null);
+                        _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Conversion failed)", null);
                         allTempFiles.Add(finalAttachmentPdf);
                     }
                 }
                 else if (ext == ".zip")
                 {
-                    // Process ZIP files with hierarchy support
-                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem, extractOriginalOnly, progressTick);
-                    // Add the final ZIP PDF to temp files for cleanup after it's merged into main output
+                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, progressTick);
                     if (finalAttachmentPdf != null)
                     {
                         allTempFiles.Add(finalAttachmentPdf);
@@ -1013,9 +989,7 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (ext == ".7z")
                 {
-                    // Process 7z files with hierarchy support
-                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem, extractOriginalOnly, progressTick);
-                    // Add the final 7z PDF to temp files for cleanup after it's merged into main output
+                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, progressTick);
                     if (finalAttachmentPdf != null)
                     {
                         allTempFiles.Add(finalAttachmentPdf);
@@ -1023,9 +997,8 @@ namespace MsgToPdfConverter.Services
                 }
                 else
                 {
-                    // Create simple text PDF for unsupported file types
                     finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                    _addHeaderPdf(finalAttachmentPdf, $"File: {currentItem}\n(Unsupported file type)", null);
+                    _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Unsupported file type)", null);
                     allTempFiles.Add(finalAttachmentPdf);
                 }
             }
@@ -1033,7 +1006,7 @@ namespace MsgToPdfConverter.Services
             {
                 Console.WriteLine($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
                 finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                _addHeaderPdf(finalAttachmentPdf, $"File: {currentItem}\n(Processing error: {ex.Message})", null);
+                _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Processing error: {ex.Message})", null);
                 allTempFiles.Add(finalAttachmentPdf);
             }
 
@@ -1351,7 +1324,7 @@ namespace MsgToPdfConverter.Services
         /// <summary>
         /// Helper to count all processable items from a file (MSG, ZIP, 7z)
         /// </summary>
-        private int CountAllProcessableItemsFromFile(string filePath)
+        public int CountAllProcessableItemsFromFile(string filePath)
         {
             string ext = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
             if (ext == ".msg")
@@ -1439,8 +1412,54 @@ namespace MsgToPdfConverter.Services
             }
             else
             {
-                return 1;
+                // Count as 1 for the main file
+                int count = 1;
+                // For Office files, also count embedded OLE/Package objects
+                if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
+                {
+                    try
+                    {
+                        var embeddedFiles = MsgToPdfConverter.Utils.DocxEmbeddedExtractor.ExtractEmbeddedFiles(filePath);
+                        if (embeddedFiles != null)
+                        {
+                            count += embeddedFiles.Count;
+                        }
+                    }
+                    catch { /* ignore errors, just count main file */ }
+                }
+                return count;
             }
+        }
+
+        /// <summary>
+        /// Extracts embedded OLE/Package objects from a DOCX/XLSX file and calls progressTick for each.
+        /// </summary>
+        private static int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tempDir, List<string> allTempFiles, Action progressTick)
+        {
+            int count = 0;
+            try
+            {
+                // Use DocxEmbeddedExtractor to extract embedded files (OLE/Package objects)
+                var embeddedFiles = MsgToPdfConverter.Utils.DocxEmbeddedExtractor.ExtractEmbeddedFiles(officeFilePath);
+                if (embeddedFiles != null)
+                {
+                    foreach (var embedded in embeddedFiles)
+                    {
+                        // Save the embedded file to disk
+                        string safeName = string.IsNullOrWhiteSpace(embedded.FileName) ? $"Embedded_{Guid.NewGuid()}" : embedded.FileName;
+                        string outPath = Path.Combine(tempDir, safeName);
+                        File.WriteAllBytes(outPath, embedded.Data);
+                        allTempFiles.Add(outPath);
+                        progressTick?.Invoke();
+                        count++;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[OLE-EXTRACT] Error extracting embedded objects: {ex.Message}");
+            }
+            return count;
         }
     }
 }

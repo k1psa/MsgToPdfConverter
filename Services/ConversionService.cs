@@ -275,8 +275,10 @@ namespace MsgToPdfConverter.Services
                     else
                     {
                         // Use the same hierarchical logic as for attachments
-                        // Reset file progress for non-MSG files
-                        updateFileProgress?.Invoke(0, 100);
+                        // Reset file progress for non-MSG files and set up progress tracking
+                        int fileProgress = 0;
+                        int totalCount = attachmentService.CountAllProcessableItemsFromFile(filePath);
+                        updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
                         
                         string outputPdf = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
                         var tempFiles = new List<string>();
@@ -288,11 +290,9 @@ namespace MsgToPdfConverter.Services
                         string processedPdf = null;
                         try
                         {
-                            // Update progress to 50% during processing
-                            updateFileProgress?.Invoke(50, 100);
-                            
                             processedPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(
-                                null, filePath, tempDir, headerText, allTempFiles, parentChain, baseName, extractOriginalOnly);
+                                null, filePath, tempDir, headerText, allTempFiles, parentChain, baseName, extractOriginalOnly,
+                                () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
                             if (!string.IsNullOrEmpty(processedPdf))
                                 allPdfFiles.Add(processedPdf);
                         }
@@ -386,7 +386,7 @@ namespace MsgToPdfConverter.Services
                             success++;
                             conversionSucceeded = true;
                             // Mark file progress as complete
-                            updateFileProgress?.Invoke(100, 100);
+                            updateFileProgress?.Invoke(totalCount, totalCount);
                         }
                         else
                         {

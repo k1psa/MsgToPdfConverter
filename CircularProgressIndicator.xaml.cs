@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using System.Windows.Media.Animation;
 
 namespace MsgToPdfConverter
 {
@@ -19,6 +20,11 @@ namespace MsgToPdfConverter
         public static readonly DependencyProperty DisplayModeProperty =
             DependencyProperty.Register("DisplayMode", typeof(ProgressDisplayMode), typeof(CircularProgressIndicator),
                 new PropertyMetadata(ProgressDisplayMode.Percent, OnProgressChanged));
+
+        // Internal animated progress property
+        private static readonly DependencyProperty AnimatedProgressProperty =
+            DependencyProperty.Register("AnimatedProgress", typeof(double), typeof(CircularProgressIndicator),
+                new PropertyMetadata(0.0, OnAnimatedProgressChanged));
 
         public double Progress
         {
@@ -38,10 +44,17 @@ namespace MsgToPdfConverter
             set { SetValue(DisplayModeProperty, value); }
         }
 
+        private double AnimatedProgress
+        {
+            get { return (double)GetValue(AnimatedProgressProperty); }
+            set { SetValue(AnimatedProgressProperty, value); }
+        }
+
         private Path _progressPath;
         private TextBlock _progressText;
         private PathFigure _progressFigure;
         private ArcSegment _progressArc;
+        private bool _isAnimating = false;
 
         public CircularProgressIndicator()
         {
@@ -67,7 +80,57 @@ namespace MsgToPdfConverter
         private static void OnProgressChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
             var control = d as CircularProgressIndicator;
+            control?.AnimateToProgress();
+        }
+
+        private static void OnAnimatedProgressChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+        {
+            var control = d as CircularProgressIndicator;
             control?.UpdateProgress();
+        }
+
+        private void AnimateToProgress()
+        {
+            if (_isAnimating)
+                return;
+
+            double targetProgress = Progress;
+            double currentProgress = AnimatedProgress;
+            
+            // If starting from 0, add a small delay before starting animation
+            if (currentProgress == 0 && targetProgress > 0)
+            {
+                // Small delay to ensure UI is ready
+                var delayTimer = new System.Windows.Threading.DispatcherTimer();
+                delayTimer.Interval = TimeSpan.FromMilliseconds(50);
+                delayTimer.Tick += (s, e) =>
+                {
+                    delayTimer.Stop();
+                    StartProgressAnimation(targetProgress);
+                };
+                delayTimer.Start();
+            }
+            else
+            {
+                StartProgressAnimation(targetProgress);
+            }
+        }
+
+        private void StartProgressAnimation(double targetProgress)
+        {
+            _isAnimating = true;
+            
+            var animation = new DoubleAnimation
+            {
+                From = AnimatedProgress,
+                To = targetProgress,
+                Duration = TimeSpan.FromMilliseconds(300), // Smooth 300ms transition
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+
+            animation.Completed += (s, e) => _isAnimating = false;
+
+            BeginAnimation(AnimatedProgressProperty, animation);
         }
 
         private void UpdateProgress()
@@ -76,7 +139,7 @@ namespace MsgToPdfConverter
                 return;
 
             double max = Maximum > 0 ? Maximum : 100.0;
-            double value = Math.Max(0, Math.Min(Progress, max));
+            double value = Math.Max(0, Math.Min(AnimatedProgress, max));
             double progress = value / max;
             double angle = progress * 360;
 
@@ -89,9 +152,9 @@ namespace MsgToPdfConverter
 
             _progressPath.Visibility = Visibility.Visible;
 
-            double radius = 7;
-            double centerX = 7;
-            double centerY = 7;
+            double radius = 8;
+            double centerX = 8;
+            double centerY = 8;
 
             // Calculate start point (top of circle)
             double startX = centerX;
@@ -109,7 +172,7 @@ namespace MsgToPdfConverter
             _progressArc.Size = new Size(radius, radius);
             _progressArc.IsLargeArc = isLargeArc;
 
-            // Set progress text
+            // Set progress text - update during animation for smooth counting
             if (DisplayMode == ProgressDisplayMode.Percent)
             {
                 int percent = (int)Math.Round(progress * 100);
