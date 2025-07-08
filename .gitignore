@@ -4,6 +4,7 @@
 bin/
 obj/
 TestResults/
+0-PREVIOUS RELEASES/
 
 # User-specific files
 *.user
