@@ -28,6 +28,8 @@ namespace MsgToPdfConverter
         private bool _appendAttachments;
         private bool _combineAllPdfs;
         private string _combinedPdfOutputPath;
+        private string _lastConfirmedCombinedPdfPath = null;
+        private bool _combinePdfOverwriteConfirmed = false;
 
         // Services
         private readonly EmailConverterService _emailService = new EmailConverterService();
@@ -84,22 +86,28 @@ namespace MsgToPdfConverter
                     OnPropertyChanged(nameof(CombineAllPdfs));
                     if (_combineAllPdfs)
                     {
-                        // Show file save dialog when checked
+                        // Always show file save dialog when checked
                         string path = FileDialogHelper.SavePdfFileDialog("Binder1.pdf");
                         if (!string.IsNullOrEmpty(path))
                         {
                             CombinedPdfOutputPath = path;
+                            _combinePdfOverwriteConfirmed = true;
+                            _lastConfirmedCombinedPdfPath = path;
                         }
                         else
                         {
                             // If user cancels, uncheck
                             _combineAllPdfs = false;
                             OnPropertyChanged(nameof(CombineAllPdfs));
+                            _combinePdfOverwriteConfirmed = false;
+                            _lastConfirmedCombinedPdfPath = null;
                         }
                     }
                     else
                     {
                         CombinedPdfOutputPath = null;
+                        _combinePdfOverwriteConfirmed = false;
+                        _lastConfirmedCombinedPdfPath = null;
                     }
                 }
             }
@@ -164,6 +172,27 @@ namespace MsgToPdfConverter
         private async Task ConvertAsync(object parameter)
         {
             if (IsConverting) return;
+            // Pre-check for combined output overwrite BEFORE starting conversion
+            if (CombineAllPdfs)
+            {
+                var mainWindow = Application.Current?.MainWindow;
+                bool wasTopmost = mainWindow != null && mainWindow.Topmost;
+                // Only skip dialog if user just confirmed overwrite for the same file
+                while (File.Exists(CombinedPdfOutputPath) && (!_combinePdfOverwriteConfirmed || CombinedPdfOutputPath != _lastConfirmedCombinedPdfPath))
+                {
+                    if (IsPinned && mainWindow != null) mainWindow.Topmost = false;
+                    string path = FileDialogHelper.SavePdfFileDialog(Path.GetFileName(CombinedPdfOutputPath));
+                    if (IsPinned && mainWindow != null) mainWindow.Topmost = wasTopmost;
+                    if (string.IsNullOrEmpty(path))
+                    {
+                        // User cancelled
+                        return;
+                    }
+                    CombinedPdfOutputPath = path;
+                    _combinePdfOverwriteConfirmed = true;
+                    _lastConfirmedCombinedPdfPath = path;
+                }
+            }
             Console.WriteLine($"Starting conversion for {SelectedFiles.Count} files. Output folder: {SelectedOutputFolder}");
             Console.WriteLine($"[DEBUG] Passing DeleteMsgAfterConversion: {DeleteFilesAfterConversion}");
             IsConverting = true;
@@ -231,12 +260,13 @@ namespace MsgToPdfConverter
                 }
                 Console.WriteLine(statusMessage);
                 // Ensure MessageBox is centered and on top, even if window is pinned
-                var mainWindow = Application.Current?.MainWindow;
-                bool wasTopmost = mainWindow != null && mainWindow.Topmost;
-                if (IsPinned && mainWindow != null) mainWindow.Topmost = false;
-                MessageBox.Show(statusMessage, "Processing Results", MessageBoxButton.OK,
+                var mainWindow2 = Application.Current?.MainWindow;
+                bool wasTopmost2 = mainWindow2 != null && mainWindow2.Topmost;
+                if (IsPinned && mainWindow2 != null) mainWindow2.Topmost = false;
+                // Use helper to center MessageBox within main window
+                MsgToPdfConverter.Utils.MessageBoxHelper.ShowCentered(mainWindow2, statusMessage, "Processing Results", MessageBoxButton.OK,
                     (result.Fail > 0 && !CombineAllPdfs) ? MessageBoxImage.Warning : MessageBoxImage.Information);
-                if (IsPinned && mainWindow != null) mainWindow.Topmost = wasTopmost;
+                if (IsPinned && mainWindow2 != null) mainWindow2.Topmost = wasTopmost2;
             }
             catch (Exception ex)
             {
@@ -249,6 +279,9 @@ namespace MsgToPdfConverter
                 IsConverting = false;
                 CancellationRequested = false;
                 ProcessingStatus = "";
+                // After conversion, reset confirmation so dialog will show again if needed next time
+                _combinePdfOverwriteConfirmed = false;
+                _lastConfirmedCombinedPdfPath = CombinedPdfOutputPath;
             }
         }
 
