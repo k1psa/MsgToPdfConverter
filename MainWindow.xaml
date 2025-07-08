@@ -137,11 +137,38 @@
                         Width="80"
                         Visibility="{Binding IsConverting, Converter={StaticResource BoolToVisibilityConverter}}"/>
             </StackPanel>
-            <TextBlock Text="{Binding ProcessingStatus}"
-                       FontWeight="Bold"
-                       Foreground="Blue"
-                       Margin="0,0,0,10"
-                       Visibility="{Binding ProcessingStatus, Converter={StaticResource StringToVisibilityConverter}}"/>
+            <StackPanel Orientation="Horizontal"
+                        Visibility="{Binding ProcessingStatus, Converter={StaticResource StringToVisibilityConverter}}">
+                <!-- Small progress spinner -->
+                <Grid Width="16" Height="16" Margin="0,0,5,0"
+                      Visibility="{Binding IsProcessingFile, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Ellipse Width="14" Height="14" 
+                             Stroke="Blue" StrokeThickness="2"
+                             Opacity="0.3"/>
+                    <Ellipse Width="14" Height="14" 
+                             Stroke="Blue" StrokeThickness="2"
+                             StrokeDashArray="3,1"
+                             StrokeDashOffset="0">
+                        <Ellipse.RenderTransform>
+                            <RotateTransform CenterX="7" CenterY="7"/>
+                        </Ellipse.RenderTransform>
+                        <Ellipse.Triggers>
+                            <EventTrigger RoutedEvent="Loaded">
+                                <BeginStoryboard>
+                                    <Storyboard RepeatBehavior="Forever">
+                                        <DoubleAnimation Storyboard.TargetProperty="RenderTransform.Angle"
+                                                         From="0" To="360" Duration="0:0:1"/>
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </EventTrigger>
+                        </Ellipse.Triggers>
+                    </Ellipse>
+                </Grid>
+                <TextBlock Text="{Binding ProcessingStatus}"
+                           FontWeight="Bold"
+                           Foreground="Blue"
+                           Margin="0,0,0,10"/>
+            </StackPanel>
         </StackPanel>
         <ProgressBar Height="20"
                      Margin="0,0,0,10"

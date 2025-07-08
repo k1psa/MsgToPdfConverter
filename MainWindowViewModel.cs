@@ -30,6 +30,7 @@ namespace MsgToPdfConverter
         private string _combinedPdfOutputPath;
         private string _lastConfirmedCombinedPdfPath = null;
         private bool _combinePdfOverwriteConfirmed = false;
+        private bool _isProcessingFile;
 
         // Services
         private readonly EmailConverterService _emailService = new EmailConverterService();
@@ -117,6 +118,7 @@ namespace MsgToPdfConverter
             get => _combinedPdfOutputPath;
             set { _combinedPdfOutputPath = value; OnPropertyChanged(nameof(CombinedPdfOutputPath)); }
         }
+        public bool IsProcessingFile { get => _isProcessingFile; set { _isProcessingFile = value; OnPropertyChanged(nameof(IsProcessingFile)); } }
 
         // Commands
         public ICommand SelectFilesCommand { get; }
@@ -218,6 +220,8 @@ namespace MsgToPdfConverter
                         {
                             ProcessingStatus = statusText;
                             ProgressValue = processed;
+                            // Show progress circle when actively processing a file
+                            IsProcessingFile = !string.IsNullOrEmpty(statusText) && statusText.Contains("Processing file");
                             Console.WriteLine($"Progress: {processed}/{total} - {statusText}");
                         },
                         () => CancellationRequested,
