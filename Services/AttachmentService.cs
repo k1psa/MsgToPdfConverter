@@ -973,8 +973,8 @@ namespace MsgToPdfConverter.Services
                         // --- Embedded OLE/Package extraction ---
                         if (File.Exists(attPath))
                         {
-                            // Extract embedded objects (they don't contribute to progress count)
-                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, null);
+                            // Extract embedded objects (they now contribute to progress count)
+                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, progressTick);
                             // embeddedCount is the number of OLE/Package objects found and processed
                         }
                     }
@@ -1420,15 +1420,49 @@ namespace MsgToPdfConverter.Services
             }
             else
             {
-                // For regular files (including Office files), count as 1 item
-                // We don't count embedded objects separately as they are part of the main file processing
-                return 1;
+                // For regular files (including Office files), count as 1 item plus embedded objects
+                int count = 1; // The main file itself
+                
+                // If it's an Office file, also count embedded objects
+                string fileExt = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
+                if (fileExt == ".doc" || fileExt == ".docx" || fileExt == ".xls" || fileExt == ".xlsx")
+                {
+                    try
+                    {
+                        int embeddedCount = CountEmbeddedObjects(filePath);
+                        count += embeddedCount;
+                        Console.WriteLine($"[COUNT] File {filePath}: 1 main + {embeddedCount} embedded = {count} total");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[COUNT] Error counting embedded objects in {filePath}: {ex.Message}");
+                    }
+                }
+                
+                return count;
             }
         }
 
         /// <summary>
-        /// Extracts embedded OLE/Package objects from a DOCX/XLSX file.
-        /// Does NOT call progressTick for embedded objects since they are internal to the Office file.
+        /// Counts embedded objects in an Office file without extracting them
+        /// </summary>
+        private static int CountEmbeddedObjects(string officeFilePath)
+        {
+            try
+            {
+                // Use DocxEmbeddedExtractor to get count of embedded files
+                var embeddedFiles = MsgToPdfConverter.Utils.DocxEmbeddedExtractor.ExtractEmbeddedFiles(officeFilePath);
+                return embeddedFiles?.Count ?? 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[COUNT-EMBED] Error counting embedded objects: {ex.Message}");
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Extracts embedded OLE/Package objects from a DOCX/XLSX file and calls progressTick for each.
         /// </summary>
         private static int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tempDir, List<string> allTempFiles, Action progressTick)
         {
@@ -1446,8 +1480,8 @@ namespace MsgToPdfConverter.Services
                         string outPath = Path.Combine(tempDir, safeName);
                         File.WriteAllBytes(outPath, embedded.Data);
                         allTempFiles.Add(outPath);
-                        // Do NOT call progressTick for embedded objects - they are internal to the Office file
-                        // and should not be counted as separate user-visible files
+                        // Call progressTick for each embedded object since they are now counted
+                        progressTick?.Invoke();
                         count++;
                     }
                 }
