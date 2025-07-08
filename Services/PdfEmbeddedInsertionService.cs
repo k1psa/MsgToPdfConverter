@@ -17,6 +17,16 @@ namespace MsgToPdfConverter.Services
     /// </summary>
     public static class PdfEmbeddedInsertionService
     {
+        // Static progress callback for embedding operations
+        private static Action s_currentProgressCallback = null;
+        
+        /// <summary>
+        /// Sets the progress callback for current embedding operations
+        /// </summary>
+        public static void SetProgressCallback(Action progressCallback)
+        {
+            s_currentProgressCallback = progressCallback;
+        }
         private static EmailConverterService _emailConverterService = new EmailConverterService();
         // --- Add static AttachmentService for 7z/zip recursive extraction ---
         private static AttachmentService _attachmentService = new AttachmentService(
@@ -32,7 +42,7 @@ namespace MsgToPdfConverter.Services
         /// <param name="mainPdfPath">Path to the main PDF file</param>
         /// <param name="extractedObjects">List of extracted embedded objects with page numbers</param>
         /// <param name="outputPdfPath">Path for the output PDF with embedded files inserted</param>
-        public static void InsertEmbeddedFiles(string mainPdfPath, List<InteropEmbeddedExtractor.ExtractedObjectInfo> extractedObjects, string outputPdfPath)
+        public static void InsertEmbeddedFiles(string mainPdfPath, List<InteropEmbeddedExtractor.ExtractedObjectInfo> extractedObjects, string outputPdfPath, Action progressTick = null)
         {
             if (!File.Exists(mainPdfPath))
             {
@@ -219,7 +229,7 @@ namespace MsgToPdfConverter.Services
                             
                             int beforeInsert = currentOutputPage;
                             int totalPagesBefore = outputPdf.GetNumberOfPages();
-                            currentOutputPage = InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage);
+                            currentOutputPage = InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage, progressTick);
                             int totalPagesAfter = outputPdf.GetNumberOfPages();
                             
                             int pagesInserted = currentOutputPage - beforeInsert;
@@ -252,25 +262,25 @@ namespace MsgToPdfConverter.Services
         }
 
         // Insert embedded object without separator/grey page
-        private static int InsertEmbeddedObject_NoSeparator(InteropEmbeddedExtractor.ExtractedObjectInfo obj, PdfDocument outputPdf, int currentOutputPage)
+        private static int InsertEmbeddedObject_NoSeparator(InteropEmbeddedExtractor.ExtractedObjectInfo obj, PdfDocument outputPdf, int currentOutputPage, Action progressTick = null)
         {
             try
             {
                 if (obj.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
                 {
-                    return InsertPdfFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage, obj.OleClass);
+                    return InsertPdfFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage, obj.OleClass, progressTick);
                 }
                 else if (obj.FilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
                 {
-                    return InsertMsgFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
+                    return InsertMsgFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage, progressTick);
                 }
                 else if (obj.FilePath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
                 {
-                    return InsertDocxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
+                    return InsertDocxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage, progressTick);
                 }
                 else if (obj.FilePath.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
                 {
-                    return InsertXlsxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
+                    return InsertXlsxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage, progressTick);
                 }
                 else if (obj.FilePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {
@@ -287,7 +297,7 @@ namespace MsgToPdfConverter.Services
                             string ext = Path.GetExtension(entry.FileName).ToLowerInvariant();
                             if (ext == ".pdf")
                             {
-                                currentOutputPage = InsertPdfFile_NoSeparator(tempFile, outputPdf, currentOutputPage, "ZIP-PDF");
+                                currentOutputPage = InsertPdfFile_NoSeparator(tempFile, outputPdf, currentOutputPage, "ZIP-PDF", progressTick);
                             }
                             else if (ext == ".docx")
                             {
@@ -332,7 +342,7 @@ namespace MsgToPdfConverter.Services
                             obj.FilePath, tempDir, headerText, allTempFiles, parentChain, currentItem, false);
                         if (!string.IsNullOrEmpty(resultPdf) && File.Exists(resultPdf))
                         {
-                            currentOutputPage = InsertPdfFile_NoSeparator(resultPdf, outputPdf, currentOutputPage, "7Z-PDF");
+                            currentOutputPage = InsertPdfFile_NoSeparator(resultPdf, outputPdf, currentOutputPage, "7Z-PDF", progressTick);
                         }
                         else
                         {
@@ -363,7 +373,7 @@ namespace MsgToPdfConverter.Services
         }
 
         // Insert PDF file without separator/grey page
-        private static int InsertPdfFile_NoSeparator(string pdfPath, PdfDocument outputPdf, int currentPage, string oleClass)
+        private static int InsertPdfFile_NoSeparator(string pdfPath, PdfDocument outputPdf, int currentPage, string oleClass, Action progressTick = null)
         {
             Console.WriteLine($"[PDF-INSERT] *** PDF INSERTION START *** Inserting PDF: {Path.GetFileName(pdfPath)} after page {currentPage} (current total pages: {outputPdf.GetNumberOfPages()})");
             try
@@ -396,9 +406,15 @@ namespace MsgToPdfConverter.Services
                         // CopyPagesTo appends to the end, which is what we want for sequential insertion
                         embeddedPdf.CopyPagesTo(pageNum, pageNum, outputPdf);
                         currentPage++;
+                        
                         int totalPagesAfter = outputPdf.GetNumberOfPages();
                         Console.WriteLine($"[PDF-INSERT] *** PDF PAGE COPY *** Copied page {pageNum}/{embeddedPageCount} from {Path.GetFileName(pdfPath)}, output PDF went from {totalPagesBefore} to {totalPagesAfter} pages, tracking currentPage={currentPage}");
                     }
+                    
+                    // Call progress tick once per embedded file (not per page) 
+                    progressTick?.Invoke();
+                    s_currentProgressCallback?.Invoke();
+                    
                     Console.WriteLine($"[PDF-INSERT] *** PDF INSERTION COMPLETE *** Successfully inserted {embeddedPageCount} pages from {Path.GetFileName(pdfPath)}, final total pages: {outputPdf.GetNumberOfPages()}");
                 }
                 finally
@@ -415,7 +431,7 @@ namespace MsgToPdfConverter.Services
         }
 
         // Insert MSG file without separator/grey page
-        private static int InsertMsgFile_NoSeparator(string msgPath, PdfDocument outputPdf, int currentPage)
+        private static int InsertMsgFile_NoSeparator(string msgPath, PdfDocument outputPdf, int currentPage, Action progressTick = null)
         {
             Console.WriteLine($"[PDF-INSERT] Converting and inserting MSG: {Path.GetFileName(msgPath)} after page {currentPage}");
             try
@@ -426,7 +442,7 @@ namespace MsgToPdfConverter.Services
                     var (converted, attachmentFiles) = TryConvertMsgToPdfWithAttachments(msgPath, tempPdfPath);
                     if (converted && File.Exists(tempPdfPath))
                     {
-                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "MSG");
+                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "MSG", progressTick);
                         
                         // Insert extracted attachments after the MSG content
                         foreach (var attachmentPath in attachmentFiles)
@@ -434,7 +450,7 @@ namespace MsgToPdfConverter.Services
                             if (File.Exists(attachmentPath))
                             {
                                 Console.WriteLine($"[PDF-INSERT] Inserting MSG attachment: {Path.GetFileName(attachmentPath)}");
-                                currentPage = InsertAttachmentFile(attachmentPath, outputPdf, currentPage);
+                                currentPage = InsertAttachmentFile(attachmentPath, outputPdf, currentPage, progressTick);
                             }
                         }
                     }
@@ -457,7 +473,7 @@ namespace MsgToPdfConverter.Services
         }
 
         // Insert DOCX file without separator/grey page
-        private static int InsertDocxFile_NoSeparator(string docxPath, PdfDocument outputPdf, int currentPage)
+        private static int InsertDocxFile_NoSeparator(string docxPath, PdfDocument outputPdf, int currentPage, Action progressTick = null)
         {
             Console.WriteLine($"[PDF-INSERT] Converting and inserting DOCX: {Path.GetFileName(docxPath)} after page {currentPage}");
             try
@@ -468,7 +484,7 @@ namespace MsgToPdfConverter.Services
                     bool converted = TryConvertDocxToPdf(docxPath, tempPdfPath);
                     if (converted && File.Exists(tempPdfPath))
                     {
-                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "DOCX");
+                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "DOCX", progressTick);
                     }
                     else
                     {
@@ -489,7 +505,7 @@ namespace MsgToPdfConverter.Services
         }
 
         // Insert XLSX file without separator/grey page
-        private static int InsertXlsxFile_NoSeparator(string xlsxPath, PdfDocument outputPdf, int currentPage)
+        private static int InsertXlsxFile_NoSeparator(string xlsxPath, PdfDocument outputPdf, int currentPage, Action progressTick = null)
         {
             Console.WriteLine($"[PDF-INSERT] *** XLSX PROCESSING START *** Converting and inserting XLSX: {Path.GetFileName(xlsxPath)} after page {currentPage}");
             try
@@ -508,7 +524,7 @@ namespace MsgToPdfConverter.Services
                         var fileInfo = new FileInfo(tempPdfPath);
                         Console.WriteLine($"[PDF-INSERT] *** XLSX PDF CREATED *** Temp PDF exists, size: {fileInfo.Length} bytes");
                         Console.WriteLine($"[PDF-INSERT] *** XLSX PDF INSERTION *** Now treating converted XLSX as regular PDF");
-                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "XLSX");
+                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "XLSX", progressTick);
                         Console.WriteLine($"[PDF-INSERT] *** XLSX PDF INSERTED *** Successfully inserted converted XLSX as PDF");
                     }
                     else
@@ -700,7 +716,7 @@ namespace MsgToPdfConverter.Services
         /// <summary>
         /// Inserts an attachment file based on its type
         /// </summary>
-        private static int InsertAttachmentFile(string attachmentPath, PdfDocument outputPdf, int currentPage)
+        private static int InsertAttachmentFile(string attachmentPath, PdfDocument outputPdf, int currentPage, Action progressTick = null)
         {
             try
             {
@@ -709,13 +725,13 @@ namespace MsgToPdfConverter.Services
                 switch (ext)
                 {
                     case ".pdf":
-                        return InsertPdfFile_NoSeparator(attachmentPath, outputPdf, currentPage, "Attachment");
+                        return InsertPdfFile_NoSeparator(attachmentPath, outputPdf, currentPage, "Attachment", progressTick);
                     case ".docx":
-                        return InsertDocxFile_NoSeparator(attachmentPath, outputPdf, currentPage);
+                        return InsertDocxFile_NoSeparator(attachmentPath, outputPdf, currentPage, progressTick);
                     case ".xlsx":
-                        return InsertXlsxFile_NoSeparator(attachmentPath, outputPdf, currentPage);
+                        return InsertXlsxFile_NoSeparator(attachmentPath, outputPdf, currentPage, progressTick);
                     case ".msg":
-                        return InsertMsgFile_NoSeparator(attachmentPath, outputPdf, currentPage);
+                        return InsertMsgFile_NoSeparator(attachmentPath, outputPdf, currentPage, progressTick);
                     default:
                         return InsertPlaceholderForFile(attachmentPath, outputPdf, currentPage, $"Attachment ({ext})");
                 }
@@ -884,10 +900,10 @@ namespace MsgToPdfConverter.Services
         /// <summary>
         /// Inserts a single embedded object into the PDF
         /// </summary>
-        private static int InsertEmbeddedObject(InteropEmbeddedExtractor.ExtractedObjectInfo obj, PdfDocument outputPdf, int currentOutputPage)
+        private static int InsertEmbeddedObject(InteropEmbeddedExtractor.ExtractedObjectInfo obj, PdfDocument outputPdf, int currentOutputPage, Action progressTick = null)
         {
             // Route all calls to the new no-separator version
-            return InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage);
+            return InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage, progressTick);
         }
 
         /// <summary>

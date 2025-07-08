@@ -13,6 +13,14 @@ namespace MsgToPdfConverter.Services
         /// </summary>
         public static bool TryConvertOfficeToPdf(string inputPath, string outputPdf)
         {
+            return TryConvertOfficeToPdf(inputPath, outputPdf, null);
+        }
+
+        /// <summary>
+        /// Attempts to convert Office files to PDF using Office Interop with progress callback for embedding operations
+        /// </summary>
+        public static bool TryConvertOfficeToPdf(string inputPath, string outputPdf, Action progressTick)
+        {
             string ext = Path.GetExtension(inputPath).ToLowerInvariant();
             bool result = false;
             Exception threadEx = null;
@@ -63,7 +71,7 @@ namespace MsgToPdfConverter.Services
                             try
                             {
                                 Console.WriteLine($"[PDF-EMBED] Inserting {extractedObjects.Count} embedded files into PDF");
-                                PdfEmbeddedInsertionService.InsertEmbeddedFiles(mainPdfPath, extractedObjects, outputPdf);
+                                PdfEmbeddedInsertionService.InsertEmbeddedFiles(mainPdfPath, extractedObjects, outputPdf, progressTick);
                                 
                                 // Clean up temp main PDF
                                 if (File.Exists(mainPdfPath) && mainPdfPath != outputPdf)

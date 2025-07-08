@@ -9,6 +9,7 @@ using MsgToPdfConverter.Utils;
 using SharpCompress.Archives;
 using SharpCompress.Archives.SevenZip;
 using SharpCompress.Common;
+using iText.Kernel.Pdf;
 
 namespace MsgToPdfConverter.Services
 {
@@ -224,8 +225,7 @@ namespace MsgToPdfConverter.Services
                 {
                     allPdfFiles.Add(attPdf);
                 }
-                // Ensure progress tick for each attachment (if not handled inside)
-                progressTick?.Invoke();
+                // Progress ticks are now handled inside ProcessSingleAttachmentWithHierarchy during embedding extraction
             }
 
             // Process nested MSG files recursively (this will handle both their body content and attachments)
@@ -965,6 +965,12 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
                 {
+                    // Set progress callback for embedding operations
+                    if (progressTick != null)
+                    {
+                        PdfEmbeddedInsertionService.SetProgressCallback(progressTick);
+                    }
+                    
                     if (_tryConvertOfficeToPdf(attPath, attPdf))
                     {
                         // Return converted PDF directly without header
@@ -973,9 +979,19 @@ namespace MsgToPdfConverter.Services
                         // --- Embedded OLE/Package extraction ---
                         if (File.Exists(attPath))
                         {
-                            // Extract embedded objects (they now contribute to progress count)
-                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, progressTick);
-                            // embeddedCount is the number of OLE/Package objects found and processed
+                            // Extract embedded objects but don't call progress ticks yet
+                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, null);
+                            Console.WriteLine($"[OFFICE-PROGRESS] File {attName} has {embeddedCount} embedded objects");
+                            
+                            // If this file has embedded objects, the progress ticks will be called 
+                            // during PDF insertion operations. If no embedded objects, call tick once.
+                            if (embeddedCount == 0 && progressTick != null)
+                            {
+                                progressTick();
+                                Console.WriteLine($"[OFFICE-PROGRESS] Called progress tick for {attName} (no embedded objects)");
+                            }
+                            // For files with embedded objects, progress ticks will be called during 
+                            // PDF insertion operations (one tick per embedded object)
                         }
                     }
                     else
@@ -984,6 +1000,9 @@ namespace MsgToPdfConverter.Services
                         _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Conversion failed)", null);
                         allTempFiles.Add(finalAttachmentPdf);
                     }
+                    
+                    // Clear progress callback
+                    PdfEmbeddedInsertionService.SetProgressCallback(null);
                 }
                 else if (ext == ".zip")
                 {
@@ -1462,7 +1481,7 @@ namespace MsgToPdfConverter.Services
         }
 
         /// <summary>
-        /// Extracts embedded OLE/Package objects from a DOCX/XLSX file and calls progressTick for each.
+        /// Extracts embedded OLE/Package objects from a DOCX/XLSX file. Progress ticks happen during PDF insertion.
         /// </summary>
         private static int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tempDir, List<string> allTempFiles, Action progressTick)
         {
@@ -1480,8 +1499,8 @@ namespace MsgToPdfConverter.Services
                         string outPath = Path.Combine(tempDir, safeName);
                         File.WriteAllBytes(outPath, embedded.Data);
                         allTempFiles.Add(outPath);
-                        // Call progressTick for each embedded object since they are now counted
-                        progressTick?.Invoke();
+
+                        // Don't call progressTick here - it will be called during PDF insertion
                         count++;
                     }
                 }
