@@ -108,80 +108,56 @@ namespace MsgToPdfConverter.Services
             }
         }
 
-        public void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5, string headerText = null, List<string> parentChain = null)
+        public void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5, string headerText = null, List<string> parentChain = null, Action progressTick = null)
         {
-            // Prevent infinite recursion
             if (depth > maxDepth)
             {
-                Console.WriteLine($"[MSG] Stopping recursion at depth {depth} - max depth reached");
+                Console.WriteLine($"[MSG] Max recursion depth {maxDepth} reached, skipping further processing");
                 return;
             }
-
-            Console.WriteLine($"[MSG] Processing message recursively at depth {depth}: {msg.Subject ?? "No Subject"}");
-
-            // Initialize parent chain if not provided
             if (parentChain == null)
             {
                 parentChain = new List<string>();
             }
-
-            // First, create PDF for the nested MSG body content (if we're processing a nested message)
             if (depth > 0)
             {
-                string msgSubject = msg.Subject ?? $"nested_msg_depth_{depth}";
-                string usedHeaderText = headerText ?? $"Nested Email (Depth {depth}): {msgSubject}";
+                // For nested MSGs, process the body as a PDF (if not extractOriginalOnly)
                 try
                 {
-                    Console.WriteLine($"[MSG] Depth {depth} - Creating PDF for nested message body: {msgSubject}");
-                    // Use new inline image logic for nested emails
-                    var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(msg, extractOriginalOnly);
-                    string nestedHtml = htmlResult.Html;
-                    List<string> tempFiles = htmlResult.TempFiles;
-                    allTempFiles.AddRange(tempFiles); // Track temp image files for cleanup
-                    string nestedPdf = Path.Combine(tempDir, $"depth{depth}_{Guid.NewGuid()}_nested_msg.pdf");
-                    string nestedHtmlPath = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".html");
-                    File.WriteAllText(nestedHtmlPath, nestedHtml, System.Text.Encoding.UTF8);
-                    var startInfo = new ProcessStartInfo
+                    if (!extractOriginalOnly)
                     {
-                        FileName = System.Reflection.Assembly.GetExecutingAssembly().Location,
-                        Arguments = $"--html2pdf \"{nestedHtmlPath}\" \"{nestedPdf}\"",
-                        UseShellExecute = false,
-                        CreateNoWindow = true
-                    };
-                    using (var process = Process.Start(startInfo))
-                    {
-                        process.WaitForExit(); if (process.ExitCode == 0)
+                        var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(msg, false);
+                        string nestedHtmlPath = Path.Combine(tempDir, Guid.NewGuid() + "_nested.html");
+                        File.WriteAllText(nestedHtmlPath, htmlResult.Html, System.Text.Encoding.UTF8);
+                        allTempFiles.Add(nestedHtmlPath);
+                        string nestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested.pdf");
+                        var psi = new System.Diagnostics.ProcessStartInfo
                         {
-                            // Add nested PDF directly without header
+                            FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
+                            Arguments = $"--html2pdf \"{nestedHtmlPath}\" \"{nestedPdf}\"",
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            RedirectStandardOutput = true,
+                            RedirectStandardError = true
+                        };
+                        var proc = System.Diagnostics.Process.Start(psi);
+                        proc.WaitForExit();
+                        if (proc.ExitCode == 0 && File.Exists(nestedPdf))
+                        {
                             allPdfFiles.Add(nestedPdf);
                             allTempFiles.Add(nestedPdf);
-                            Console.WriteLine($"[MSG] Depth {depth} - Successfully created PDF for nested MSG body: {msgSubject}");
-
-                            // COMMENTED OUT: Create hierarchy header with SmartArt
-                            // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                            // CreateHierarchyHeaderPdf(new List<string>(parentChain), msgSubject, usedHeaderText, headerPdf);
-                            // string finalNestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested_merged.pdf");
-                            // _appendPdfs(new List<string> { headerPdf, nestedPdf }, finalNestedPdf);
-                            // allPdfFiles.Add(finalNestedPdf);
-                            // allTempFiles.Add(headerPdf);
-                            // allTempFiles.Add(nestedPdf);
-                            // allTempFiles.Add(finalNestedPdf);
                         }
                         else
                         {
-                            Console.WriteLine($"[MSG] Depth {depth} - Failed to convert nested MSG body to PDF: {msgSubject}");
+                            Console.WriteLine($"[MSG] Failed to convert nested MSG to PDF");
                         }
+                        // Progress tick for MSG body
+                        progressTick?.Invoke();
                     }
-                    File.Delete(nestedHtmlPath);
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[MSG] Depth {depth} - Error processing nested MSG body {msgSubject}: {ex.Message}");
-                    string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_msg_error.pdf");
-                    string enhancedErrorText = CreateHierarchyHeaderText(new List<string>(parentChain), msgSubject, usedHeaderText + $"\n(Error: {ex.Message})");
-                    _addHeaderPdf(errorPdf, enhancedErrorText, null);
-                    allPdfFiles.Add(errorPdf);
-                    allTempFiles.Add(errorPdf);
+                    Console.WriteLine($"[MSG] Error processing nested MSG body: {ex.Message}");
                 }
             }
 
@@ -234,64 +210,32 @@ namespace MsgToPdfConverter.Services
             int totalAttachments = typedAttachments.Count;
             for (int attIndex = 0; attIndex < typedAttachments.Count; attIndex++)
             {
-                var att = typedAttachments[attIndex];
-                string attName = att.FileName ?? "attachment";
-                string attPath = Path.Combine(tempDir, $"depth{depth}_{attName}");
-                string attachmentHeaderText = $"Attachment (Depth {depth}): {attIndex + 1}/{totalAttachments} - {attName}";
-
-                try
+                var a = typedAttachments[attIndex];
+                string attPath = Path.Combine(tempDir, a.FileName ?? $"attachment_{attIndex}");
+                File.WriteAllBytes(attPath, a.Data);
+                allTempFiles.Add(attPath);
+                string attHeader = $"Attachment {attIndex + 1}/{totalAttachments} - {a.FileName}";
+                string currentItem = a.FileName;
+                var parentChainForAtt = new List<string>(parentChain);
+                parentChainForAtt.Add(msg.Subject ?? "MSG");
+                // Use hierarchy-aware processing and pass progressTick
+                var attPdf = ProcessSingleAttachmentWithHierarchy(a, attPath, tempDir, attHeader, allTempFiles, parentChainForAtt, currentItem, extractOriginalOnly, progressTick);
+                if (attPdf != null)
                 {
-                    File.WriteAllBytes(attPath, att.Data);
-                    allTempFiles.Add(attPath);
-
-                    // Build parent chain for this attachment
-                    var attachmentParentChain = new List<string>(parentChain);
-                    if (depth > 0)
-                    {
-                        attachmentParentChain.Add($"Nested Email: {msg.Subject ?? "No Subject"}");
-                    }
-
-                    string finalAttachmentPdf = ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, attachmentHeaderText, allTempFiles, attachmentParentChain, attName, extractOriginalOnly);
-
-                    if (finalAttachmentPdf != null)
-                        allPdfFiles.Add(finalAttachmentPdf);
+                    allPdfFiles.Add(attPdf);
                 }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[MSG] Depth {depth} - Error processing attachment {attName}: {ex.Message}");
-                    string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
-                    var errorParentChain = new List<string>(parentChain);
-                    if (depth > 0)
-                    {
-                        errorParentChain.Add($"Nested Email: {msg.Subject ?? "No Subject"}");
-                    }
-                    string enhancedErrorText = CreateHierarchyHeaderText(errorParentChain, attName, attachmentHeaderText + $"\n(Error: {ex.Message})");
-                    _addHeaderPdf(errorPdf, enhancedErrorText, null);
-                    allPdfFiles.Add(errorPdf);
-                    allTempFiles.Add(errorPdf);
-                }
+                // Progress tick for each attachment (if not handled inside)
+                // (But ProcessSingleAttachmentWithHierarchy should call progressTick for every file inside ZIP/7z)
             }
 
             // Process nested MSG files recursively (this will handle both their body content and attachments)
             for (int msgIndex = 0; msgIndex < nestedMessages.Count; msgIndex++)
             {
                 var nestedMsg = nestedMessages[msgIndex];
-                string nestedSubject = nestedMsg.Subject ?? $"nested_msg_depth_{depth + 1}";
-                string nestedHeaderText = $"Attachment (Depth {depth + 1}): {msgIndex + 1}/{nestedMessages.Count} - Nested Email: {nestedSubject}";
-
-                // Build parent chain for nested message
-                var nestedParentChain = new List<string>(parentChain);
-                if (depth == 0)
-                {
-                    nestedParentChain.Add("Root Email");
-                }
-                else
-                {
-                    nestedParentChain.Add($"Nested Email: {msg.Subject ?? "No Subject"}");
-                }
-
-                Console.WriteLine($"[MSG] Depth {depth} - Recursively processing nested message {msgIndex + 1}/{nestedMessages.Count}: {nestedSubject}");
-                ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, depth + 1, maxDepth, nestedHeaderText, nestedParentChain);
+                var parentChainForMsg = new List<string>(parentChain);
+                parentChainForMsg.Add(msg.Subject ?? "MSG");
+                // Recursively process nested MSG, pass progressTick
+                ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, extractOriginalOnly, depth + 1, maxDepth, $"Nested Email: {nestedMsg.Subject ?? "MSG"}", parentChainForMsg, progressTick);
             }
         }
 
@@ -399,7 +343,7 @@ namespace MsgToPdfConverter.Services
             return finalAttachmentPdf;
         }
 
-        public string ProcessZipAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false)
+        public string ProcessZipAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false, Action progressTick = null)
         {
             try
             {
@@ -420,12 +364,6 @@ namespace MsgToPdfConverter.Services
                     int fileCount = fileEntries.Count;
                     var folderEntries = archive.Entries.Where(e => e.Length == 0).ToList();
                     int folderCount = folderEntries.Count;
-
-                    // COMMENTED OUT: Create header PDF for the ZIP file itself
-                    // string zipHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_header.pdf");
-                    // CreateHierarchyHeaderPdf(parentChain, currentItem, enhancedHeaderText + $"\n\nZIP Archive Contents ({fileCount} files):", zipHeaderPdf);
-                    // zipPdfFiles.Add(zipHeaderPdf);
-                    // allTempFiles.Add(zipHeaderPdf);
 
                     int fileIndex = 0;
                     int folderIndex = 0;
@@ -625,6 +563,9 @@ namespace MsgToPdfConverter.Services
                             allTempFiles.Add(entryPdf);
                             unconvertibleFiles.Add(errorFileName);
                         }
+
+                        // Progress tick for every file processed
+                        progressTick?.Invoke();
                     }
 
                     // Skip unconvertible files notification (no header creation)
@@ -691,7 +632,7 @@ namespace MsgToPdfConverter.Services
             }
         }
 
-        public string Process7zAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false)
+        public string Process7zAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false, Action progressTick = null)
         {
             try
             {
@@ -712,12 +653,6 @@ namespace MsgToPdfConverter.Services
                     int fileCount = fileEntries.Count;
                     var folderEntries = archive.Entries.Where(e => e.IsDirectory).ToList();
                     int folderCount = folderEntries.Count;
-
-                    // COMMENTED OUT: Create header PDF for the 7z file itself
-                    // string sevenZipHeaderPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_header.pdf");
-                    // CreateHierarchyHeaderPdf(parentChain, currentItem, enhancedHeaderText + $"\n\n7z Archive Contents ({fileCount} files):", sevenZipHeaderPdf);
-                    // sevenZipPdfFiles.Add(sevenZipHeaderPdf);
-                    // allTempFiles.Add(sevenZipHeaderPdf);
 
                     int fileIndex = 0;
                     int folderIndex = 0;
@@ -756,7 +691,7 @@ namespace MsgToPdfConverter.Services
                             IsLikelySignatureImageByNameAndSize(currentFileName, entry.Size))
                         {
                             Console.WriteLine($"[7Z] Skipping likely signature image: {currentFileName}");
-                            continue; // Skip this image file
+                            continue;
                         }
 
                         string entryPath = Path.Combine(tempDir, $"7z_{Guid.NewGuid()}_{Path.GetFileName(entry.Key)}");
@@ -920,6 +855,9 @@ namespace MsgToPdfConverter.Services
                             allTempFiles.Add(entryPdf);
                             unconvertibleFiles.Add(errorFileName);
                         }
+
+                        // Progress tick for every file processed
+                        progressTick?.Invoke();
                     }
 
                     // Skip unconvertible files notification (no header creation)
@@ -989,7 +927,7 @@ namespace MsgToPdfConverter.Services
         /// <summary>
         /// Processes a single attachment with SmartArt hierarchy support
         /// </summary>
-        public string ProcessSingleAttachmentWithHierarchy(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false)
+        public string ProcessSingleAttachmentWithHierarchy(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false, Action progressTick = null)
         {
             Console.WriteLine($"[ATTACH-DEBUG] ENTER: attName={att?.FileName}, attPath={attPath}, tempDir={tempDir}, headerText={headerText}, parentChain=[{string.Join(" -> ", parentChain ?? new List<string>())}], currentItem={currentItem}, extractOriginalOnly={extractOriginalOnly}");
             
@@ -1066,7 +1004,7 @@ namespace MsgToPdfConverter.Services
                 else if (ext == ".zip")
                 {
                     // Process ZIP files with hierarchy support
-                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem, extractOriginalOnly);
+                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem, extractOriginalOnly, progressTick);
                     // Add the final ZIP PDF to temp files for cleanup after it's merged into main output
                     if (finalAttachmentPdf != null)
                     {
@@ -1076,7 +1014,7 @@ namespace MsgToPdfConverter.Services
                 else if (ext == ".7z")
                 {
                     // Process 7z files with hierarchy support
-                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem, extractOriginalOnly);
+                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, parentChain, currentItem, extractOriginalOnly, progressTick);
                     // Add the final 7z PDF to temp files for cleanup after it's merged into main output
                     if (finalAttachmentPdf != null)
                     {
@@ -1287,6 +1225,221 @@ namespace MsgToPdfConverter.Services
             {
                 Console.WriteLine($"[FILTER] Error checking signature image {fileName}: {ex.Message}");
                 return false; // If in doubt, don't filter out
+            }
+        }
+
+        /// <summary>
+        /// Recursively counts all processable items (attachments, embedded, files in ZIP/7z, nested MSG)
+        /// </summary>
+        public int CountAllProcessableItems(Storage.Message msg)
+        {
+            int count = 0;
+            if (msg.Attachments != null)
+            {
+                foreach (var att in msg.Attachments)
+                {
+                    if (att is Storage.Message nestedMsg)
+                    {
+                        count += 1 + CountAllProcessableItems(nestedMsg);
+                    }
+                    else if (att is Storage.Attachment a)
+                    {
+                        string ext = System.IO.Path.GetExtension(a.FileName ?? "").ToLowerInvariant();
+                        if (ext == ".zip" || ext == ".7z")
+                        {
+                            // Extract to temp dir and count recursively
+                            string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MsgToPdf_CountAllItems_" + Guid.NewGuid().ToString());
+                            System.IO.Directory.CreateDirectory(tempDir);
+                            try
+                            {
+                                if (ext == ".zip")
+                                {
+                                    using (var archive = System.IO.Compression.ZipFile.OpenRead(a.FileName))
+                                    {
+                                        foreach (var entry in archive.Entries)
+                                        {
+                                            if (entry.Length == 0) continue; // skip directories
+                                            string entryPath = System.IO.Path.Combine(tempDir, entry.FullName);
+                                            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(entryPath));
+                                            entry.ExtractToFile(entryPath, true);
+                                            string entryExt = System.IO.Path.GetExtension(entryPath).ToLowerInvariant();
+                                            if (entryExt == ".msg")
+                                            {
+                                                try
+                                                {
+                                                    using (var entryMsg = new Storage.Message(entryPath))
+                                                    {
+                                                        count += 1 + CountAllProcessableItems(entryMsg);
+                                                    }
+                                                }
+                                                catch { count++; }
+                                            }
+                                            else if (entryExt == ".zip" || entryExt == ".7z")
+                                            {
+                                                // Recurse into nested archive
+                                                try
+                                                {
+                                                    count += 1 + CountAllProcessableItemsFromFile(entryPath);
+                                                }
+                                                catch { count++; }
+                                            }
+                                            else
+                                            {
+                                                count++;
+                                            }
+                                        }
+                                    }
+                                }
+                                else if (ext == ".7z")
+                                {
+                                    using (var archive = SharpCompress.Archives.SevenZip.SevenZipArchive.Open(a.FileName))
+                                    {
+                                        foreach (var entry in archive.Entries)
+                                        {
+                                            if (entry.IsDirectory) continue;
+                                            string entryPath = System.IO.Path.Combine(tempDir, entry.Key);
+                                            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(entryPath));
+                                            using (var entryStream = entry.OpenEntryStream())
+                                            using (var fileStream = System.IO.File.Create(entryPath))
+                                            {
+                                                entryStream.CopyTo(fileStream);
+                                            }
+                                            string entryExt = System.IO.Path.GetExtension(entryPath).ToLowerInvariant();
+                                            if (entryExt == ".msg")
+                                            {
+                                                try
+                                                {
+                                                    using (var entryMsg = new Storage.Message(entryPath))
+                                                    {
+                                                        count += 1 + CountAllProcessableItems(entryMsg);
+                                                    }
+                                                }
+                                                catch { count++; }
+                                            }
+                                            else if (entryExt == ".zip" || entryExt == ".7z")
+                                            {
+                                                try
+                                                {
+                                                    count += 1 + CountAllProcessableItemsFromFile(entryPath);
+                                                }
+                                                catch { count++; }
+                                            }
+                                            else
+                                            {
+                                                count++;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            catch { count++; }
+                            finally
+                            {
+                                try { System.IO.Directory.Delete(tempDir, true); } catch { }
+                            }
+                        }
+                        else
+                        {
+                            count++;
+                        }
+                    }
+                }
+            }
+            return count;
+        }
+
+        /// <summary>
+        /// Helper to count all processable items from a file (MSG, ZIP, 7z)
+        /// </summary>
+        private int CountAllProcessableItemsFromFile(string filePath)
+        {
+            string ext = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
+            if (ext == ".msg")
+            {
+                try
+                {
+                    using (var msg = new Storage.Message(filePath))
+                    {
+                        return 1 + CountAllProcessableItems(msg);
+                    }
+                }
+                catch { return 1; }
+            }
+            else if (ext == ".zip")
+            {
+                int count = 0;
+                string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MsgToPdf_CountAllItems_" + Guid.NewGuid().ToString());
+                System.IO.Directory.CreateDirectory(tempDir);
+                try
+                {
+                    using (var archive = System.IO.Compression.ZipFile.OpenRead(filePath))
+                    {
+                        foreach (var entry in archive.Entries)
+                        {
+                            if (entry.Length == 0) continue;
+                            string entryPath = System.IO.Path.Combine(tempDir, entry.FullName);
+                            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(entryPath));
+                            entry.ExtractToFile(entryPath, true);
+                            string entryExt = System.IO.Path.GetExtension(entryPath).ToLowerInvariant();
+                            if (entryExt == ".msg" || entryExt == ".zip" || entryExt == ".7z")
+                            {
+                                count += 1 + CountAllProcessableItemsFromFile(entryPath);
+                            }
+                            else
+                            {
+                                count++;
+                            }
+                        }
+                    }
+                }
+                catch { count++; }
+                finally
+                {
+                    try { System.IO.Directory.Delete(tempDir, true); } catch { }
+                }
+                return count;
+            }
+            else if (ext == ".7z")
+            {
+                int count = 0;
+                string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MsgToPdf_CountAllItems_" + Guid.NewGuid().ToString());
+                System.IO.Directory.CreateDirectory(tempDir);
+                try
+                {
+                    using (var archive = SharpCompress.Archives.SevenZip.SevenZipArchive.Open(filePath))
+                    {
+                        foreach (var entry in archive.Entries)
+                        {
+                            if (entry.IsDirectory) continue;
+                            string entryPath = System.IO.Path.Combine(tempDir, entry.Key);
+                            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(entryPath));
+                            using (var entryStream = entry.OpenEntryStream())
+                            using (var fileStream = System.IO.File.Create(entryPath))
+                            {
+                                entryStream.CopyTo(fileStream);
+                            }
+                            string entryExt = System.IO.Path.GetExtension(entryPath).ToLowerInvariant();
+                            if (entryExt == ".msg" || entryExt == ".zip" || entryExt == ".7z")
+                            {
+                                count += 1 + CountAllProcessableItemsFromFile(entryPath);
+                            }
+                            else
+                            {
+                                count++;
+                            }
+                        }
+                    }
+                }
+                catch { count++; }
+                finally
+                {
+                    try { System.IO.Directory.Delete(tempDir, true); } catch { }
+                }
+                return count;
+            }
+            else
+            {
+                return 1;
             }
         }
     }

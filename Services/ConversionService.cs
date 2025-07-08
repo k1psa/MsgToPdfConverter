@@ -55,6 +55,7 @@ namespace MsgToPdfConverter.Services
             EmailConverterService emailService,
             AttachmentService attachmentService,
             Action<int, int, int, string> updateProgress, // (processed, total, progress, statusText)
+            Action<int, int> updateFileProgress, // (current, max) for per-file progress
             Func<bool> isCancellationRequested,
             Action<string> showMessageBox // (message)
             , List<string> generatedPdfs = null // optional: collect generated PDFs
@@ -78,11 +79,15 @@ namespace MsgToPdfConverter.Services
                     {
                         if (appendAttachments)
                         {
-                            // Use robust attachment/merge logic for .msg files
                             Storage.Message msg = null;
                             try
                             {
                                 msg = new Storage.Message(filePath);
+                                // --- Set up progress max for this file ---
+                                int fileProgress = 0;
+                                int totalCount = attachmentService.CountAllProcessableItems(msg);
+                                updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
+                                // ---
                                 string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
                                 string msgBaseName = System.IO.Path.GetFileNameWithoutExtension(filePath);
                                 string msgDir = !string.IsNullOrEmpty(selectedOutputFolder) ? selectedOutputFolder : System.IO.Path.GetDirectoryName(filePath);
@@ -143,19 +148,19 @@ namespace MsgToPdfConverter.Services
                                 var allPdfFiles = new List<string> { pdfFilePath };
                                 var allTempFiles = new List<string>();
                                 string tempDir = System.IO.Path.GetDirectoryName(pdfFilePath);
-                                int totalAttachments = typedAttachments.Count;
                                 for (int attIndex = 0; attIndex < typedAttachments.Count; attIndex++)
                                 {
                                     var att = typedAttachments[attIndex];
                                     string attName = att.FileName ?? "attachment";
                                     string attPath = System.IO.Path.Combine(tempDir, attName);
-                                    string headerText = $"Attachment {attIndex + 1}/{totalAttachments} - {attName}";
+                                    string headerText = $"Attachment {attIndex + 1}/{typedAttachments.Count} - {attName}";
                                     try
                                     {
                                         System.IO.File.WriteAllBytes(attPath, att.Data);
                                         allTempFiles.Add(attPath);
                                         var attachmentParentChain = new List<string> { msg.Subject ?? System.IO.Path.GetFileName(filePath) };
-                                        string finalAttachmentPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, attachmentParentChain, attName, false);
+                                        // Pass progressTick to ensure every processed file increments progress
+                                        string finalAttachmentPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, attachmentParentChain, attName, false, () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
                                         if (finalAttachmentPdf != null)
                                             allPdfFiles.Add(finalAttachmentPdf);
                                     }
@@ -175,7 +180,8 @@ namespace MsgToPdfConverter.Services
                                     string nestedSubject = nestedMsg.Subject ?? $"nested_msg_depth_1";
                                     string nestedHeaderText = $"Attachment (Depth 1): {nestedIndex + 1}/{nestedMessages.Count} - Nested Email: {nestedSubject}";
                                     var initialParentChain = new List<string> { msg.Subject ?? System.IO.Path.GetFileName(filePath) };
-                                    attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, false, 1, 5, nestedHeaderText, initialParentChain);
+                                    // When calling ProcessMsgAttachmentsRecursively, pass a lambda to increment progress:
+                                    attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, false, 1, 5, nestedHeaderText, initialParentChain, () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
                                 }
                                 string mergedPdf = System.IO.Path.Combine(tempDir, System.IO.Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
                                 PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf);
@@ -221,6 +227,9 @@ namespace MsgToPdfConverter.Services
                                 generatedPdfs?.Add(pdfFilePath);
                                 success++;
                                 conversionSucceeded = true;
+                                
+                                // Mark file progress as complete
+                                updateFileProgress?.Invoke(totalCount, totalCount);
                             }
                             catch (Exception ex)
                             {
@@ -252,13 +261,23 @@ namespace MsgToPdfConverter.Services
                         else
                         {
                             // Only convert the email body (no attachments)
+                            updateFileProgress?.Invoke(0, 100);
                             var result = ConvertSingleMsgFile(filePath, dir, appendAttachments, extractOriginalOnly, emailService, attachmentService, generatedPdfs, selectedFiles);
-                            if (result) { success++; conversionSucceeded = true; } else fail++;
+                            if (result) { 
+                                success++; 
+                                conversionSucceeded = true; 
+                                updateFileProgress?.Invoke(100, 100);
+                            } else {
+                                fail++;
+                            }
                         }
                     }
                     else
                     {
                         // Use the same hierarchical logic as for attachments
+                        // Reset file progress for non-MSG files
+                        updateFileProgress?.Invoke(0, 100);
+                        
                         string outputPdf = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
                         var tempFiles = new List<string>();
                         var allPdfFiles = new List<string>();
@@ -269,6 +288,9 @@ namespace MsgToPdfConverter.Services
                         string processedPdf = null;
                         try
                         {
+                            // Update progress to 50% during processing
+                            updateFileProgress?.Invoke(50, 100);
+                            
                             processedPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(
                                 null, filePath, tempDir, headerText, allTempFiles, parentChain, baseName, extractOriginalOnly);
                             if (!string.IsNullOrEmpty(processedPdf))
@@ -363,6 +385,8 @@ namespace MsgToPdfConverter.Services
                             generatedPdfs?.Add(outputPdf);
                             success++;
                             conversionSucceeded = true;
+                            // Mark file progress as complete
+                            updateFileProgress?.Invoke(100, 100);
                         }
                         else
                         {

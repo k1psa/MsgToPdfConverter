@@ -31,6 +31,8 @@ namespace MsgToPdfConverter
         private string _lastConfirmedCombinedPdfPath = null;
         private bool _combinePdfOverwriteConfirmed = false;
         private bool _isProcessingFile;
+        private int _fileProgressValue;
+        private int _fileProgressMax = 100;
 
         // Services
         private readonly EmailConverterService _emailService = new EmailConverterService();
@@ -119,6 +121,10 @@ namespace MsgToPdfConverter
             set { _combinedPdfOutputPath = value; OnPropertyChanged(nameof(CombinedPdfOutputPath)); }
         }
         public bool IsProcessingFile { get => _isProcessingFile; set { _isProcessingFile = value; OnPropertyChanged(nameof(IsProcessingFile)); } }
+        public int FileProgressValue { get => _fileProgressValue; set { _fileProgressValue = value; OnPropertyChanged(nameof(FileProgressValue)); OnPropertyChanged(nameof(FileProgressPercentage)); OnPropertyChanged(nameof(FileProgressRatio)); } }
+        public int FileProgressMax { get => _fileProgressMax; set { _fileProgressMax = value; OnPropertyChanged(nameof(FileProgressMax)); OnPropertyChanged(nameof(FileProgressPercentage)); OnPropertyChanged(nameof(FileProgressRatio)); } }
+        public double FileProgressPercentage => _fileProgressMax > 0 ? (double)_fileProgressValue / _fileProgressMax * 100 : 0;
+        public double FileProgressRatio => _fileProgressMax > 0 ? (double)_fileProgressValue / _fileProgressMax : 0;
 
         // Commands
         public ICommand SelectFilesCommand { get; }
@@ -220,9 +226,18 @@ namespace MsgToPdfConverter
                         {
                             ProcessingStatus = statusText;
                             ProgressValue = processed;
-                            // Show progress circle when actively processing a file
                             IsProcessingFile = !string.IsNullOrEmpty(statusText) && statusText.Contains("Processing file");
                             Console.WriteLine($"Progress: {processed}/{total} - {statusText}");
+                        },
+                        (current, max) =>
+                        {
+                            Application.Current.Dispatcher.Invoke(() =>
+                            {
+                                FileProgressValue = current;
+                                FileProgressMax = max;
+                                IsProcessingFile = max > 0;
+                                Console.WriteLine($"[FILE-PROGRESS] {current}/{max} = {FileProgressRatio:F2} - IsProcessingFile: {IsProcessingFile}");
+                            });
                         },
                         () => CancellationRequested,
                         null, // no messagebox during conversion
@@ -283,6 +298,20 @@ namespace MsgToPdfConverter
                 IsConverting = false;
                 CancellationRequested = false;
                 ProcessingStatus = "";
+                
+                // Delay resetting file progress to let user see 100% completion
+#pragma warning disable CS4014 // Because this call is not awaited, execution continues before call is completed
+                Task.Delay(1500).ContinueWith(_ =>
+                {
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        IsProcessingFile = false;
+                        FileProgressValue = 0;
+                        FileProgressMax = 0;
+                    });
+                });
+#pragma warning restore CS4014
+                
                 // After conversion, reset confirmation so dialog will show again if needed next time
                 _combinePdfOverwriteConfirmed = false;
                 _lastConfirmedCombinedPdfPath = CombinedPdfOutputPath;
