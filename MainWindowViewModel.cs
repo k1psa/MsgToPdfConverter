@@ -230,8 +230,13 @@ namespace MsgToPdfConverter
                         : $"Processing completed. Total files: {SelectedFiles.Count}, Success: {result.Success}, Failed: {result.Fail}";
                 }
                 Console.WriteLine(statusMessage);
+                // Ensure MessageBox is centered and on top, even if window is pinned
+                var mainWindow = Application.Current?.MainWindow;
+                bool wasTopmost = mainWindow != null && mainWindow.Topmost;
+                if (IsPinned && mainWindow != null) mainWindow.Topmost = false;
                 MessageBox.Show(statusMessage, "Processing Results", MessageBoxButton.OK,
                     (result.Fail > 0 && !CombineAllPdfs) ? MessageBoxImage.Warning : MessageBoxImage.Information);
+                if (IsPinned && mainWindow != null) mainWindow.Topmost = wasTopmost;
             }
             catch (Exception ex)
             {
