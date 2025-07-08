@@ -2,7 +2,6 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Name="Root"
-             Width="44" Height="44"
              Padding="2">
     <Grid>
         <!-- Background circle -->
@@ -10,8 +9,8 @@
                  Stroke="#E0E0E0" 
                  StrokeThickness="3" 
                  Fill="Transparent" 
-                 Width="40" 
-                 Height="40"
+                 Width="25" 
+                 Height="25"
                  HorizontalAlignment="Center"
                  VerticalAlignment="Center"/>
         <!-- Foreground progress arc -->
@@ -19,16 +18,16 @@
               Stroke="#2196F3" 
               StrokeThickness="3" 
               Fill="Transparent"
-              Width="40" 
-              Height="40"
+              Width="25" 
+              Height="25"
               HorizontalAlignment="Center"
               VerticalAlignment="Center">
             <Path.Data>
                 <PathGeometry x:Name="ProgressGeometry">
-                    <PathFigure x:Name="ProgressFigure" StartPoint="20,4">
+                    <PathFigure x:Name="ProgressFigure" StartPoint="8,0">
                         <ArcSegment x:Name="ProgressArc" 
-                                    Point="20,4" 
-                                    Size="16,16" 
+                                    Point="8,0" 
+                                    Size="8,8" 
                                     SweepDirection="Clockwise" 
                                     IsLargeArc="False"/>
                     </PathFigure>
@@ -41,7 +40,7 @@
                    HorizontalAlignment="Center" 
                    VerticalAlignment="Center" 
                    FontWeight="Bold" 
-                   FontSize="14" 
+                   FontSize="8" 
                    Foreground="#333"/>
     </Grid>
 </UserControl>
