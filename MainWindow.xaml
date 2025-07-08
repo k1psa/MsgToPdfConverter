@@ -143,8 +143,8 @@
                         Visibility="{Binding ProcessingStatus, Converter={StaticResource StringToVisibilityConverter}}">
                 <!-- Circular progress indicator -->
                 <local:CircularProgressIndicator Progress="{Binding FileProgressPercentage}" 
-                                               Width="25" Height="25" 
-                                               Margin="0,0,8,0"
+                                               Width="30" Height="30" 
+                                               Margin="0,0,0,0"
                                                VerticalAlignment="Center"
                                                Visibility="{Binding IsProcessingFile, Converter={StaticResource BoolToVisibilityConverter}}"/>
                 <TextBlock Text="{Binding ProcessingStatus}"

@@ -152,9 +152,9 @@ namespace MsgToPdfConverter
 
             _progressPath.Visibility = Visibility.Visible;
 
-            double radius = 8;
-            double centerX = 8;
-            double centerY = 8;
+            double centerX = 12.5;
+            double centerY = 12.5;
+            double radius = 11;
 
             // Calculate start point (top of circle)
             double startX = centerX;

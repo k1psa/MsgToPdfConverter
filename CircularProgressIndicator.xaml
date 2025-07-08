@@ -24,10 +24,10 @@
               VerticalAlignment="Center">
             <Path.Data>
                 <PathGeometry x:Name="ProgressGeometry">
-                    <PathFigure x:Name="ProgressFigure" StartPoint="8,0">
+                    <PathFigure x:Name="ProgressFigure" StartPoint="12.5,3">
                         <ArcSegment x:Name="ProgressArc" 
-                                    Point="8,0" 
-                                    Size="8,8" 
+                                    Point="12.5,3" 
+                                    Size="11,11" 
                                     SweepDirection="Clockwise" 
                                     IsLargeArc="False"/>
                     </PathFigure>
