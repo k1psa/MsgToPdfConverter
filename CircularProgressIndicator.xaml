@@ -2,32 +2,33 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Name="Root"
+             Width="44" Height="44"
              Padding="2">
     <Grid>
         <!-- Background circle -->
         <Ellipse x:Name="BackgroundCircle" 
                  Stroke="#E0E0E0" 
-                 StrokeThickness="2" 
+                 StrokeThickness="3" 
                  Fill="Transparent" 
-                 Width="18" 
-                 Height="18"
+                 Width="40" 
+                 Height="40"
                  HorizontalAlignment="Center"
                  VerticalAlignment="Center"/>
         <!-- Foreground progress arc -->
         <Path x:Name="ProgressPath" 
               Stroke="#2196F3" 
-              StrokeThickness="2" 
+              StrokeThickness="3" 
               Fill="Transparent"
-              Width="18" 
-              Height="18"
+              Width="40" 
+              Height="40"
               HorizontalAlignment="Center"
               VerticalAlignment="Center">
             <Path.Data>
                 <PathGeometry x:Name="ProgressGeometry">
-                    <PathFigure x:Name="ProgressFigure" StartPoint="10,1">
+                    <PathFigure x:Name="ProgressFigure" StartPoint="20,4">
                         <ArcSegment x:Name="ProgressArc" 
-                                    Point="10,1" 
-                                    Size="9,9" 
+                                    Point="20,4" 
+                                    Size="16,16" 
                                     SweepDirection="Clockwise" 
                                     IsLargeArc="False"/>
                     </PathFigure>
@@ -40,7 +41,7 @@
                    HorizontalAlignment="Center" 
                    VerticalAlignment="Center" 
                    FontWeight="Bold" 
-                   FontSize="8" 
+                   FontSize="14" 
                    Foreground="#333"/>
     </Grid>
 </UserControl>
