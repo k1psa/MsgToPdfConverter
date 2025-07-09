@@ -7,6 +7,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Collections.Generic;
 using System.Linq;
+using System.Windows.Threading;
 using MsgToPdfConverter.Services;
 using MsgToPdfConverter.Utils;
 
@@ -33,6 +34,8 @@ namespace MsgToPdfConverter
         private bool _isProcessingFile;
         private int _fileProgressValue;
         private int _fileProgressMax = 100;
+        private DispatcherTimer _progressRingDelayTimer;
+        private bool _pendingShowProgressRing;
 
         // Services
         private readonly EmailConverterService _emailService = new EmailConverterService();
@@ -64,6 +67,15 @@ namespace MsgToPdfConverter
                 (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
             };
             Console.WriteLine("MainWindowViewModel initialized");
+            _progressRingDelayTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+            _progressRingDelayTimer.Tick += (s, e) =>
+            {
+                _progressRingDelayTimer.Stop();
+                if (_pendingShowProgressRing)
+                {
+                    IsProcessingFile = true;
+                }
+            };
         }
 
         // Properties for binding
@@ -226,7 +238,7 @@ namespace MsgToPdfConverter
                         {
                             ProcessingStatus = statusText;
                             ProgressValue = processed;
-                            IsProcessingFile = !string.IsNullOrEmpty(statusText) && statusText.Contains("Processing file");
+                            // Remove direct IsProcessingFile set here
                             Console.WriteLine($"Progress: {processed}/{total} - {statusText}");
                         },
                         (current, max) =>
@@ -235,7 +247,21 @@ namespace MsgToPdfConverter
                             {
                                 FileProgressValue = current;
                                 FileProgressMax = max;
-                                IsProcessingFile = max > 0;
+                                // Progress ring delay logic
+                                if (max > 0 && current < max)
+                                {
+                                    if (!_progressRingDelayTimer.IsEnabled && !IsProcessingFile)
+                                    {
+                                        _pendingShowProgressRing = true;
+                                        _progressRingDelayTimer.Start();
+                                    }
+                                }
+                                else
+                                {
+                                    _pendingShowProgressRing = false;
+                                    _progressRingDelayTimer.Stop();
+                                    IsProcessingFile = false;
+                                }
                                 Console.WriteLine($"[FILE-PROGRESS] {current}/{max} = {FileProgressRatio:F2} - IsProcessingFile: {IsProcessingFile}");
                             });
                         },
@@ -305,6 +331,8 @@ namespace MsgToPdfConverter
                 {
                     Application.Current.Dispatcher.Invoke(() =>
                     {
+                        _pendingShowProgressRing = false;
+                        _progressRingDelayTimer.Stop();
                         IsProcessingFile = false;
                         FileProgressValue = 0;
                         FileProgressMax = 0;
@@ -505,5 +533,14 @@ namespace MsgToPdfConverter
 
         public event PropertyChangedEventHandler PropertyChanged;
         protected void OnPropertyChanged(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+        // Add this method to the MainWindowViewModel class:
+        public void SafeFileProgressTick()
+        {
+            if (FileProgressValue < FileProgressMax)
+                FileProgressValue++;
+            else
+                FileProgressValue = FileProgressMax;
+        }
     }
 }

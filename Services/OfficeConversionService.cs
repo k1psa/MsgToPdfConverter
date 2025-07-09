@@ -30,10 +30,10 @@ namespace MsgToPdfConverter.Services
                 {
                     if (ext == ".doc" || ext == ".docx")
                     {
+                        progressTick?.Invoke(); // Tick: starting extraction/conversion
                         // Extract embedded OLE objects before PDF export
                         var extractedObjects = new List<MsgToPdfConverter.Utils.InteropEmbeddedExtractor.ExtractedObjectInfo>();
                         string tempDir = null;
-                        
                         try
                         {
                             tempDir = Path.Combine(Path.GetTempPath(), "MsgToPdf_Embedded_" + Guid.NewGuid());
@@ -45,7 +45,7 @@ namespace MsgToPdfConverter.Services
                         {
                             Console.WriteLine($"[InteropExtractor] Extraction failed: {ex.Message}");
                         }
-
+                        progressTick?.Invoke(); // Tick: after embedded extraction
                         // Create main PDF from Word document
                         string mainPdfPath = outputPdf;
                         if (extractedObjects.Count > 0)
@@ -53,18 +53,18 @@ namespace MsgToPdfConverter.Services
                             // If we have embedded objects, create the main PDF in a temp location first
                             mainPdfPath = Path.Combine(Path.GetTempPath(), $"main_pdf_{Guid.NewGuid()}.pdf");
                         }
-
-                        // Convert Word document to PDF
                         var wordApp = new Microsoft.Office.Interop.Word.Application();
                         var doc = wordApp.Documents.Open(inputPath);
+                        progressTick?.Invoke(); // Tick: after opening document
+  
                         doc.ExportAsFixedFormat(mainPdfPath, Microsoft.Office.Interop.Word.WdExportFormat.wdExportFormatPDF);
+                        progressTick?.Invoke(); // Tick: after exporting to PDF
                         doc.Close();
                         Marshal.ReleaseComObject(doc);
                         wordApp.Quit();
                         Marshal.ReleaseComObject(wordApp);
                         GC.Collect();
                         GC.WaitForPendingFinalizers();
-
                         // Insert embedded files into the PDF if any were extracted
                         if (extractedObjects.Count > 0)
                         {
@@ -72,7 +72,7 @@ namespace MsgToPdfConverter.Services
                             {
                                 Console.WriteLine($"[PDF-EMBED] Inserting {extractedObjects.Count} embedded files into PDF");
                                 PdfEmbeddedInsertionService.InsertEmbeddedFiles(mainPdfPath, extractedObjects, outputPdf, progressTick);
-                                
+                                progressTick?.Invoke(); // Tick: after embedding
                                 // Clean up temp main PDF
                                 if (File.Exists(mainPdfPath) && mainPdfPath != outputPdf)
                                 {
@@ -90,7 +90,6 @@ namespace MsgToPdfConverter.Services
                                 }
                             }
                         }
-
                         // Clean up temp extraction directory
                         if (!string.IsNullOrEmpty(tempDir) && Directory.Exists(tempDir))
                         {
@@ -103,7 +102,6 @@ namespace MsgToPdfConverter.Services
                                 Console.WriteLine($"[CLEANUP] Failed to delete temp directory {tempDir}: {ex.Message}");
                             }
                         }
-
                         result = true;
                     }
                     else if (ext == ".xls" || ext == ".xlsx")
@@ -153,13 +151,11 @@ namespace MsgToPdfConverter.Services
             if (result)
             {
                 Console.WriteLine($"[Interop] Waiting for Office to release PDF file: {outputPdf}");
-
-                // Wait and verify the PDF is not locked (start with shorter delays)
                 int[] delays = { 100, 200, 300, 500, 500, 500, 1000, 1000, 1000, 1000 };
                 for (int i = 0; i < delays.Length; i++)
                 {
                     System.Threading.Thread.Sleep(delays[i]);
-
+                    progressTick?.Invoke(); // Tick: show progress during wait
                     // Try to open the PDF file to verify it's not locked
                     try
                     {
@@ -187,5 +183,15 @@ namespace MsgToPdfConverter.Services
             }
             return result;
         }
+
+        // Add a helper for safe progress ticking (to be used in the ViewModel or tick callback):
+        // public void SafeProgressTick() {
+        //     if (FileProgressValue < FileProgressMax)
+        //         FileProgressValue++;
+        //     else
+        //         FileProgressValue = FileProgressMax;
+        // }
+        // Only call FileProgressValue = 0 and FileProgressMax = N at the start of a new file, not after finishing one.
+        // In OfficeConversionService.cs, do not call progressTick after the file is done, and only reset at the start of a new file.
     }
 }
