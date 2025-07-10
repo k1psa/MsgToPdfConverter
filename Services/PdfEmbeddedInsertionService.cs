@@ -62,38 +62,14 @@ namespace MsgToPdfConverter.Services
                 return;
             }
 
-            // --- BEGIN CONTENT-BASED DEDUPLICATION ---
-            var seenHashes = new HashSet<string>();
-            var uniqueObjects = new List<InteropEmbeddedExtractor.ExtractedObjectInfo>();
-            foreach (var obj in extractedObjects)
-            {
-                if (!File.Exists(obj.FilePath)) continue;
-                string hash = ComputeFileHash(obj.FilePath);
-                if (hash == null) continue;
-                if (!seenHashes.Contains(hash))
-                {
-                    seenHashes.Add(hash);
-                    uniqueObjects.Add(obj);
-                }
-                else
-                {
-                    Console.WriteLine($"[PDF-INSERT] Skipping duplicate embedded file by content hash: {Path.GetFileName(obj.FilePath)}");
-                }
-            }
-            // --- END CONTENT-BASED DEDUPLICATION ---
+            // --- REMOVED CONTENT-BASED DEDUPLICATION ---
+            // All embedded files will be processed, even if content is identical.
 
-            if (uniqueObjects.Count == 0)
-            {
-                Console.WriteLine("[PDF-INSERT] No valid embedded files to insert, copying main PDF");
-                File.Copy(mainPdfPath, outputPdfPath, true);
-                return;
-            }
-
-            Console.WriteLine($"[PDF-INSERT] Inserting {uniqueObjects.Count} embedded files into {mainPdfPath}");
+            Console.WriteLine($"[PDF-INSERT] Inserting {extractedObjects.Count} embedded files into {mainPdfPath}");
 
             // Sort embedded objects by PageNumber (synthetic or real), then by DocumentOrderIndex for tie-breaking
             // Note: Objects with PageNumber = -1 will be assigned to the last page
-            var objectsByPage = uniqueObjects
+            var objectsByPage = extractedObjects
                 .OrderBy(obj => obj.PageNumber == -1 ? int.MaxValue : obj.PageNumber)
                 .ThenBy(obj => obj.DocumentOrderIndex)
                 .ToList();
@@ -264,8 +240,13 @@ namespace MsgToPdfConverter.Services
         {
             try
             {
+                // Enhanced debug logging for file type detection
+                string extMain = Path.GetExtension(obj.FilePath)?.ToLowerInvariant();
+                bool isPdf = IsPdfFile(obj.FilePath);
+                Console.WriteLine($"[PDF-INSERT][DEBUG] InsertEmbeddedObject_NoSeparator: {obj.FilePath} (ext: {extMain}) IsPdfFile={isPdf}");
+
                 // Treat any file that is a PDF by header as a PDF, regardless of extension
-                if (IsPdfFile(obj.FilePath))
+                if (isPdf)
                 {
                     return InsertPdfFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage, obj.OleClass, progressTick);
                 }
@@ -300,26 +281,29 @@ namespace MsgToPdfConverter.Services
                             // Save each entry to a temp file
                             string tempFile = Path.Combine(Path.GetTempPath(), $"zip_entry_{Guid.NewGuid()}_{entry.FileName}");
                             File.WriteAllBytes(tempFile, entry.Data);
-                            string ext = Path.GetExtension(entry.FileName).ToLowerInvariant();
-                            if (ext == ".pdf")
+                            string entryExt = Path.GetExtension(entry.FileName).ToLowerInvariant(); // FIX: avoid shadowing
+                            bool entryIsPdf = IsPdfFile(tempFile);
+                            Console.WriteLine($"[PDF-INSERT][DEBUG] ZIP entry: {entry.FileName} (ext: {entryExt}) IsPdfFile={entryIsPdf}");
+                            if (entryIsPdf)
                             {
                                 currentOutputPage = InsertPdfFile_NoSeparator(tempFile, outputPdf, currentOutputPage, "ZIP-PDF", progressTick);
                             }
-                            else if (ext == ".docx")
+                            else if (entryExt == ".docx")
                             {
                                 currentOutputPage = InsertDocxFile_NoSeparator(tempFile, outputPdf, currentOutputPage);
                             }
-                            else if (ext == ".xlsx")
+                            else if (entryExt == ".xlsx")
                             {
                                 currentOutputPage = InsertXlsxFile_NoSeparator(tempFile, outputPdf, currentOutputPage);
                             }
-                            else if (ext == ".msg")
+                            else if (entryExt == ".msg")
                             {
                                 currentOutputPage = InsertMsgFile_NoSeparator(tempFile, outputPdf, currentOutputPage);
                             }
                             else
                             {
-                                currentOutputPage = InsertPlaceholderForFile(tempFile, outputPdf, currentOutputPage, $"ZIP Entry ({ext})");
+                                Console.WriteLine($"[PDF-INSERT][DEBUG] ZIP entry: {entry.FileName} not recognized as supported type, inserting placeholder.");
+                                currentOutputPage = InsertPlaceholderForFile(tempFile, outputPdf, currentOutputPage, $"ZIP Entry ({entryExt})");
                             }
                             try { File.Delete(tempFile); } catch { }
                         }
@@ -355,7 +339,15 @@ namespace MsgToPdfConverter.Services
                             obj.FilePath, tempDir, headerText, allTempFiles, parentChain, currentItem, false);
                         if (!string.IsNullOrEmpty(resultPdf) && File.Exists(resultPdf))
                         {
-                            currentOutputPage = InsertPdfFile_NoSeparator(resultPdf, outputPdf, currentOutputPage, "7Z-PDF", progressTick);
+                            bool resultIsPdf = IsPdfFile(resultPdf);
+                            Console.WriteLine($"[PDF-INSERT][DEBUG] 7Z result: {resultPdf} IsPdfFile={resultIsPdf}");
+                            if (resultIsPdf)
+                                currentOutputPage = InsertPdfFile_NoSeparator(resultPdf, outputPdf, currentOutputPage, "7Z-PDF", progressTick);
+                            else
+                            {
+                                Console.WriteLine($"[PDF-INSERT][DEBUG] 7Z result not recognized as PDF, inserting placeholder.");
+                                currentOutputPage = InsertPlaceholderForFile(resultPdf, outputPdf, currentOutputPage, "7Z");
+                            }
                         }
                         else
                         {
@@ -374,6 +366,7 @@ namespace MsgToPdfConverter.Services
                 }
                 else
                 {
+                    Console.WriteLine($"[PDF-INSERT][DEBUG] File {obj.FilePath} not recognized as supported type, inserting placeholder.");
                     // Only for unsupported types, add a placeholder
                     return InsertPlaceholderForFile(obj.FilePath, outputPdf, currentOutputPage, obj.OleClass);
                 }
@@ -404,7 +397,7 @@ namespace MsgToPdfConverter.Services
             }
         }
 
-        // Helper to check if a file is a PDF by header
+        // Helper to check if a file is a PDF by header (robust: scans first 1KB for %PDF-)
         private static bool IsPdfFile(string filePath)
         {
             try
@@ -412,13 +405,32 @@ namespace MsgToPdfConverter.Services
                 if (!File.Exists(filePath)) return false;
                 using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
                 {
-                    byte[] header = new byte[5];
-                    int read = fs.Read(header, 0, 5);
-                    string headerStr = System.Text.Encoding.ASCII.GetString(header, 0, read);
-                    return (read == 5 && headerStr == "%PDF-");
+                    byte[] buffer = new byte[1024];
+                    int read = fs.Read(buffer, 0, buffer.Length);
+                    string content = System.Text.Encoding.ASCII.GetString(buffer, 0, read);
+                    int idx = content.IndexOf("%PDF-");
+                    if (idx >= 0)
+                    {
+                        if (idx > 0)
+                        {
+                            Console.WriteLine($"[PDF-INSERT][IsPdfFile] Found '%PDF-' at offset {idx} in {filePath}, treating as PDF (nonzero offset)");
+                        }
+                        return true;
+                    }
+                    else
+                    {
+                        // Log first 32 bytes for debugging
+                        string hex = BitConverter.ToString(buffer, 0, Math.Min(32, read)).Replace("-", " ");
+                        Console.WriteLine($"[PDF-INSERT][IsPdfFile] No '%PDF-' found in first 1KB of {filePath}. First 32 bytes: {hex}");
+                        return false;
+                    }
                 }
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PDF-INSERT][IsPdfFile] Exception for {filePath}: {ex.Message}");
+                return false;
+            }
         }
 
         // Insert PDF file without separator
