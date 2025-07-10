@@ -75,6 +75,7 @@ namespace MsgToPdfConverter.Utils
                             string ext = GetExtensionFromProgID((ole as OLEFormat)?.ProgID);
                             string outFile = Path.Combine(outputDir, $"Embedded_{counter}{ext}");
                             counter++;
+                            bool extracted = false;
                             try
                             {
                                 if ((ole as OLEFormat)?.ProgID != null && (ole as OLEFormat).ProgID.ToLowerInvariant() == "package")
@@ -141,8 +142,76 @@ namespace MsgToPdfConverter.Utils
                                         if (!saved)
                                         {
                                             Console.WriteLine($"[InteropExtractor] Could not extract Package object directly - will rely on fallback extraction");
-                                            // Don't throw exception - let fallback handle it
-                                            continue; // Skip this object for now
+                                            // --- IMMEDIATE OpenXml fallback for this object ---
+                                            // Try to find the relId for this InlineShape (if possible)
+                                            string relId = null;
+                                            try
+                                            {
+                                                // Try to get relId from InlineShape (if available)
+                                                var shapeIdProp = inlineShape.GetType().GetProperty("Id");
+                                                if (shapeIdProp != null)
+                                                {
+                                                    relId = shapeIdProp.GetValue(inlineShape)?.ToString();
+                                                }
+                                            }
+                                            catch { }
+                                            // Fallback: Use OpenXml to extract the next available Package part
+                                            if (docxPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                using (var wordDoc = WordprocessingDocument.Open(docxPath, false))
+                                                {
+                                                    var mainPart = wordDoc.MainDocumentPart;
+                                                    var embeddedParts = mainPart.EmbeddedObjectParts.ToList();
+                                                    var relIdToPart = new Dictionary<string, EmbeddedObjectPart>();
+                                                    foreach (var rel in mainPart.Parts)
+                                                    {
+                                                        if (rel.OpenXmlPart is EmbeddedObjectPart objPart)
+                                                        {
+                                                            relIdToPart[rel.RelationshipId] = objPart;
+                                                        }
+                                                    }
+                                                    // Try to match relId, otherwise take the next unused part
+                                                    EmbeddedObjectPart part = null;
+                                                    if (!string.IsNullOrEmpty(relId) && relIdToPart.ContainsKey(relId))
+                                                    {
+                                                        part = relIdToPart[relId];
+                                                    }
+                                                    else if (embeddedParts.Count > 0)
+                                                    {
+                                                        part = embeddedParts.First();
+                                                    }
+                                                    if (part != null)
+                                                    {
+                                                        string partExt = ".bin";
+                                                        string uniqueSuffix = $"_InlineShape{i}_{Guid.NewGuid().ToString("N")}";
+                                                        string partFile = Path.Combine(outputDir, $"Embedded_OpenXml_{counter}{uniqueSuffix}{partExt}");
+                                                        using (var fs = new FileStream(partFile, FileMode.Create, FileAccess.Write))
+                                                        {
+                                                            part.GetStream().CopyTo(fs);
+                                                        }
+                                                        int page = -1;
+                                                        try
+                                                        {
+                                                            page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
+                                                            if (page <= 0)
+                                                            {
+                                                                page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
+                                                            }
+                                                        }
+                                                        catch { }
+                                                        if (page <= 0) page = -1;
+                                                        results.Add(new ExtractedObjectInfo { FilePath = partFile, PageNumber = page, OleClass = "Package", DocumentOrderIndex = docOrderIndex, SourceInlineShapeIndex = i, MatchedInlineShapeIndex = i });
+                                                        docOrderIndex++;
+                                                        counter++;
+                                                        Console.WriteLine($"[InteropExtractor] Immediate OpenXml fallback extracted: {partFile} (page {page}, Order={docOrderIndex-1})");
+                                                        extracted = true;
+                                                    }
+                                                }
+                                            }
+                                            if (!extracted)
+                                            {
+                                                continue; // Skip this object for now
+                                            }
                                         }
                                     }
                                     catch (Exception packageEx)
@@ -155,31 +224,34 @@ namespace MsgToPdfConverter.Utils
                                 {
                                     // Try to save the embedded object if possible
                                     SaveOleObjectToFile(ole as OLEFormat, outFile);
+                                    extracted = true;
                                 }
-                                // Try multiple robust methods to get page number
-                                int page = 0;
-                                try
+                                if (extracted)
                                 {
-                                    page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
-                                    if (page <= 0)
+                                    int page = 0;
+                                    try
                                     {
-                                        page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
+                                        page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
+                                        if (page <= 0)
+                                        {
+                                            page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
+                                        }
+                                        if (page <= 0)
+                                        {
+                                            var range = inlineShape.Range;
+                                            range.Select();
+                                            page = (int)range.get_Information(WdInformation.wdActiveEndPageNumber);
+                                        }
                                     }
-                                    if (page <= 0)
+                                    catch (Exception pageEx)
                                     {
-                                        var range = inlineShape.Range;
-                                        range.Select();
-                                        page = (int)range.get_Information(WdInformation.wdActiveEndPageNumber);
+                                        Console.WriteLine($"[InteropExtractor] Could not determine page number: {pageEx.Message}");
                                     }
+                                    if (page <= 0) page = -1;
+                                    results.Add(new ExtractedObjectInfo { FilePath = outFile, PageNumber = page, OleClass = (ole as OLEFormat)?.ProgID, DocumentOrderIndex = docOrderIndex });
+                                    docOrderIndex++;
+                                    Console.WriteLine($"[InteropExtractor] Extracted: {outFile} (page {page}, ProgID={(ole as OLEFormat)?.ProgID}, Order={docOrderIndex-1})");
                                 }
-                                catch (Exception pageEx)
-                                {
-                                    Console.WriteLine($"[InteropExtractor] Could not determine page number: {pageEx.Message}");
-                                }
-                                if (page <= 0) page = -1;
-                                results.Add(new ExtractedObjectInfo { FilePath = outFile, PageNumber = page, OleClass = (ole as OLEFormat)?.ProgID, DocumentOrderIndex = docOrderIndex });
-                                docOrderIndex++;
-                                Console.WriteLine($"[InteropExtractor] Extracted: {outFile} (page {page}, ProgID={(ole as OLEFormat)?.ProgID}, Order={docOrderIndex-1})");
                             }
                             catch (Exception ex)
                             {
@@ -512,8 +584,10 @@ namespace MsgToPdfConverter.Utils
                             {
                                 if (relIdToPart.TryGetValue(relId, out var part))
                                 {
+                                    // Use a unique filename for each extracted part to prevent overwriting
                                     string partExt = ".bin";
-                                    string partFile = Path.Combine(outputDir, $"Embedded_OpenXml_{xmlCounter}{partExt}");
+                                    string uniqueSuffix = $"_{relId}_{Guid.NewGuid().ToString("N")}";
+                                    string partFile = Path.Combine(outputDir, $"Embedded_OpenXml_{xmlCounter}{uniqueSuffix}{partExt}");
                                     using (var fs = new FileStream(partFile, FileMode.Create, FileAccess.Write))
                                     {
                                         part.GetStream().CopyTo(fs);
@@ -531,8 +605,10 @@ namespace MsgToPdfConverter.Utils
                                 var rel = wordDoc.MainDocumentPart.Parts.FirstOrDefault(p => p.OpenXmlPart == part);
                                 if (rel != null && !usedRelIds.Contains(rel.RelationshipId))
                                 {
+                                    // Use a unique filename for each extracted part to prevent overwriting
                                     string partExt = ".bin";
-                                    string partFile = Path.Combine(outputDir, $"Embedded_OpenXml_{xmlCounter}{partExt}");
+                                    string uniqueSuffix = $"_{rel.RelationshipId}_{Guid.NewGuid().ToString("N")}";
+                                    string partFile = Path.Combine(outputDir, $"Embedded_OpenXml_{xmlCounter}{uniqueSuffix}{partExt}");
                                     using (var fs = new FileStream(partFile, FileMode.Create, FileAccess.Write))
                                     {
                                         part.GetStream().CopyTo(fs);
@@ -613,7 +689,7 @@ namespace MsgToPdfConverter.Utils
             // --- NEW: Extract real files from .bin in OpenXml order, and disregard non-real files immediately ---
             int packageShapeCounter = 0;
             var openXmlBinObjs = results.Where(obj => obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase) && (obj.OleClass ?? "").ToLower().Contains("package")).ToList();
-            foreach (var obj in openXmlBinObjs)
+            foreach (var obj in openXmlBinObjs.ToList()) // ToList() to avoid modifying collection during iteration
             {
                 int? sourceIdx = null;
                 int? pageFromShape = null;
@@ -634,10 +710,12 @@ namespace MsgToPdfConverter.Utils
                         pageFromShape = packageInlineShapes[packageShapeCounter].Page;
                         packageShapeCounter++;
                     }
-                    string realFilePath = Path.Combine(Path.GetDirectoryName(obj.FilePath), pkg.FileName);
+                    // --- Ensure unique filename for each extracted file ---
+                    string realFileName = Path.GetFileNameWithoutExtension(obj.FilePath) + "_" + Guid.NewGuid().ToString("N") + Path.GetExtension(pkg.FileName ?? "");
+                    string realFilePath = Path.Combine(Path.GetDirectoryName(obj.FilePath), realFileName);
                     File.WriteAllBytes(realFilePath, pkg.Data);
                     Console.WriteLine($"[InteropExtractor] OLE bin extracted: {realFilePath} (from {obj.FilePath})");
-                    Console.WriteLine($"[InteropExtractor] Mapping: File='{pkg.FileName}', EmbeddedOfficeName='{pkg.EmbeddedOfficeName}', Stream='{pkg.OriginalStreamName}', InlineShapeIdx={sourceIdx}, Page={pageFromShape}");
+                    Console.WriteLine($"[InteropExtractor] Mapping: File='{realFileName}', EmbeddedOfficeName='{pkg.EmbeddedOfficeName}', Stream='{pkg.OriginalStreamName}', InlineShapeIdx={sourceIdx}, Page={pageFromShape}");
                     var newObj = new ExtractedObjectInfo {
                         FilePath = realFilePath,
                         PageNumber = pageFromShape ?? -1,
@@ -646,7 +724,7 @@ namespace MsgToPdfConverter.Utils
                         SourceInlineShapeIndex = sourceIdx,
                         MatchedInlineShapeIndex = sourceIdx,
                         OriginalStreamName = pkg.OriginalStreamName,
-                        ExtractedFileName = pkg.FileName
+                        ExtractedFileName = realFileName
                     };
                     results.Add(newObj);
                     // Remove the .bin placeholder from results

@@ -66,14 +66,44 @@ namespace MsgToPdfConverter.Services
             foreach (var obj in extractedObjects)
             {
                 Console.WriteLine($"[PDF-INSERT] Checking object: {Path.GetFileName(obj.FilePath)} at {obj.FilePath}, OleClass: {obj.OleClass}");
-                
-                // Skip Package objects that don't have meaningful content
+
+                // Only skip Package .bin if NOT a valid PDF
                 if (obj.OleClass == "Package" && obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
                 {
-                    Console.WriteLine($"[PDF-INSERT] Skipping Package object (likely placeholder): {obj.FilePath}");
-                    continue;
+                    if (File.Exists(obj.FilePath))
+                    {
+                        try
+                        {
+                            using (var fs = new FileStream(obj.FilePath, FileMode.Open, FileAccess.Read))
+                            {
+                                byte[] header = new byte[5];
+                                int read = fs.Read(header, 0, 5);
+                                string headerStr = System.Text.Encoding.ASCII.GetString(header, 0, read);
+                                if (headerStr == "%PDF-")
+                                {
+                                    Console.WriteLine($"[PDF-INSERT] Detected valid PDF in .bin: {obj.FilePath} (including for embedding)");
+                                    // fall through to add to validObjects
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[PDF-INSERT] Skipping Package object (not a PDF): {obj.FilePath}");
+                                    continue;
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[PDF-INSERT] Error reading .bin file header: {ex.Message}, skipping: {obj.FilePath}");
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[PDF-INSERT] Skipping Package object (file missing): {obj.FilePath}");
+                        continue;
+                    }
                 }
-                
+
                 if (!File.Exists(obj.FilePath))
                 {
                     Console.WriteLine($"[PDF-INSERT] Warning: Extracted file not found: {obj.FilePath}");
@@ -91,18 +121,26 @@ namespace MsgToPdfConverter.Services
 
             Console.WriteLine($"[PDF-INSERT] {validObjects.Count} valid objects to insert");
 
-            if (validObjects.Count == 0)
+            // Deduplicate validObjects by (FilePath, PageNumber, DocumentOrderIndex)
+            var uniqueObjects = validObjects
+                .GroupBy(obj => new { obj.FilePath, obj.PageNumber, obj.DocumentOrderIndex })
+                .Select(g => g.First())
+                .ToList();
+
+            Console.WriteLine($"[PDF-INSERT] {uniqueObjects.Count} unique objects to insert after deduplication");
+
+            if (uniqueObjects.Count == 0)
             {
                 Console.WriteLine("[PDF-INSERT] No valid embedded files to insert, copying main PDF");
                 File.Copy(mainPdfPath, outputPdfPath, true);
                 return;
             }
 
-            Console.WriteLine($"[PDF-INSERT] Inserting {validObjects.Count} embedded files into {mainPdfPath}");
+            Console.WriteLine($"[PDF-INSERT] Inserting {uniqueObjects.Count} embedded files into {mainPdfPath}");
 
             // Sort embedded objects by PageNumber (synthetic or real), then by DocumentOrderIndex for tie-breaking
             // Note: Objects with PageNumber = -1 will be assigned to the last page
-            var objectsByPage = validObjects
+            var objectsByPage = uniqueObjects
                 .OrderBy(obj => obj.PageNumber == -1 ? int.MaxValue : obj.PageNumber)
                 .ThenBy(obj => obj.DocumentOrderIndex)
                 .ToList();
@@ -164,6 +202,12 @@ namespace MsgToPdfConverter.Services
                     // Validate that no object requests insertion after a non-existent page
                     foreach (var obj in objectsByPage)
                     {
+                        // Fallback for missing or invalid page numbers
+                        if (obj.PageNumber <= 0)
+                        {
+                            Console.WriteLine($"[PDF-INSERT] Warning: Object {Path.GetFileName(obj.FilePath)} has missing or invalid PageNumber ({obj.PageNumber}). Assigning to last page.");
+                            obj.PageNumber = mainPageCount;
+                        }
                         if (obj.PageNumber > mainPageCount)
                         {
                             Console.WriteLine($"[PDF-INSERT] Warning: Object {Path.GetFileName(obj.FilePath)} requests insertion after page {obj.PageNumber}, but main PDF only has {mainPageCount} pages. Adjusting to page {mainPageCount}.");
@@ -266,7 +310,8 @@ namespace MsgToPdfConverter.Services
         {
             try
             {
-                if (obj.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                // Treat any file that is a PDF by header as a PDF, regardless of extension
+                if (IsPdfFile(obj.FilePath))
                 {
                     return InsertPdfFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage, obj.OleClass, progressTick);
                 }
@@ -370,6 +415,23 @@ namespace MsgToPdfConverter.Services
                 Console.WriteLine($"[PDF-INSERT] Error inserting {obj.FilePath}: {ex.Message}");
                 return InsertErrorPlaceholder(obj.FilePath, outputPdf, currentOutputPage, ex.Message);
             }
+        }
+
+        // Helper to check if a file is a PDF by header
+        private static bool IsPdfFile(string filePath)
+        {
+            try
+            {
+                if (!File.Exists(filePath)) return false;
+                using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                {
+                    byte[] header = new byte[5];
+                    int read = fs.Read(header, 0, 5);
+                    string headerStr = System.Text.Encoding.ASCII.GetString(header, 0, read);
+                    return (read == 5 && headerStr == "%PDF-");
+                }
+            }
+            catch { return false; }
         }
 
         // Insert PDF file without separator/grey page
