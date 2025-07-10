@@ -770,7 +770,6 @@ namespace MsgToPdfConverter.Services
             try
             {
                 var ext = Path.GetExtension(attachmentPath)?.ToLowerInvariant();
-                
                 switch (ext)
                 {
                     case ".pdf":
@@ -781,6 +780,33 @@ namespace MsgToPdfConverter.Services
                         return InsertXlsxFile_NoSeparator(attachmentPath, outputPdf, currentPage, progressTick);
                     case ".msg":
                         return InsertMsgFile_NoSeparator(attachmentPath, outputPdf, currentPage, progressTick);
+                    case ".jpg":
+                    case ".jpeg":
+                    case ".png":
+                    case ".bmp":
+                    case ".gif":
+                    case ".tif":
+                    case ".tiff":
+                    case ".webp":
+                    {
+                        // Use PdfService.AddImagePdf to create a temp PDF, then insert it
+                        string tempPdf = Path.Combine(Path.GetTempPath(), $"img2pdf_{Guid.NewGuid()}.pdf");
+                        try
+                        {
+                            PdfService.AddImagePdf(tempPdf, attachmentPath, Path.GetFileName(attachmentPath));
+                            int result = InsertPdfFile_NoSeparator(tempPdf, outputPdf, currentPage, "Image", progressTick);
+                            return result;
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[PDF-INSERT] Error converting image to PDF: {attachmentPath}: {ex.Message}");
+                            return InsertErrorPlaceholder(attachmentPath, outputPdf, currentPage, ex.Message);
+                        }
+                        finally
+                        {
+                            try { if (File.Exists(tempPdf)) File.Delete(tempPdf); } catch { }
+                        }
+                    }
                     default:
                         return InsertPlaceholderForFile(attachmentPath, outputPdf, currentPage, $"Attachment ({ext})");
                 }
