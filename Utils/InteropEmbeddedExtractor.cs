@@ -35,6 +35,8 @@ namespace MsgToPdfConverter.Utils
         public static List<ExtractedObjectInfo> ExtractEmbeddedObjects(string docxPath, string outputDir)
         {
             var results = new List<ExtractedObjectInfo>();
+            var extractedRelIds = new HashSet<string>(); // Track relIds extracted by OLE/Interop
+            var extractedInlineShapeIndices = new HashSet<int>(); // Track InlineShape indices extracted by OLE/Interop
             Application wordApp = null;
             Document doc = null;
             int counter = 1;
@@ -413,10 +415,6 @@ namespace MsgToPdfConverter.Utils
                 }
             }
 
-            // Always run OpenXML fallback for Package objects and missing/failed objects
-            var existingFiles = new HashSet<string>(results.Where(r => File.Exists(r.FilePath)).Select(r => r.FilePath), StringComparer.OrdinalIgnoreCase);
-            int openXmlDocOrderIndex = docOrderIndex;
-            
             // Remove invalid/missing files from results before OpenXML fallback
             var validResults = new List<ExtractedObjectInfo>();
             foreach (var result in results)
@@ -432,8 +430,8 @@ namespace MsgToPdfConverter.Utils
                 }
             }
             results = validResults;
-            
-            // Always run OpenXML fallback for .docx files to catch Package objects
+
+            // Only run OpenXML fallback for .docx files to catch Package objects NOT already extracted
             if (docxPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
             {
                 // Check if file is locked before OpenXml fallback
@@ -507,7 +505,8 @@ namespace MsgToPdfConverter.Utils
                                     var relId = oleElem.Attribute(r + "id")?.Value;
                                     if (!string.IsNullOrEmpty(relId))
                                     {
-                                        orderedRelIds.Add(relId);
+                                        if (!extractedRelIds.Contains(relId))
+                                            orderedRelIds.Add(relId);
                                         continue;
                                     }
                                 }
@@ -518,7 +517,8 @@ namespace MsgToPdfConverter.Utils
                                     var relId = oElem.Attribute(r + "id")?.Value;
                                     if (!string.IsNullOrEmpty(relId))
                                     {
-                                        orderedRelIds.Add(relId);
+                                        if (!extractedRelIds.Contains(relId))
+                                            orderedRelIds.Add(relId);
                                         continue;
                                     }
                                 }
@@ -526,7 +526,8 @@ namespace MsgToPdfConverter.Utils
                                 var directId = objElem.Attribute(r + "id")?.Value;
                                 if (!string.IsNullOrEmpty(directId))
                                 {
-                                    orderedRelIds.Add(directId);
+                                    if (!extractedRelIds.Contains(directId))
+                                        orderedRelIds.Add(directId);
                                     continue;
                                 }
                             }
@@ -535,7 +536,7 @@ namespace MsgToPdfConverter.Utils
                             foreach (var elem in looseOleElements)
                             {
                                 var relId = elem.Attribute(r + "id")?.Value;
-                                if (!string.IsNullOrEmpty(relId) && !orderedRelIds.Contains(relId))
+                                if (!string.IsNullOrEmpty(relId) && !orderedRelIds.Contains(relId) && !extractedRelIds.Contains(relId))
                                     orderedRelIds.Add(relId);
                             }
                             // Also check for <w:altChunk> (for embedded files)
@@ -543,7 +544,7 @@ namespace MsgToPdfConverter.Utils
                             foreach (var elem in altChunkElements)
                             {
                                 var relId = elem.Attribute(r + "id")?.Value;
-                                if (!string.IsNullOrEmpty(relId) && !orderedRelIds.Contains(relId))
+                                if (!string.IsNullOrEmpty(relId) && !orderedRelIds.Contains(relId) && !extractedRelIds.Contains(relId))
                                     orderedRelIds.Add(relId);
                             }
                         }

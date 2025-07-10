@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using iText.Kernel.Pdf;
 using iText.Kernel.Pdf.Canvas;
 using iText.Kernel.Colors;
@@ -61,73 +62,25 @@ namespace MsgToPdfConverter.Services
                 return;
             }
 
-            // Validate and log extracted objects, filter out Package placeholders
-            var validObjects = new List<InteropEmbeddedExtractor.ExtractedObjectInfo>();
+            // --- BEGIN CONTENT-BASED DEDUPLICATION ---
+            var seenHashes = new HashSet<string>();
+            var uniqueObjects = new List<InteropEmbeddedExtractor.ExtractedObjectInfo>();
             foreach (var obj in extractedObjects)
             {
-                Console.WriteLine($"[PDF-INSERT] Checking object: {Path.GetFileName(obj.FilePath)} at {obj.FilePath}, OleClass: {obj.OleClass}");
-
-                // Only skip Package .bin if NOT a valid PDF
-                if (obj.OleClass == "Package" && obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase))
+                if (!File.Exists(obj.FilePath)) continue;
+                string hash = ComputeFileHash(obj.FilePath);
+                if (hash == null) continue;
+                if (!seenHashes.Contains(hash))
                 {
-                    if (File.Exists(obj.FilePath))
-                    {
-                        try
-                        {
-                            using (var fs = new FileStream(obj.FilePath, FileMode.Open, FileAccess.Read))
-                            {
-                                byte[] header = new byte[5];
-                                int read = fs.Read(header, 0, 5);
-                                string headerStr = System.Text.Encoding.ASCII.GetString(header, 0, read);
-                                if (headerStr == "%PDF-")
-                                {
-                                    Console.WriteLine($"[PDF-INSERT] Detected valid PDF in .bin: {obj.FilePath} (including for embedding)");
-                                    // fall through to add to validObjects
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"[PDF-INSERT] Skipping Package object (not a PDF): {obj.FilePath}");
-                                    continue;
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[PDF-INSERT] Error reading .bin file header: {ex.Message}, skipping: {obj.FilePath}");
-                            continue;
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[PDF-INSERT] Skipping Package object (file missing): {obj.FilePath}");
-                        continue;
-                    }
+                    seenHashes.Add(hash);
+                    uniqueObjects.Add(obj);
                 }
-
-                if (!File.Exists(obj.FilePath))
+                else
                 {
-                    Console.WriteLine($"[PDF-INSERT] Warning: Extracted file not found: {obj.FilePath}");
-                    continue;
+                    Console.WriteLine($"[PDF-INSERT] Skipping duplicate embedded file by content hash: {Path.GetFileName(obj.FilePath)}");
                 }
-                var fileInfo = new FileInfo(obj.FilePath);
-                Console.WriteLine($"[PDF-INSERT] File exists, size: {fileInfo.Length} bytes, page: {obj.PageNumber}");
-                if (fileInfo.Length == 0)
-                {
-                    Console.WriteLine($"[PDF-INSERT] Warning: Extracted file is empty: {obj.FilePath}");
-                    continue;
-                }
-                validObjects.Add(obj);
             }
-
-            Console.WriteLine($"[PDF-INSERT] {validObjects.Count} valid objects to insert");
-
-            // Deduplicate validObjects by (FilePath, PageNumber, DocumentOrderIndex)
-            var uniqueObjects = validObjects
-                .GroupBy(obj => new { obj.FilePath, obj.PageNumber, obj.DocumentOrderIndex })
-                .Select(g => g.First())
-                .ToList();
-
-            Console.WriteLine($"[PDF-INSERT] {uniqueObjects.Count} unique objects to insert after deduplication");
+            // --- END CONTENT-BASED DEDUPLICATION ---
 
             if (uniqueObjects.Count == 0)
             {
@@ -306,6 +259,7 @@ namespace MsgToPdfConverter.Services
         }
 
         // Insert embedded object without separator/grey page
+        private static HashSet<string> processedArchiveHashes = new HashSet<string>(); // Archive deduplication
         private static int InsertEmbeddedObject_NoSeparator(InteropEmbeddedExtractor.ExtractedObjectInfo obj, PdfDocument outputPdf, int currentOutputPage, Action progressTick = null)
         {
             try
@@ -321,15 +275,22 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (obj.FilePath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
                 {
-                    return InsertDocxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage, progressTick);
+                    return InsertDocxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
                 }
                 else if (obj.FilePath.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
                 {
-                    return InsertXlsxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage, progressTick);
+                    return InsertXlsxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
                 }
                 else if (obj.FilePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {
                     // --- ZIP HANDLING ---
+                    string zipHash = ComputeFileHash(obj.FilePath);
+                    if (zipHash != null && processedArchiveHashes.Contains(zipHash))
+                    {
+                        Console.WriteLine($"[PDF-INSERT] Skipping duplicate ZIP archive by content hash: {Path.GetFileName(obj.FilePath)}");
+                        return currentOutputPage;
+                    }
+                    if (zipHash != null) processedArchiveHashes.Add(zipHash);
                     Console.WriteLine($"[PDF-INSERT] *** ZIP PROCESSING START *** Extracting and inserting ZIP: {Path.GetFileName(obj.FilePath)} after page {currentOutputPage}");
                     try
                     {
@@ -374,6 +335,13 @@ namespace MsgToPdfConverter.Services
                 else if (obj.FilePath.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
                 {
                     // --- 7Z HANDLING ---
+                    string sevenZHash = ComputeFileHash(obj.FilePath);
+                    if (sevenZHash != null && processedArchiveHashes.Contains(sevenZHash))
+                    {
+                        Console.WriteLine($"[PDF-INSERT] Skipping duplicate 7Z archive by content hash: {Path.GetFileName(obj.FilePath)}");
+                        return currentOutputPage;
+                    }
+                    if (sevenZHash != null) processedArchiveHashes.Add(sevenZHash);
                     Console.WriteLine($"[PDF-INSERT] *** 7Z PROCESSING START *** Extracting and inserting 7Z: {Path.GetFileName(obj.FilePath)} after page {currentOutputPage}");
                     try
                     {
@@ -414,6 +382,25 @@ namespace MsgToPdfConverter.Services
             {
                 Console.WriteLine($"[PDF-INSERT] Error inserting {obj.FilePath}: {ex.Message}");
                 return InsertErrorPlaceholder(obj.FilePath, outputPdf, currentOutputPage, ex.Message);
+            }
+        }
+
+        // --- Helper: Compute SHA256 hash of a file ---
+        private static string ComputeFileHash(string filePath)
+        {
+            try
+            {
+                using (var stream = File.OpenRead(filePath))
+                using (var sha = SHA256.Create())
+                {
+                    var hashBytes = sha.ComputeHash(stream);
+                    return BitConverter.ToString(hashBytes).Replace("-", "").ToLowerInvariant();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PDF-INSERT] Failed to compute hash for {filePath}: {ex.Message}");
+                return null;
             }
         }
 
