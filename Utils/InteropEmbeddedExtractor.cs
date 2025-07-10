@@ -819,54 +819,24 @@ namespace MsgToPdfConverter.Utils
                         Console.WriteLine($"[DEBUG-MAP] InlineShape {idx}: ProgID={progId}, Page={page}");
                     }
 
-                    // --- Robust mapping for Package objects (bin and real files) ---
-                    var packageShapes = inlineShapeMeta.Where(m => (m.ProgId ?? "").ToLower().Contains("package")).ToList();
-                    int packageShapePtr = 0;
-                    foreach (var obj in results.Where(r => (r.OleClass ?? "").ToLower().Contains("package") && r.PageNumber == -1))
+                    // --- Robust mapping for OpenXml fallback objects (PDFs) ---
+                    // Only fallback objects (e.g. Package, .bin, or unique fallback PDFs) with PageNumber == -1
+                    var fallbackObjs = results.Where(r => r.PageNumber == -1 && (r.OleClass == "Package" || r.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase) || r.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))).ToList();
+                    int fallbackPtr = 0;
+                    foreach (var obj in fallbackObjs)
                     {
-                        if (packageShapes.Count == 0)
+                        if (fallbackPtr < inlineShapeMeta.Count)
                         {
-                            Console.WriteLine($"[DEBUG-MAP] Robust mapping (Package): No Package InlineShapes found for {Path.GetFileName(obj.FilePath)}");
-                            continue;
-                        }
-                        int useIdx = packageShapePtr < packageShapes.Count ? packageShapePtr : packageShapes.Count - 1;
-                        obj.PageNumber = packageShapes[useIdx].Page > 0 ? packageShapes[useIdx].Page : packageShapes[useIdx].Index;
-                        obj.SourceInlineShapeIndex = packageShapes[useIdx].Index;
-                        obj.MatchedInlineShapeIndex = packageShapes[useIdx].Index;
-                        Console.WriteLine($"[DEBUG-MAP] Robust mapping (Package): {Path.GetFileName(obj.FilePath)} -> InlineShape {packageShapes[useIdx].Index} (ProgID={packageShapes[useIdx].ProgId}) assigned to page {obj.PageNumber}");
-                        packageShapePtr++;
-                    }
-
-                    // --- Robust mapping for all other objects ---
-                    var unmappedResults = results.Where(r => r.PageNumber == -1 && !((r.OleClass ?? "").ToLower().Contains("package"))).ToList();
-                    var mapped = new HashSet<int>();
-                    foreach (var obj in unmappedResults)
-                    {
-                        int foundIdx = -1;
-                        for (int i = 0; i < inlineShapeMeta.Count; i++)
-                        {
-                            if (mapped.Contains(i)) continue;
-                            bool progIdMatch = false;
-                            if (string.IsNullOrEmpty(obj.OleClass) && string.IsNullOrEmpty(inlineShapeMeta[i].ProgId))
-                                progIdMatch = true;
-                            else if (!string.IsNullOrEmpty(obj.OleClass) && !string.IsNullOrEmpty(inlineShapeMeta[i].ProgId))
-                                progIdMatch = string.Equals(obj.OleClass, inlineShapeMeta[i].ProgId, StringComparison.OrdinalIgnoreCase);
-                            if (progIdMatch)
-                            {
-                                foundIdx = i;
-                                break;
-                            }
-                        }
-                        if (foundIdx != -1)
-                        {
-                            obj.PageNumber = inlineShapeMeta[foundIdx].Page > 0 ? inlineShapeMeta[foundIdx].Page : (foundIdx + 1);
-                            mapped.Add(foundIdx);
-                            Console.WriteLine($"[DEBUG-MAP] Robust mapping: {Path.GetFileName(obj.FilePath)} -> InlineShape {inlineShapeMeta[foundIdx].Index} (ProgID={inlineShapeMeta[foundIdx].ProgId}) assigned to page {obj.PageNumber}");
+                            obj.PageNumber = inlineShapeMeta[fallbackPtr].Page > 0 ? inlineShapeMeta[fallbackPtr].Page : (fallbackPtr + 1);
+                            obj.SourceInlineShapeIndex = inlineShapeMeta[fallbackPtr].Index;
+                            obj.MatchedInlineShapeIndex = inlineShapeMeta[fallbackPtr].Index;
+                            Console.WriteLine($"[DEBUG-MAP] Fallback mapping: {Path.GetFileName(obj.FilePath)} -> InlineShape {inlineShapeMeta[fallbackPtr].Index} (ProgID={inlineShapeMeta[fallbackPtr].ProgId}) assigned to page {obj.PageNumber}");
+                            fallbackPtr++;
                         }
                         else
                         {
                             obj.PageNumber = obj.DocumentOrderIndex + 1;
-                            Console.WriteLine($"[DEBUG-MAP] Robust mapping: {Path.GetFileName(obj.FilePath)} could not be matched, assigned fallback page {obj.PageNumber}");
+                            Console.WriteLine($"[DEBUG-MAP] Fallback mapping: {Path.GetFileName(obj.FilePath)} could not be matched, assigned fallback page {obj.PageNumber}");
                         }
                     }
 
