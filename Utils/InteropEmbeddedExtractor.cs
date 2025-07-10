@@ -11,796 +11,178 @@ namespace MsgToPdfConverter.Utils
 {
     public class InteropEmbeddedExtractor
     {
-        // Constants for safety limits
-        private const int MAX_SHAPES_TO_PROCESS = 100;
-        private const int MAX_PROCESSING_TIME_MINUTES = 3;
-        
         public class ExtractedObjectInfo
         {
             public string FilePath { get; set; }
             public int PageNumber { get; set; } // 1-based page number
             public string OleClass { get; set; }
             public int DocumentOrderIndex { get; set; } // Order in document flow
-            public int? SourceInlineShapeIndex { get; set; } // NEW: Index of InlineShape this object is mapped to (1-based)
-            public int? MatchedInlineShapeIndex { get; set; } // Used for improved Package mapping
-            // New: for robust mapping
-            public string OriginalStreamName { get; set; }
             public string ExtractedFileName { get; set; }
         }
 
         /// <summary>
-        /// Extracts embedded OLE objects from a .doc or .docx file using Word Interop, saving them to the specified output directory.
+        /// Extracts embedded OLE objects from a .docx file using OpenXml, saving them to the specified output directory.
+        /// Uses Interop only to map each object to its page number.
         /// Returns a list of extracted file info, including the page number where each object was found.
         /// </summary>
         public static List<ExtractedObjectInfo> ExtractEmbeddedObjects(string docxPath, string outputDir)
         {
             var results = new List<ExtractedObjectInfo>();
-            var extractedRelIds = new HashSet<string>(); // Track relIds extracted by OLE/Interop
-            var extractedInlineShapeIndices = new HashSet<int>(); // Track InlineShape indices extracted by OLE/Interop
-            Application wordApp = null;
-            Document doc = null;
-            int counter = 1;
-            int docOrderIndex = 0;
+            if (!docxPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
+                throw new NotSupportedException("Only .docx files are supported for OpenXml extraction.");
+
+            // --- 1. Extract embedded objects using OpenXml in document order ---
+            List<string> orderedRelIds = new List<string>();
             try
             {
-                Console.WriteLine($"[InteropExtractor] ExtractEmbeddedObjects called for: {docxPath}");
-                wordApp = new Application { Visible = false, DisplayAlerts = WdAlertLevel.wdAlertsNone };
-                doc = wordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
-
-                Console.WriteLine($"[InteropExtractor] InlineShapes count: {doc.InlineShapes.Count}");
-                
-                // Add limits to prevent excessive processing
-                int maxShapesToProcess = Math.Min(doc.InlineShapes.Count, 50); // Limit to 50 shapes
-                var startTime = DateTime.Now;
-                var maxProcessingTime = TimeSpan.FromMinutes(2); // 2 minute timeout
-                int found = 0;
-                // InlineShapes (OLE objects, e.g. embedded PDFs, Excels, etc.)
-                for (int i = 1; i <= maxShapesToProcess; i++)
+                using (var wordDoc = WordprocessingDocument.Open(docxPath, false))
                 {
-                    // Check timeout
-                    if (DateTime.Now - startTime > maxProcessingTime)
+                    var mainPart = wordDoc.MainDocumentPart;
+                    if (mainPart != null)
                     {
-                        Console.WriteLine($"[InteropExtractor] Timeout reached, stopping extraction after {i-1} shapes");
-                        break;
-                    }
-                    object ish = null;
-                    object ole = null;
-                    try
-                    {
-                        ish = doc.InlineShapes[i];
-                        var inlineShape = ish as InlineShape;
-                        Console.WriteLine($"[InteropExtractor] Processing InlineShape {i}/{maxShapesToProcess}: Type={inlineShape?.Type}, OLE ProgID={inlineShape?.OLEFormat?.ProgID}");
-                        if (inlineShape != null && inlineShape.Type == WdInlineShapeType.wdInlineShapeEmbeddedOLEObject)
+                        var xdoc = System.Xml.Linq.XDocument.Load(mainPart.GetStream());
+                        XNamespace w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+                        XNamespace o = "urn:schemas-microsoft-com:office:office";
+                        XNamespace r = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+                        // Find all <w:object> elements in order
+                        var objectElements = xdoc.Descendants(w + "object").ToList();
+                        foreach (var objElem in objectElements)
                         {
-                            found++;
-                            ole = inlineShape.OLEFormat;
-                            string ext = GetExtensionFromProgID((ole as OLEFormat)?.ProgID);
-                            string outFile = Path.Combine(outputDir, $"Embedded_{counter}{ext}");
-                            counter++;
-                            bool extracted = false;
-                            try
+                            // 1. Check for <w:oleObject r:id="..."> descendant
+                            var oleElem = objElem.Descendants(w + "oleObject").FirstOrDefault();
+                            if (oleElem != null)
                             {
-                                if ((ole as OLEFormat)?.ProgID != null && (ole as OLEFormat).ProgID.ToLowerInvariant() == "package")
+                                var relId = oleElem.Attribute(r + "id")?.Value;
+                                if (!string.IsNullOrEmpty(relId))
                                 {
-                                    // Special handling for OLE Package: use DoVerb to activate and try to save
-                                    Console.WriteLine($"[InteropExtractor] Attempting to extract OLE Package object");
-                                    try
-                                    {
-                                        // Try different approaches for Package objects
-                                        bool saved = false;
-
-                                        // Method 1: Try to get the object and use reflection carefully
-                                        try
-                                        {
-                                            var oleFormatObj = ole as OLEFormat;
-                                            var obj = oleFormatObj != null ? oleFormatObj.Object : null;
-                                            if (obj != null)
-                                            {
-                                                var type = obj.GetType();
-                                                Console.WriteLine($"[InteropExtractor] OLE Package object type: {type.FullName}");
-                                                
-                                                // Try common save methods
-                                                var methods = type.GetMethods().Where(m => 
-                                                    m.Name.ToLower().Contains("save") || 
-                                                    m.Name.ToLower().Contains("export")).ToArray();
-                                                
-                                                foreach (var method in methods)
-                                                {
-                                                    Console.WriteLine($"[InteropExtractor] Found method: {method.Name}");
-                                                    try
-                                                    {
-                                                        if (method.Name == "SaveAs" && method.GetParameters().Length == 1)
-                                                        {
-                                                            method.Invoke(obj, new object[] { outFile });
-                                                            saved = true;
-                                                            break;
-                                                        }
-                                                        else if (method.Name == "SaveToFile" && method.GetParameters().Length == 1)
-                                                        {
-                                                            method.Invoke(obj, new object[] { outFile });
-                                                            saved = true;
-                                                            break;
-                                                        }
-                                                    }
-                                                    catch (Exception methodEx)
-                                                    {
-                                                        Console.WriteLine($"[InteropExtractor] Method {method.Name} failed: {methodEx.Message}");
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        catch (Exception objEx)
-                                        {
-                                            Console.WriteLine($"[InteropExtractor] Could not access OLE object: {objEx.Message}");
-                                        }
-                                        
-                                        // Method 2: Skip DoVerb activation as it can cause freezes and dialogs
-                                        // DoVerb can cause Word to hang or show dialogs, so we skip it
-                                        if (!saved)
-                                        {
-                                            Console.WriteLine($"[InteropExtractor] Skipping DoVerb activation to prevent freezing");
-                                        }
-                                        
-                                        if (!saved)
-                                        {
-                                            Console.WriteLine($"[InteropExtractor] Could not extract Package object directly - will rely on fallback extraction");
-                                            // --- IMMEDIATE OpenXml fallback for this object ---
-                                            // Try to find the relId for this InlineShape (if possible)
-                                            string relId = null;
-                                            try
-                                            {
-                                                // Try to get relId from InlineShape (if available)
-                                                var shapeIdProp = inlineShape.GetType().GetProperty("Id");
-                                                if (shapeIdProp != null)
-                                                {
-                                                    relId = shapeIdProp.GetValue(inlineShape)?.ToString();
-                                                }
-                                            }
-                                            catch { }
-                                            // Fallback: Use OpenXml to extract the next available Package part
-                                            if (docxPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
-                                            {
-                                                using (var wordDoc = WordprocessingDocument.Open(docxPath, false))
-                                                {
-                                                    var mainPart = wordDoc.MainDocumentPart;
-                                                    var embeddedParts = mainPart.EmbeddedObjectParts.ToList();
-                                                    var relIdToPart = new Dictionary<string, EmbeddedObjectPart>();
-                                                    foreach (var rel in mainPart.Parts)
-                                                    {
-                                                        if (rel.OpenXmlPart is EmbeddedObjectPart objPart)
-                                                        {
-                                                            relIdToPart[rel.RelationshipId] = objPart;
-                                                        }
-                                                    }
-                                                    // Try to match relId, otherwise take the next unused part
-                                                    EmbeddedObjectPart part = null;
-                                                    if (!string.IsNullOrEmpty(relId) && relIdToPart.ContainsKey(relId))
-                                                    {
-                                                        part = relIdToPart[relId];
-                                                    }
-                                                    else if (embeddedParts.Count > 0)
-                                                    {
-                                                        part = embeddedParts.First();
-                                                    }
-                                                    if (part != null)
-                                                    {
-                                                        string partExt = ".bin";
-                                                        string uniqueSuffix = $"_InlineShape{i}_{Guid.NewGuid().ToString("N")}";
-                                                        string partFile = Path.Combine(outputDir, $"Embedded_OpenXml_{counter}{uniqueSuffix}{partExt}");
-                                                        using (var fs = new FileStream(partFile, FileMode.Create, FileAccess.Write))
-                                                        {
-                                                            part.GetStream().CopyTo(fs);
-                                                        }
-                                                        int page = -1;
-                                                        try
-                                                        {
-                                                            page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
-                                                            if (page <= 0)
-                                                            {
-                                                                page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
-                                                            }
-                                                        }
-                                                        catch { }
-                                                        if (page <= 0) page = -1;
-                                                        results.Add(new ExtractedObjectInfo { FilePath = partFile, PageNumber = page, OleClass = "Package", DocumentOrderIndex = docOrderIndex, SourceInlineShapeIndex = i, MatchedInlineShapeIndex = i });
-                                                        docOrderIndex++;
-                                                        counter++;
-                                                        Console.WriteLine($"[InteropExtractor] Immediate OpenXml fallback extracted: {partFile} (page {page}, Order={docOrderIndex-1})");
-                                                        extracted = true;
-                                                    }
-                                                }
-                                            }
-                                            if (!extracted)
-                                            {
-                                                continue; // Skip this object for now
-                                            }
-                                        }
-                                    }
-                                    catch (Exception packageEx)
-                                    {
-                                        Console.WriteLine($"[InteropExtractor] Package extraction failed: {packageEx.Message}");
-                                        continue; // Skip this object
-                                    }
-                                }
-                                else
-                                {
-                                    // Try to save the embedded object if possible
-                                    SaveOleObjectToFile(ole as OLEFormat, outFile);
-                                    extracted = true;
-                                }
-                                if (extracted)
-                                {
-                                    int page = 0;
-                                    try
-                                    {
-                                        page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
-                                        if (page <= 0)
-                                        {
-                                            page = (int)inlineShape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
-                                        }
-                                        if (page <= 0)
-                                        {
-                                            var range = inlineShape.Range;
-                                            range.Select();
-                                            page = (int)range.get_Information(WdInformation.wdActiveEndPageNumber);
-                                        }
-                                    }
-                                    catch (Exception pageEx)
-                                    {
-                                        Console.WriteLine($"[InteropExtractor] Could not determine page number: {pageEx.Message}");
-                                    }
-                                    if (page <= 0) page = -1;
-                                    results.Add(new ExtractedObjectInfo { FilePath = outFile, PageNumber = page, OleClass = (ole as OLEFormat)?.ProgID, DocumentOrderIndex = docOrderIndex });
-                                    docOrderIndex++;
-                                    Console.WriteLine($"[InteropExtractor] Extracted: {outFile} (page {page}, ProgID={(ole as OLEFormat)?.ProgID}, Order={docOrderIndex-1})");
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[InteropExtractor] Extraction error: {ex.Message}");
-                            }
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[InteropExtractor] Error processing InlineShape: {ex.Message}");
-                    }
-                    finally
-                    {
-                        if (ole != null)
-                        {
-                            try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(ole); Console.WriteLine("[InteropExtractor] Released OLEFormat COM object"); } catch (Exception ex) { Console.WriteLine($"[InteropExtractor] Error releasing OLEFormat: {ex.Message}"); }
-                            ole = null;
-                        }
-                        if (ish != null)
-                        {
-                            try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(ish); Console.WriteLine("[InteropExtractor] Released InlineShape COM object"); } catch (Exception ex) { Console.WriteLine($"[InteropExtractor] Error releasing InlineShape: {ex.Message}"); }
-                            ish = null;
-                        }
-                    }
-                }
-                Console.WriteLine($"[InteropExtractor] Embedded OLE InlineShapes found: {found}");
-
-                // Shapes (floating OLE objects) - with safety limits to prevent freezing
-                int floatingFound = 0;
-                int shapesCount = 0;
-                const int MAX_SHAPES_TO_PROCESS = 100; // Limit to prevent freezing
-                
-                try
-                {
-                    shapesCount = doc.Shapes.Count;
-                    Console.WriteLine($"[InteropExtractor] Total shapes in document: {shapesCount}");
-                    
-                    if (shapesCount > MAX_SHAPES_TO_PROCESS)
-                    {
-                        Console.WriteLine($"[InteropExtractor] WARNING: Document has {shapesCount} shapes. Processing only first {MAX_SHAPES_TO_PROCESS} to prevent freezing.");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] Could not get shapes count: {ex.Message}");
-                    shapesCount = 0;
-                }
-                
-                if (shapesCount > 0)
-                {
-                    int processedShapes = 0;
-                    foreach (Shape shape in doc.Shapes)
-                    {
-                        processedShapes++;
-                        if (processedShapes > MAX_SHAPES_TO_PROCESS)
-                        {
-                            Console.WriteLine($"[InteropExtractor] Stopped processing shapes at limit {MAX_SHAPES_TO_PROCESS}");
-                            break;
-                        }
-                        object ole = null;
-                        try
-                        {
-                            // Add timeout for each shape processing to prevent hanging
-                            var shapeTask = System.Threading.Tasks.Task.Run(() =>
-                            {
-                                // Check if this shape has an OLE format without referencing MsoShapeType
-                                bool hasOleFormat = false;
-                                try
-                                {
-                                    var oleFormat = shape.OLEFormat;
-                                    hasOleFormat = (oleFormat != null);
-                                }
-                                catch
-                                {
-                                    hasOleFormat = false;
-                                }
-                                
-                                if (hasOleFormat)
-                                {
-                                    ole = shape.OLEFormat;
-                                    string ext = GetExtensionFromProgID((ole as OLEFormat)?.ProgID);
-                                    string outFile = Path.Combine(outputDir, $"Embedded_Floating_{counter}{ext}");
-                                    counter++;
-                                    SaveOleObjectToFile(ole as OLEFormat, outFile);
-                                    int page = -1;
-                                    try
-                                    {
-                                        page = (int)shape.Anchor.get_Information(WdInformation.wdActiveEndPageNumber);
-                                    }
-                                    catch (Exception pageEx)
-                                    {
-                                        Console.WriteLine($"[InteropExtractor] Could not determine page number for floating shape: {pageEx.Message}");
-                                    }
-                                    if (page <= 0) page = -1;
-                                    results.Add(new ExtractedObjectInfo { FilePath = outFile, PageNumber = page, OleClass = (ole as OLEFormat)?.ProgID, DocumentOrderIndex = docOrderIndex });
-                                    docOrderIndex++;
-                                    Console.WriteLine($"[InteropExtractor] Extracted floating OLE: {outFile} (page {page}, ProgID={(ole as OLEFormat)?.ProgID}, Order={docOrderIndex-1})");
-                                    floatingFound++;
-                                }
-                            });
-                            
-                            // Wait for task with timeout (5 seconds per shape)
-                            if (!shapeTask.Wait(5000))
-                            {
-                                Console.WriteLine($"[InteropExtractor] Shape processing timed out, skipping shape {processedShapes}");
-                                continue;
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[InteropExtractor] Error extracting floating OLE from shape {processedShapes}: {ex.Message}");
-                        }
-                        finally
-                        {
-                            if (ole != null)
-                            {
-                                try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(ole); Console.WriteLine("[InteropExtractor] Released Shape.OLEFormat COM object"); } catch (Exception ex) { Console.WriteLine($"[InteropExtractor] Error releasing Shape.OLEFormat: {ex.Message}"); }
-                                ole = null;
-                            }
-                            try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(shape); Console.WriteLine("[InteropExtractor] Released Shape COM object"); } catch (Exception ex) { Console.WriteLine($"[InteropExtractor] Error releasing Shape: {ex.Message}"); }
-                        }
-                    }
-                }
-                Console.WriteLine($"[InteropExtractor] Embedded OLE floating Shapes found: {floatingFound}");
-            }
-            finally
-            {
-                if (doc != null)
-                {
-                    try 
-                    {
-                        doc.Close(false);
-                        System.Runtime.InteropServices.Marshal.FinalReleaseComObject(doc);
-                        doc = null;
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[InteropExtractor] Error closing document: {ex.Message}");
-                    }
-                }
-                if (wordApp != null)
-                {
-                    try
-                    {
-                        wordApp.Quit(false);
-                        System.Runtime.InteropServices.Marshal.FinalReleaseComObject(wordApp);
-                        wordApp = null;
-                        // Give Word time to fully close and release file locks
-                        System.Threading.Thread.Sleep(2000);
-                        // Force garbage collection to ensure COM objects are released
-                        GC.Collect();
-                        GC.WaitForPendingFinalizers();
-                        GC.Collect();
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[InteropExtractor] Error closing Word application: {ex.Message}");
-                    }
-                }
-            }
-
-            // Remove invalid/missing files from results before OpenXML fallback
-            var validResults = new List<ExtractedObjectInfo>();
-            foreach (var result in results)
-            {
-                if (File.Exists(result.FilePath) && new FileInfo(result.FilePath).Length > 0)
-                {
-                    validResults.Add(result);
-                    Console.WriteLine($"[InteropExtractor] Validated: {result.FilePath} (size: {new FileInfo(result.FilePath).Length} bytes)");
-                }
-                else
-                {
-                    Console.WriteLine($"[InteropExtractor] Removed invalid extraction: {result.FilePath} (file missing or empty)");
-                }
-            }
-            results = validResults;
-
-            // Only run OpenXML fallback for .docx files to catch Package objects NOT already extracted
-            if (docxPath.EndsWith(".docx", StringComparison.OrdinalIgnoreCase))
-            {
-                // Check if file is locked before OpenXml fallback
-                bool fileLocked = false;
-                try
-                {
-                    using (var fs = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.None))
-                    {
-                        // File is not locked
-                        fileLocked = false;
-                    }
-                }
-                catch (IOException ex)
-                {
-                    fileLocked = true;
-                    Console.WriteLine($"[InteropExtractor] File is still locked before OpenXml fallback: {ex.Message}");
-                }
-                if (fileLocked)
-                {
-                    Console.WriteLine("[InteropExtractor] Waiting for file lock to clear before OpenXml fallback...");
-                    int retriesOpenXml = 0;
-                    while (fileLocked && retriesOpenXml < 10)
-                    {
-                        System.Threading.Thread.Sleep(500);
-                        retriesOpenXml++;
-                        try
-                        {
-                            using (var fs = new FileStream(docxPath, FileMode.Open, FileAccess.Read, FileShare.None))
-                            {
-                                fileLocked = false;
-                                Console.WriteLine($"[InteropExtractor] File lock cleared after {retriesOpenXml} retries");
-                            }
-                        }
-                        catch (IOException)
-                        {
-                            fileLocked = true;
-                        }
-                    }
-                    if (fileLocked)
-                    {
-                        Console.WriteLine("[InteropExtractor] File is still locked after retries. OpenXml fallback may fail.");
-                    }
-                }
-
-                Console.WriteLine("[InteropExtractor] Running OpenXml fallback to extract missing objects...");
-                Console.WriteLine("[InteropExtractor] Attempting to determine document order of embedded objects via OpenXml.");
-
-                // --- Improved: Parse document.xml for embedded object order, including nested r:id ---
-                List<string> orderedRelIds = new List<string>();
-                try
-                {
-                    using (var wordDoc = WordprocessingDocument.Open(docxPath, false))
-                    {
-                        var mainPart = wordDoc.MainDocumentPart;
-                        if (mainPart != null)
-                        {
-                            var xdoc = System.Xml.Linq.XDocument.Load(mainPart.GetStream());
-                            XNamespace w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-                            XNamespace v = "urn:schemas-microsoft-com:vml";
-                            XNamespace o = "urn:schemas-microsoft-com:office:office";
-                            XNamespace r = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
-
-                            // Find all <w:object> elements in order
-                            var objectElements = xdoc.Descendants(w + "object").ToList();
-                            foreach (var objElem in objectElements)
-                            {
-                                // 1. Check for <w:oleObject r:id="..."> descendant
-                                var oleElem = objElem.Descendants(w + "oleObject").FirstOrDefault();
-                                if (oleElem != null)
-                                {
-                                    var relId = oleElem.Attribute(r + "id")?.Value;
-                                    if (!string.IsNullOrEmpty(relId))
-                                    {
-                                        if (!extractedRelIds.Contains(relId))
-                                            orderedRelIds.Add(relId);
-                                        continue;
-                                    }
-                                }
-                                // 2. Check for <o:OLEObject r:id="..."> descendant (sometimes used)
-                                var oElem = objElem.Descendants(o + "OLEObject").FirstOrDefault();
-                                if (oElem != null)
-                                {
-                                    var relId = oElem.Attribute(r + "id")?.Value;
-                                    if (!string.IsNullOrEmpty(relId))
-                                    {
-                                        if (!extractedRelIds.Contains(relId))
-                                            orderedRelIds.Add(relId);
-                                        continue;
-                                    }
-                                }
-                                // 3. Check for r:id directly on <w:object>
-                                var directId = objElem.Attribute(r + "id")?.Value;
-                                if (!string.IsNullOrEmpty(directId))
-                                {
-                                    if (!extractedRelIds.Contains(directId))
-                                        orderedRelIds.Add(directId);
+                                    orderedRelIds.Add(relId);
                                     continue;
                                 }
                             }
-                            // Also check for <w:oleObject> outside <w:object>
-                            var looseOleElements = xdoc.Descendants(w + "oleObject").ToList();
-                            foreach (var elem in looseOleElements)
+                            // 2. Check for <o:OLEObject r:id="..."> descendant (sometimes used)
+                            var oElem = objElem.Descendants(o + "OLEObject").FirstOrDefault();
+                            if (oElem != null)
                             {
-                                var relId = elem.Attribute(r + "id")?.Value;
-                                if (!string.IsNullOrEmpty(relId) && !orderedRelIds.Contains(relId) && !extractedRelIds.Contains(relId))
+                                var relId = oElem.Attribute(r + "id")?.Value;
+                                if (!string.IsNullOrEmpty(relId))
+                                {
                                     orderedRelIds.Add(relId);
-                            }
-                            // Also check for <w:altChunk> (for embedded files)
-                            var altChunkElements = xdoc.Descendants(w + "altChunk").ToList();
-                            foreach (var elem in altChunkElements)
-                            {
-                                var relId = elem.Attribute(r + "id")?.Value;
-                                if (!string.IsNullOrEmpty(relId) && !orderedRelIds.Contains(relId) && !extractedRelIds.Contains(relId))
-                                    orderedRelIds.Add(relId);
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] OpenXml document order parse error: {ex.Message}");
-                }
-                // --- End Improved ---
-
-                // Retry mechanism for file lock issues
-                int retries = 3;
-                // Place usedRelIds declaration here so it is in scope for both loops
-                var usedRelIds = new HashSet<string>();
-                for (int i = 0; i < retries; i++)
-                {
-                    try
-                    {
-                        using (var wordDoc = WordprocessingDocument.Open(docxPath, false))
-                        {
-                            var embeddedParts = wordDoc.MainDocumentPart.EmbeddedObjectParts.ToList();
-                            Console.WriteLine($"[InteropExtractor] OpenXml found {embeddedParts.Count} embedded object parts");
-
-                            // Build relId -> part mapping
-                            var relIdToPart = new Dictionary<string, EmbeddedObjectPart>();
-                            foreach (var rel in wordDoc.MainDocumentPart.Parts)
-                            {
-                                if (rel.OpenXmlPart is EmbeddedObjectPart objPart)
-                                {
-                                    relIdToPart[rel.RelationshipId] = objPart;
+                                    continue;
                                 }
                             }
-
-                            int xmlCounter = 1;
-                            // Insert in document order first
-                            foreach (var relId in orderedRelIds)
+                            // 3. Check for r:id directly on <w:object>
+                            var directId = objElem.Attribute(r + "id")?.Value;
+                            if (!string.IsNullOrEmpty(directId))
                             {
-                                if (relIdToPart.TryGetValue(relId, out var part))
-                                {
-                                    // Use a unique filename for each extracted part to prevent overwriting
-                                    string partExt = ".bin";
-                                    string uniqueSuffix = $"_{relId}_{Guid.NewGuid().ToString("N")}";
-                                    string partFile = Path.Combine(outputDir, $"Embedded_OpenXml_{xmlCounter}{uniqueSuffix}{partExt}");
-                                    using (var fs = new FileStream(partFile, FileMode.Create, FileAccess.Write))
-                                    {
-                                        part.GetStream().CopyTo(fs);
-                                    }
-                                    Console.WriteLine($"[InteropExtractor] OpenXml extracted OLE: {partFile} (relId={relId}, Order={docOrderIndex})");
-                                    results.Add(new ExtractedObjectInfo { FilePath = partFile, PageNumber = -1, OleClass = "Package", DocumentOrderIndex = docOrderIndex });
-                                    docOrderIndex++;
-                                    xmlCounter++;
-                                    usedRelIds.Add(relId); // Mark as used here to prevent duplicates
-                                }
-                            }
-                            // Add any remaining parts not referenced in document order (rare)
-                            foreach (var part in embeddedParts)
-                            {
-                                var rel = wordDoc.MainDocumentPart.Parts.FirstOrDefault(p => p.OpenXmlPart == part);
-                                if (rel != null && !usedRelIds.Contains(rel.RelationshipId))
-                                {
-                                    // Use a unique filename for each extracted part to prevent overwriting
-                                    string partExt = ".bin";
-                                    string uniqueSuffix = $"_{rel.RelationshipId}_{Guid.NewGuid().ToString("N")}";
-                                    string partFile = Path.Combine(outputDir, $"Embedded_OpenXml_{xmlCounter}{uniqueSuffix}{partExt}");
-                                    using (var fs = new FileStream(partFile, FileMode.Create, FileAccess.Write))
-                                    {
-                                        part.GetStream().CopyTo(fs);
-                                    }
-                                    Console.WriteLine($"[InteropExtractor] OpenXml extracted OLE (unreferenced): {partFile} (relId={rel.RelationshipId}, Order={docOrderIndex})");
-                                    results.Add(new ExtractedObjectInfo { FilePath = partFile, PageNumber = -1, OleClass = "Package", DocumentOrderIndex = docOrderIndex });
-                                    docOrderIndex++;
-                                    xmlCounter++;
-                                    usedRelIds.Add(rel.RelationshipId); // Mark as used so no duplicates
-                                }
+                                orderedRelIds.Add(directId);
+                                continue;
                             }
                         }
-                        break; // Success, exit retry loop
-                    }
-                    catch (IOException ex) when (ex.Message.Contains("being used by another process"))
-                    {
-                        Console.WriteLine($"[InteropExtractor] File locked (attempt {i + 1}/{retries}): {ex.Message}");
-                        if (i < retries - 1)
+                        // Also check for <w:oleObject> outside <w:object>
+                        var looseOleElements = xdoc.Descendants(w + "oleObject").ToList();
+                        foreach (var elem in looseOleElements)
                         {
-                            // Wait longer before retrying
-                            System.Threading.Thread.Sleep(3000 * (i + 1));
+                            var relId = elem.Attribute(r + "id")?.Value;
+                            if (!string.IsNullOrEmpty(relId) && !orderedRelIds.Contains(relId))
+                                orderedRelIds.Add(relId);
                         }
-                        else
-                        {
-                            Console.WriteLine($"[InteropExtractor] OpenXml fallback failed after {retries} attempts due to file lock");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[InteropExtractor] OpenXml fallback extraction error: {ex.Message}");
-                        break; // Non-retryable error
-                    }
-                }
-            }
-
-            // --- After extracting .bin OLE packages, extract real files from them using OpenMcdf ---
-            // Build a list of InlineShapes with ProgID "Package" and their page numbers
-            var packageInlineShapes = new List<(int Index, int Page)>();
-            Application pkgWordApp = null;
-            Document pkgDoc = null;
-            try
-            {
-                pkgWordApp = new Application { Visible = false, DisplayAlerts = WdAlertLevel.wdAlertsNone };
-                pkgDoc = pkgWordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
-                for (int idx = 1; idx <= pkgDoc.InlineShapes.Count; idx++)
-                {
-                    var shape = pkgDoc.InlineShapes[idx];
-                    string progId = "";
-                    try { progId = shape.OLEFormat?.ProgID ?? ""; } catch { }
-                    if ((progId ?? "").ToLower().Contains("package"))
-                    {
-                        int page = -1;
-                        try
-                        {
-                            page = (int)shape.Range.get_Information(WdInformation.wdActiveEndPageNumber);
-                            if (page <= 0)
-                                page = (int)shape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
-                            if (page <= 0)
-                            {
-                                var startRange = pkgDoc.Range(shape.Range.Start, shape.Range.Start);
-                                page = (int)startRange.get_Information(WdInformation.wdActiveEndPageNumber);
-                            }
-                        }
-                        catch { }
-                        packageInlineShapes.Add((idx, page));
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[InteropExtractor] Error building Package InlineShape list: {ex.Message}");
+                Console.WriteLine($"[InteropExtractor] OpenXml document order parse error: {ex.Message}");
             }
-            finally
+
+            // --- 2. Extract objects in order ---
+            var relIdToFile = new Dictionary<string, string>();
+            var relIdToOleClass = new Dictionary<string, string>();
+            int docOrderIndex = 0;
+            try
             {
-                if (pkgDoc != null) { try { pkgDoc.Close(false); } catch { } }
-                if (pkgWordApp != null) { try { pkgWordApp.Quit(false); } catch { } }
+                using (var wordDoc = WordprocessingDocument.Open(docxPath, false))
+                {
+                    var embeddedParts = wordDoc.MainDocumentPart.EmbeddedObjectParts.ToList();
+                    var relIdToPart = new Dictionary<string, EmbeddedObjectPart>();
+                    foreach (var rel in wordDoc.MainDocumentPart.Parts)
+                    {
+                        if (rel.OpenXmlPart is EmbeddedObjectPart objPart)
+                        {
+                            relIdToPart[rel.RelationshipId] = objPart;
+                        }
+                    }
+                    int xmlCounter = 1;
+                    foreach (var relId in orderedRelIds)
+                    {
+                        if (relIdToPart.TryGetValue(relId, out var part))
+                        {
+                            string partExt = ".bin";
+                            string uniqueSuffix = $"_{relId}_{Guid.NewGuid().ToString("N")}";
+                            string partFile = Path.Combine(outputDir, $"Embedded_OpenXml_{xmlCounter}{uniqueSuffix}{partExt}");
+                            using (var fs = new FileStream(partFile, FileMode.Create, FileAccess.Write))
+                            {
+                                part.GetStream().CopyTo(fs);
+                            }
+                            relIdToFile[relId] = partFile;
+                            relIdToOleClass[relId] = "Package"; // Default, can be improved if needed
+                            results.Add(new ExtractedObjectInfo { FilePath = partFile, PageNumber = -1, OleClass = "Package", DocumentOrderIndex = docOrderIndex, ExtractedFileName = Path.GetFileName(partFile) });
+                            docOrderIndex++;
+                            xmlCounter++;
+                        }
+                    }
+                }
             }
-            // --- NEW: Extract real files from .bin in OpenXml order, and disregard non-real files immediately ---
-            int packageShapeCounter = 0;
-            var openXmlBinObjs = results.Where(obj => obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase) && (obj.OleClass ?? "").ToLower().Contains("package")).ToList();
-            foreach (var obj in openXmlBinObjs.ToList()) // ToList() to avoid modifying collection during iteration
+            catch (Exception ex)
             {
-                int? sourceIdx = null;
-                int? pageFromShape = null;
+                Console.WriteLine($"[InteropExtractor] OpenXml extraction error: {ex.Message}");
+            }
+
+            // --- 3. Extract real files from .bin using OlePackageExtractor ---
+            var binObjs = results.Where(obj => obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)).ToList();
+            var realResults = new List<ExtractedObjectInfo>();
+            foreach (var obj in binObjs)
+            {
                 try
                 {
                     var bytes = File.ReadAllBytes(obj.FilePath);
                     var pkg = MsgToPdfConverter.Utils.OlePackageExtractor.ExtractPackage(bytes);
-                    // --- Disregard non-real files immediately ---
                     if (pkg == null || pkg.Data == null || pkg.Data.Length == 0)
-                    {
-                        results.Remove(obj);
                         continue;
-                    }
-                    // Fallback: assign by OpenXml order (packageShapeCounter)
-                    if (packageShapeCounter < packageInlineShapes.Count)
-                    {
-                        sourceIdx = packageInlineShapes[packageShapeCounter].Index;
-                        pageFromShape = packageInlineShapes[packageShapeCounter].Page;
-                        packageShapeCounter++;
-                    }
-                    // --- Ensure unique filename for each extracted file ---
                     string realFileName = Path.GetFileNameWithoutExtension(obj.FilePath) + "_" + Guid.NewGuid().ToString("N") + Path.GetExtension(pkg.FileName ?? "");
                     string realFilePath = Path.Combine(Path.GetDirectoryName(obj.FilePath), realFileName);
                     File.WriteAllBytes(realFilePath, pkg.Data);
-                    Console.WriteLine($"[InteropExtractor] OLE bin extracted: {realFilePath} (from {obj.FilePath})");
-                    Console.WriteLine($"[InteropExtractor] Mapping: File='{realFileName}', EmbeddedOfficeName='{pkg.EmbeddedOfficeName}', Stream='{pkg.OriginalStreamName}', InlineShapeIdx={sourceIdx}, Page={pageFromShape}");
-                    var newObj = new ExtractedObjectInfo {
+                    realResults.Add(new ExtractedObjectInfo {
                         FilePath = realFilePath,
-                        PageNumber = pageFromShape ?? -1,
-                        OleClass = Path.GetExtension(realFilePath).ToLower() == ".msg" ? "Package" : obj.OleClass,
+                        PageNumber = -1,
+                        OleClass = obj.OleClass,
                         DocumentOrderIndex = obj.DocumentOrderIndex,
-                        SourceInlineShapeIndex = sourceIdx,
-                        MatchedInlineShapeIndex = sourceIdx,
-                        OriginalStreamName = pkg.OriginalStreamName,
                         ExtractedFileName = realFileName
-                    };
-                    results.Add(newObj);
-                    // Remove the .bin placeholder from results
-                    results.Remove(obj);
-                    // --- Validate MSG files with enhanced debugging ---
-                    if (realFilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-                    {
-                        Console.WriteLine($"[InteropExtractor] Validating MSG file: {realFilePath}");
-                        Console.WriteLine($"[InteropExtractor] MSG file size: {new FileInfo(realFilePath).Length} bytes");
-                        // Debug: Show first 32 bytes of the MSG file
-                        try
-                        {
-                            var msgBytes = File.ReadAllBytes(realFilePath);
-                            var first32 = msgBytes.Take(32).ToArray();
-                            var hexString = string.Join(" ", first32.Select(b => b.ToString("X2")));
-                            Console.WriteLine($"[InteropExtractor] MSG first 32 bytes: {hexString}");
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[InteropExtractor] Could not read MSG bytes for debugging: {ex.Message}");
-                        }
-                        if (ValidateMsgFile(realFilePath))
-                        {
-                            Console.WriteLine($"[InteropExtractor] MSG file validated successfully: {realFilePath}");
-                            newObj.FilePath = realFilePath;
-                        }
-                        else
-                        {
-                            Console.WriteLine($"[InteropExtractor] MSG file validation failed, trying fallback validation...");
-                            bool fallbackValid = TryFallbackMsgValidation(realFilePath);
-                            if (fallbackValid)
-                            {
-                                Console.WriteLine($"[InteropExtractor] MSG file validated with fallback method: {realFilePath}");
-                                newObj.FilePath = realFilePath;
-                            }
-                            else
-                            {
-                                Console.WriteLine($"[InteropExtractor] MSG file validation failed completely, removing: {realFilePath}");
-                                var debugPath = realFilePath + ".corrupted";
-                                try
-                                {
-                                    File.Copy(realFilePath, debugPath, true);
-                                    Console.WriteLine($"[InteropExtractor] Corrupted MSG saved for analysis: {debugPath}");
-                                }
-                                catch { }
-                                results.Remove(newObj);
-                                try { File.Delete(realFilePath); } catch { }
-                                continue;
-                            }
-                        }
-                    }
+                    });
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[InteropExtractor] OLE bin extraction error: {ex.Message}");
-                    results.Remove(obj);
                 }
             }
+            // Replace .bin objects with real extracted files
+            results = results.Where(obj => !obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)).ToList();
+            results.AddRange(realResults);
+            results = results.OrderBy(r => r.DocumentOrderIndex).ToList();
 
-            // --- Find ACTUAL page numbers using Word Interop if fallback was used ---
-            if (results.Count > 0 && results.Any(o => o.PageNumber == -1))
+            // --- 4. Map each extracted object to its page number using Interop (by order) ---
+            try
             {
-                Console.WriteLine($"[DEBUG-MAP] ===== InlineShape Table (Index, ProgID, Page) =====");
-                Application pageWordApp = null;
-                Document pageDoc = null;
+                Application wordApp = null;
+                Document doc = null;
                 try
                 {
-                    pageWordApp = new Application { Visible = false, DisplayAlerts = WdAlertLevel.wdAlertsNone };
-                    pageDoc = pageWordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
-
-                    // Build InlineShape metadata list
+                    wordApp = new Application { Visible = false, DisplayAlerts = WdAlertLevel.wdAlertsNone };
+                    doc = wordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
                     var inlineShapeMeta = new List<(int Index, string ProgId, int Page)>();
-                    for (int idx = 1; idx <= pageDoc.InlineShapes.Count; idx++)
+                    for (int idx = 1; idx <= doc.InlineShapes.Count; idx++)
                     {
-                        var shape = pageDoc.InlineShapes[idx];
+                        var shape = doc.InlineShapes[idx];
                         string progId = "";
                         try { progId = shape.OLEFormat?.ProgID ?? ""; } catch { }
                         int page = -1;
@@ -811,691 +193,43 @@ namespace MsgToPdfConverter.Utils
                                 page = (int)shape.Range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
                             if (page <= 0)
                             {
-                                var startRange = pageDoc.Range(shape.Range.Start, shape.Range.Start);
+                                var startRange = doc.Range(shape.Range.Start, shape.Range.Start);
                                 page = (int)startRange.get_Information(WdInformation.wdActiveEndPageNumber);
                             }
                         }
                         catch { }
                         inlineShapeMeta.Add((idx, progId, page));
-                        Console.WriteLine($"[DEBUG-MAP] InlineShape {idx}: ProgID={progId}, Page={page}");
                     }
-
-                    // --- Robust mapping for OpenXml fallback objects (PDFs) ---
-                    // Only fallback objects (e.g. Package, .bin, or unique fallback PDFs) with PageNumber == -1
-                    var fallbackObjs = results.Where(r => r.PageNumber == -1 && (r.OleClass == "Package" || r.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase) || r.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))).ToList();
-                    int fallbackPtr = 0;
-                    foreach (var obj in fallbackObjs)
+                    // Map by order: assign each extracted object to the corresponding InlineShape's page
+                    for (int i = 0; i < results.Count && i < inlineShapeMeta.Count; i++)
                     {
-                        if (fallbackPtr < inlineShapeMeta.Count)
-                        {
-                            obj.PageNumber = inlineShapeMeta[fallbackPtr].Page > 0 ? inlineShapeMeta[fallbackPtr].Page : (fallbackPtr + 1);
-                            obj.SourceInlineShapeIndex = inlineShapeMeta[fallbackPtr].Index;
-                            obj.MatchedInlineShapeIndex = inlineShapeMeta[fallbackPtr].Index;
-                            Console.WriteLine($"[DEBUG-MAP] Fallback mapping: {Path.GetFileName(obj.FilePath)} -> InlineShape {inlineShapeMeta[fallbackPtr].Index} (ProgID={inlineShapeMeta[fallbackPtr].ProgId}) assigned to page {obj.PageNumber}");
-                            fallbackPtr++;
-                        }
-                        else
-                        {
-                            obj.PageNumber = obj.DocumentOrderIndex + 1;
-                            Console.WriteLine($"[DEBUG-MAP] Fallback mapping: {Path.GetFileName(obj.FilePath)} could not be matched, assigned fallback page {obj.PageNumber}");
-                        }
-                    }
-
-                    // --- SUMMARY TABLE ---
-                    Console.WriteLine("[DEBUG-MAP] ===== FINAL OBJECT TO PAGE MAPPING =====");
-                    foreach (var obj in results)
-                    {
-                        Console.WriteLine($"[DEBUG-MAP] File: {Path.GetFileName(obj.FilePath)}, OleClass: {obj.OleClass}, InlineShapeIdx: {obj.SourceInlineShapeIndex}, Page: {obj.PageNumber}, Order: {obj.DocumentOrderIndex}");
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] Page detection failed (robust mapping): {ex.Message}. Using simple assignment.");
-                    for (int i = 0; i < results.Count; i++)
-                    {
-                        results[i].PageNumber = i + 1;
-                        Console.WriteLine($"[DEBUG-MAP] Fallback: File: {Path.GetFileName(results[i].FilePath)}, Page: {results[i].PageNumber}");
+                        results[i].PageNumber = inlineShapeMeta[i].Page > 0 ? inlineShapeMeta[i].Page : (i + 1);
                     }
                 }
                 finally
                 {
-                    if (pageDoc != null)
-                    {
-                        try { pageDoc.Close(false); } catch { }
-                    }
-                    if (pageWordApp != null)
-                    {
-                        try { pageWordApp.Quit(false); } catch { }
-                    }
+                    if (doc != null) { try { doc.Close(false); } catch { } }
+                    if (wordApp != null) { try { wordApp.Quit(false); } catch { } }
                 }
             }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[InteropExtractor] Page mapping failed: {ex.Message}");
+                for (int i = 0; i < results.Count; i++)
+                {
+                    results[i].PageNumber = i + 1;
+                }
+            }
+
+            // --- 5. Return only one object per logical annex (no duplicates) ---
+            // (Assume one per DocumentOrderIndex, as OpenXml order is correct)
+            results = results
+                .GroupBy(r => r.DocumentOrderIndex)
+                .Select(g => g.First())
+                .OrderBy(r => r.DocumentOrderIndex)
+                .ToList();
 
             return results;
-        }
-
-        // Attempts to save the OLE object to a file, if possible
-        private static void SaveOleObjectToFile(OLEFormat ole, string outFile)
-        {
-            // Handle Word documents with enhanced extraction
-            if (ole.ProgID != null && ole.ProgID.ToLowerInvariant().Contains("word"))
-            {
-                SaveEmbeddedWordDocument(ole, outFile);
-                return;
-            }
-            
-            // Handle Excel documents with enhanced extraction
-            if (ole.ProgID != null && (ole.ProgID.ToLowerInvariant().Contains("excel") || ole.ProgID.ToLowerInvariant().Contains("sheet")))
-            {
-                Console.WriteLine($"[InteropExtractor] Detected Excel object with ProgID: {ole.ProgID}");
-                SaveEmbeddedExcelDocument(ole, outFile);
-                return;
-            }
-            
-            // Only certain ProgIDs support direct saving; for others, try to save the object if it's a known type
-            if (ole.ProgID != null && ole.ProgID.ToLowerInvariant().Contains("pdf"))
-            {
-                // Embedded PDF: try to save as file
-                dynamic obj = ole.Object;
-                if (obj != null && obj is MemoryStream)
-                {
-                    using (var fs = new FileStream(outFile, FileMode.Create, FileAccess.Write))
-                    {
-                        ((MemoryStream)obj).WriteTo(fs);
-                    }
-                }
-                else
-                {
-                    // Fallback: try Package extraction (not always possible)
-                    ole.Activate();
-                }
-            }
-            else
-            {
-                // For other objects, try SaveCopyAs if available
-                try
-                {
-                    dynamic obj = ole.Object;
-                    if (obj != null && obj.GetType().GetMethod("SaveCopyAs") != null)
-                    {
-                        obj.SaveCopyAs(outFile);
-                    }
-                }
-                catch { }
-            }
-        }
-
-        private static string GetExtensionFromProgID(string progId)
-        {
-            // Map common OLE ProgIDs to file extensions
-            if (string.IsNullOrEmpty(progId)) return ".bin";
-            progId = progId.ToLowerInvariant();
-            
-            // PDF files
-            if (progId.Contains("pdf") || progId.Contains("acrobat")) return ".pdf";
-            
-            // Excel files - handle various ProgIDs
-            if (progId.Contains("excel") || progId.Contains("sheet") || progId.Contains("workbook")) return ".xlsx";
-            
-            // Word files
-            if (progId.Contains("word") || progId.Contains("document")) return ".docx";
-            
-            // PowerPoint files
-            if (progId.Contains("powerpoint") || progId.Contains("presentation")) return ".pptx";
-            
-            // Package objects (could be anything)
-            if (progId.Contains("package")) return ".bin";
-            
-            // MSG files
-            if (progId.Contains("msg") || progId.Contains("outlook")) return ".msg";
-            
-            return ".bin";
-        }
-        
-        /// <summary>
-        /// Gets the page number for an InlineShape using multiple robust methods
-        /// </summary>
-        private static int GetPageNumberForInlineShape(InlineShape inlineShape, Document doc)
-        {
-            int page = 0;
-            
-            try
-            {
-                Console.WriteLine($"[InteropExtractor] Attempting to get page number for InlineShape...");
-                
-                // Method 1: Direct range information (most reliable)
-                var range = inlineShape.Range;
-                page = (int)range.get_Information(WdInformation.wdActiveEndPageNumber);
-                Console.WriteLine($"[InteropExtractor] Method 1 (Range.Information): page = {page}");
-                
-                if (page <= 0)
-                {
-                    // Method 2: Try with adjusted page number
-                    page = (int)range.get_Information(WdInformation.wdActiveEndAdjustedPageNumber);
-                    Console.WriteLine($"[InteropExtractor] Method 2 (AdjustedPageNumber): page = {page}");
-                }
-                
-                if (page <= 0)
-                {
-                    // Method 3: Try by getting the range start position
-                    var startRange = doc.Range(range.Start, range.Start);
-                    page = (int)startRange.get_Information(WdInformation.wdActiveEndPageNumber);
-                    Console.WriteLine($"[InteropExtractor] Method 3 (StartRange): page = {page}");
-                }
-                
-                if (page <= 0)
-                {
-                    // Method 4: Try by calculating page from character position
-                    page = CalculatePageFromPosition(range.Start, doc);
-                    Console.WriteLine($"[InteropExtractor] Method 4 (CalculateFromPosition): page = {page}");
-                }
-                
-                if (page <= 0)
-                {
-                    // Method 5: Fallback - estimate based on document structure
-                    page = EstimatePageFromDocumentStructure(range, doc);
-                    Console.WriteLine($"[InteropExtractor] Method 5 (EstimateFromStructure): page = {page}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[InteropExtractor] Error getting page number: {ex.Message}");
-                page = 0;
-            }
-            
-            Console.WriteLine($"[InteropExtractor] Final page number: {page}");
-            return page;
-        }
-        
-        /// <summary>
-        /// Calculates page number from character position in document
-        /// </summary>
-        private static int CalculatePageFromPosition(int position, Document doc)
-        {
-            try
-            {
-                // Get total pages and characters to estimate
-                int totalPages = doc.ComputeStatistics(WdStatistic.wdStatisticPages);
-                int totalChars = doc.ComputeStatistics(WdStatistic.wdStatisticCharacters);
-                if (totalChars > 0 && totalPages > 0)
-                {
-                    // Simple estimation: position / (total chars / total pages)
-                    int estimatedPage = (int)Math.Ceiling((double)position / totalChars * totalPages);
-                    return Math.Max(1, Math.Min(estimatedPage, totalPages));
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[InteropExtractor] Error calculating page from position: {ex.Message}");
-            }
-            return 0;
-        }
-        
-        /// <summary>
-        /// Estimates the page number based on document structure (headings, footers, etc.)
-        /// </summary>
-        private static int EstimatePageFromDocumentStructure(Range range, Document doc)
-        {
-            int estimatedPage = 0;
-            
-            try
-            {
-                // Heuristic: check preceding and following content for page breaks or section breaks
-                var prevRange = range.Previous();
-                var nextRange = range.Next();
-                
-                // Check for page break character (manual page break)
-                if (prevRange != null && prevRange.Text.Trim() == "\f")
-                {
-                    estimatedPage--;
-                }
-                if (nextRange != null && nextRange.Text.Trim() == "\f")
-                {
-                    estimatedPage++;
-                }
-                
-                // Check for section breaks (next page)
-                if (nextRange != null && nextRange.Sections.Count > 0)
-                {
-                    estimatedPage++;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[InteropExtractor] Error estimating page from structure: {ex.Message}");
-            }
-            
-            return estimatedPage;
-        }
-
-        /// <summary>
-        /// Enhanced method to save embedded Word documents using multiple strategies
-        /// </summary>
-        private static bool SaveEmbeddedWordDocument(OLEFormat ole, string outFile)
-        {
-            Console.WriteLine($"[InteropExtractor] Attempting enhanced Word document extraction to: {outFile}");
-            
-            try
-            {
-                dynamic obj = ole.Object;
-                if (obj == null)
-                {
-                    Console.WriteLine($"[InteropExtractor] Could not access embedded Word object");
-                    return false;
-                }
-                
-                // Method 1: Try SaveAs2
-                try
-                {
-                    obj.SaveAs2(outFile, WdSaveFormat.wdFormatDocumentDefault);
-                    if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
-                    {
-                        Console.WriteLine($"[InteropExtractor] Word document saved using SaveAs2");
-                        return true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] SaveAs2 failed: {ex.Message}");
-                }
-                
-                // Method 2: Try SaveAs
-                try
-                {
-                    obj.SaveAs(outFile);
-                    if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
-                    {
-                        Console.WriteLine($"[InteropExtractor] Word document saved using SaveAs");
-                        return true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] SaveAs failed: {ex.Message}");
-                }
-                
-                // Method 3: Try SaveCopyAs
-                try
-                {
-                    obj.SaveCopyAs(outFile);
-                    if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
-                    {
-                        Console.WriteLine($"[InteropExtractor] Word document saved using SaveCopyAs");
-                        return true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] SaveCopyAs failed: {ex.Message}");
-                }
-                
-                // Method 4: Create new document and copy content
-                try
-                {
-                    var wordApp = new Application { Visible = false, DisplayAlerts = WdAlertLevel.wdAlertsNone };
-                    var newDoc = wordApp.Documents.Add();
-                    
-                    // Try to select all content and copy
-                    var range = obj.Content;
-                    range.Copy();
-                    newDoc.Content.Paste();
-                    newDoc.SaveAs2(outFile, WdSaveFormat.wdFormatDocumentDefault);
-                    
-                    newDoc.Close(false);
-                    wordApp.Quit(false);
-                    
-                    if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
-                    {
-                        Console.WriteLine($"[InteropExtractor] Word document saved using content copy method");
-                        return true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] Content copy method failed: {ex.Message}");
-                }
-                
-                Console.WriteLine($"[InteropExtractor] All Word document extraction methods failed");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[InteropExtractor] Enhanced Word extraction failed: {ex.Message}");
-                return false;
-            }
-        }
-
-        /// <summary>
-        /// Enhanced Excel document extraction using Excel Interop in silent mode
-        /// </summary>
-        private static void SaveEmbeddedExcelDocument(OLEFormat ole, string outFile)
-        {
-            Microsoft.Office.Interop.Excel.Application excelApp = null;
-            Microsoft.Office.Interop.Excel.Workbook workbook = null;
-            
-            try
-            {
-                Console.WriteLine($"[InteropExtractor] Attempting Excel document extraction using Excel Interop to: {outFile}");
-                
-                // Create Excel application in silent mode
-                excelApp = new Microsoft.Office.Interop.Excel.Application
-                {
-                    Visible = false,
-                    DisplayAlerts = false,
-                    ScreenUpdating = false,
-                    EnableEvents = false,
-                    Interactive = false,
-                    UserControl = false,
-                    ShowWindowsInTaskbar = false
-                };
-                
-                Console.WriteLine("[InteropExtractor] Excel application created in silent mode");
-
-                // Try to get the embedded Excel data via OLE activation in Excel
-                try
-                {
-                    // Activate the OLE object to make it available to Excel
-                    ole.Activate();
-                    Console.WriteLine("[InteropExtractor] OLE object activated");
-                    
-                    // Give Excel a moment to process the activation
-                    System.Threading.Thread.Sleep(500);
-                    
-                    // Try to access the active workbook that should be opened by the activation
-                    if (excelApp.Workbooks.Count > 0)
-                    {
-                        workbook = excelApp.ActiveWorkbook;
-                        if (workbook != null)
-                        {
-                            Console.WriteLine($"[InteropExtractor] Found active Excel workbook: {workbook.Name}");
-                            
-                            // Save the workbook to the specified file
-                            workbook.SaveAs(outFile, Microsoft.Office.Interop.Excel.XlFileFormat.xlOpenXMLWorkbook);
-                            
-                            if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
-                            {
-                                Console.WriteLine("[InteropExtractor] Excel document saved successfully using Excel Interop");
-                                return;
-                            }
-                        }
-                    }
-                    
-                    Console.WriteLine("[InteropExtractor] No active workbook found after OLE activation");
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] Excel Interop extraction failed: {ex.Message}");
-                }
-                
-                // Alternative approach: Try to extract OLE object data directly and open in Excel
-                try
-                {
-                    Console.WriteLine("[InteropExtractor] Trying direct OLE data extraction approach");
-                    
-                    // Create a temporary file to store the OLE object data
-                    string tempFile = Path.GetTempFileName();
-                    try
-                    {
-                        // Try to get the native data from the OLE object
-                        dynamic oleObject = ole.Object;
-                        if (oleObject != null)
-                        {
-                            // Close any existing workbooks first
-                            while (excelApp.Workbooks.Count > 0)
-                            {
-                                excelApp.Workbooks[1].Close(false);
-                            }
-                            
-                            // Try to use DoVerb to activate and potentially save the object
-                            ole.DoVerb(Microsoft.Office.Interop.Word.WdOLEVerb.wdOLEVerbHide); // Use Hide instead of Show to avoid popups
-                            System.Threading.Thread.Sleep(300);
-                            
-                            // Check if Excel now has an active workbook
-                            if (excelApp.Workbooks.Count > 0)
-                            {
-                                workbook = excelApp.ActiveWorkbook;
-                                if (workbook != null)
-                                {
-                                    Console.WriteLine($"[InteropExtractor] Found workbook after DoVerb: {workbook.Name}");
-                                    
-                                    workbook.SaveAs(outFile, Microsoft.Office.Interop.Excel.XlFileFormat.xlOpenXMLWorkbook);
-                                    
-                                    if (File.Exists(outFile) && new FileInfo(outFile).Length > 0)
-                                    {
-                                        Console.WriteLine("[InteropExtractor] Excel document saved using DoVerb approach");
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    finally
-                    {
-                        try { File.Delete(tempFile); } catch { }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] Direct OLE data extraction failed: {ex.Message}");
-                }
-                
-                Console.WriteLine("[InteropExtractor] Excel extraction failed - unable to extract embedded Excel document");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[InteropExtractor] Excel extraction error: {ex.Message}");
-            }
-            finally
-            {
-                // Clean up Excel objects
-                try
-                {
-                    if (workbook != null)
-                    {
-                        try { workbook.Close(false); } catch { }
-                        try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(workbook); } catch { }
-                        workbook = null;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] Error closing workbook: {ex.Message}");
-                }
-                
-                try
-                {
-                    if (excelApp != null)
-                    {
-                        try
-                        {
-                            // Close all workbooks without saving
-                            while (excelApp.Workbooks.Count > 0)
-                            {
-                                try { excelApp.Workbooks[1].Close(false); } catch { break; }
-                            }
-                            excelApp.Quit();
-                        }
-                        catch { }
-                        try { System.Runtime.InteropServices.Marshal.FinalReleaseComObject(excelApp); } catch { }
-                        excelApp = null;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] Error closing Excel application: {ex.Message}");
-                }
-                // Force garbage collection to help clean up COM objects
-                GC.Collect();
-                GC.WaitForPendingFinalizers();
-                GC.Collect();
-            }
-        }
-
-        /// <summary>
-        /// Validates if an extracted MSG file is a valid OLE structured storage file
-        /// </summary>
-        private static bool ValidateMsgFile(string msgPath)
-        {
-            try
-            {
-                if (!File.Exists(msgPath) || new FileInfo(msgPath).Length == 0)
-                {
-                    Console.WriteLine($"[InteropExtractor] MSG validation failed: file missing or empty");
-                    return false;
-                }
-                
-                // Check OLE signature
-                var bytes = File.ReadAllBytes(msgPath);
-                if (bytes.Length < 8)
-                {
-                    Console.WriteLine($"[InteropExtractor] MSG validation failed: file too small ({bytes.Length} bytes)");
-                    return false;
-                }
-                
-                // OLE files start with signature: D0 CF 11 E0 A1 B1 1A E1
-                var oleSignature = new byte[] { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
-                bool signatureMatch = true;
-                for (int i = 0; i < 8; i++)
-                {
-                    if (bytes[i] != oleSignature[i])
-                    {
-                        signatureMatch = false;
-                        Console.WriteLine($"[InteropExtractor] MSG validation failed: OLE signature mismatch at byte {i}. Expected: {oleSignature[i]:X2}, Found: {bytes[i]:X2}");
-                        break;
-                    }
-                }
-                
-                if (!signatureMatch)
-                {
-                    // Show what we actually found
-                    var actualSignature = string.Join(" ", bytes.Take(8).Select(b => b.ToString("X2")));
-                    var expectedSignature = string.Join(" ", oleSignature.Select(b => b.ToString("X2")));
-                    Console.WriteLine($"[InteropExtractor] Expected OLE signature: {expectedSignature}");
-                    Console.WriteLine($"[InteropExtractor] Actual file signature:  {actualSignature}");
-                    return false;
-                }
-                
-                // Try to open with MsgReader as additional validation
-                try
-                {
-                    using (var msg = new MsgReader.Outlook.Storage.Message(msgPath))
-                    {
-                        // Basic validation - just try to access subject
-                        var subject = msg.Subject ?? "";
-                        var sender = msg.Sender?.DisplayName ?? "";
-                        Console.WriteLine($"[InteropExtractor] MSG validation passed: subject='{subject.Substring(0, Math.Min(50, subject.Length))}', sender='{sender}'");
-                        return true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] MSG validation failed: MsgReader error: {ex.Message}");
-                    Console.WriteLine($"[InteropExtractor] This indicates the OLE structure is present but the MSG content is corrupted");
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[InteropExtractor] MSG validation error: {ex.Message}");
-                return false;
-            }
-        }
-        
-        /// <summary>
-        /// Tries alternative validation methods for MSG files that may not have standard OLE signatures
-        /// </summary>
-        private static bool TryFallbackMsgValidation(string msgPath)
-        {
-            try
-            {
-                if (!File.Exists(msgPath) || new FileInfo(msgPath).Length < 100)
-                {
-                    Console.WriteLine($"[InteropExtractor] Fallback MSG validation failed: file too small or missing");
-                    return false;
-                }
-                
-                // Method 1: Try to open with MsgReader without OLE signature check
-                try
-                {
-                    using (var msg = new MsgReader.Outlook.Storage.Message(msgPath))
-                    {
-                        // If we can read basic properties, it's probably a valid MSG
-                        var subject = msg.Subject ?? "";
-                        var sender = msg.Sender?.DisplayName ?? "";
-                        var hasAttachments = msg.Attachments?.Count > 0;
-                        
-                        Console.WriteLine($"[InteropExtractor] Fallback MSG validation via MsgReader succeeded");
-                        Console.WriteLine($"[InteropExtractor] Subject: '{subject.Substring(0, Math.Min(50, subject.Length))}'");
-                        Console.WriteLine($"[InteropExtractor] Sender: '{sender}'");
-                        Console.WriteLine($"[InteropExtractor] Has attachments: {hasAttachments}");
-                        return true;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"[InteropExtractor] Fallback MSG validation via MsgReader failed: {ex.Message}");
-                }
-                
-                // Method 2: Check for alternative OLE signatures or compound document patterns
-                byte[] buffer = new byte[512];
-                using (var fs = new FileStream(msgPath, FileMode.Open, FileAccess.Read))
-                {
-                    int bytesRead = fs.Read(buffer, 0, buffer.Length);
-                    
-                    // Look for OLE signature at different offsets (sometimes MSG files have wrapper headers)
-                    byte[] oleSignature = { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
-                    
-                    for (int offset = 0; offset <= Math.Min(200, bytesRead - 8); offset++)
-                    {
-                        bool signatureFound = true;
-                        for (int i = 0; i < 8; i++)
-                        {
-                            if (buffer[offset + i] != oleSignature[i])
-                            {
-                                signatureFound = false;
-                                break;
-                            }
-                        }
-                        
-                        if (signatureFound)
-                        {
-                            Console.WriteLine($"[InteropExtractor] Found OLE signature at offset {offset} in MSG file");
-                            return true;
-                        }
-                    }
-                    
-                    // Method 3: Look for other MSG-specific patterns
-                    string hexContent = BitConverter.ToString(buffer, 0, Math.Min(100, bytesRead)).Replace("-", " ");
-                    Console.WriteLine($"[InteropExtractor] MSG file content analysis (first 100 bytes): {hexContent}");
-                    
-                    // Some MSG files might have different structures but still be readable
-                    // If the file size is reasonable and contains some text-like content, consider it valid
-                    var fileInfo = new FileInfo(msgPath);
-                    if (fileInfo.Length > 1000 && fileInfo.Length < 104857600) // Between 1KB and 100MB
-                    {
-                        // Look for patterns that suggest this is email content
-                        string bufferAsText = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead);
-                        bool hasEmailPatterns = bufferAsText.Contains("@") || 
-                                               bufferAsText.Contains("Subject") ||
-                                               bufferAsText.Contains("From") ||
-                                               bufferAsText.Contains("To") ||
-                                               bufferAsText.Contains("Date");
-                        
-                        if (hasEmailPatterns)
-                        {
-                            Console.WriteLine($"[InteropExtractor] MSG file contains email-like patterns, considering valid");
-                            return true;
-                        }
-                    }
-                }
-                
-                Console.WriteLine($"[InteropExtractor] All fallback MSG validation methods failed");
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[InteropExtractor] Exception during fallback MSG validation: {ex.Message}");
-                return false;
-            }
         }
     }
 }

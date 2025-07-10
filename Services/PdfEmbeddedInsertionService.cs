@@ -55,21 +55,40 @@ namespace MsgToPdfConverter.Services
             Console.WriteLine($"[PDF-INSERT] Output PDF: {outputPdfPath}");
             Console.WriteLine($"[PDF-INSERT] Found {extractedObjects?.Count ?? 0} extracted objects");
 
-            if (extractedObjects == null || extractedObjects.Count == 0)
+            // --- REMOVED CONTENT-BASED DEDUPLICATION ---
+            // All embedded files will be processed, even if content is identical.
+            // Only filter for valid files (exist, non-empty), no grouping/deduplication by file name or hash.
+            var validObjects = new List<InteropEmbeddedExtractor.ExtractedObjectInfo>();
+            foreach (var obj in extractedObjects)
             {
-                Console.WriteLine("[PDF-INSERT] No embedded objects to insert, copying main PDF");
+                if (!File.Exists(obj.FilePath))
+                {
+                    Console.WriteLine($"[PDF-INSERT] Warning: Extracted file not found: {obj.FilePath}");
+                    continue;
+                }
+                var fileInfo = new FileInfo(obj.FilePath);
+                if (fileInfo.Length == 0)
+                {
+                    Console.WriteLine($"[PDF-INSERT] Warning: Extracted file is empty: {obj.FilePath}");
+                    continue;
+                }
+                validObjects.Add(obj);
+            }
+
+            Console.WriteLine($"[PDF-INSERT] {validObjects.Count} valid objects to insert");
+
+            if (validObjects.Count == 0)
+            {
+                Console.WriteLine("[PDF-INSERT] No valid embedded files to insert, copying main PDF");
                 File.Copy(mainPdfPath, outputPdfPath, true);
                 return;
             }
 
-            // --- REMOVED CONTENT-BASED DEDUPLICATION ---
-            // All embedded files will be processed, even if content is identical.
-
-            Console.WriteLine($"[PDF-INSERT] Inserting {extractedObjects.Count} embedded files into {mainPdfPath}");
+            Console.WriteLine($"[PDF-INSERT] Inserting {validObjects.Count} embedded files into {mainPdfPath}");
 
             // Sort embedded objects by PageNumber (synthetic or real), then by DocumentOrderIndex for tie-breaking
             // Note: Objects with PageNumber = -1 will be assigned to the last page
-            var objectsByPage = extractedObjects
+            var objectsByPage = validObjects
                 .OrderBy(obj => obj.PageNumber == -1 ? int.MaxValue : obj.PageNumber)
                 .ThenBy(obj => obj.DocumentOrderIndex)
                 .ToList();
