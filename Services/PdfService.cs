@@ -102,7 +102,7 @@ namespace MsgToPdfConverter.Services
                 using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
                 using (var doc = new iText.Layout.Document(pdf))
                 {
-                    // Add header text if provided
+                    // Only add header if non-empty
                     if (!string.IsNullOrEmpty(headerText))
                     {
                         var header = new iText.Layout.Element.Paragraph(headerText)
@@ -118,12 +118,12 @@ namespace MsgToPdfConverter.Services
                     {
                         var imageData = iText.IO.Image.ImageDataFactory.Create(imagePath);
                         var image = new iText.Layout.Element.Image(imageData);
-                        
-                        // Center the image and scale it appropriately
+                        // Center the image and scale it to fit the page (A4 minus margin)
                         image.SetHorizontalAlignment(iText.Layout.Properties.HorizontalAlignment.CENTER);
-                        image.SetMaxWidth(doc.GetPdfDocument().GetDefaultPageSize().GetWidth() - 80);
-                        image.SetMaxHeight(200); // Limit height to keep it compact
-                        
+                        float maxWidth = doc.GetPdfDocument().GetDefaultPageSize().GetWidth() - 40; // 20pt margin each side
+                        float maxHeight = doc.GetPdfDocument().GetDefaultPageSize().GetHeight() - 40; // 20pt margin top/bottom
+                        image.SetMaxWidth(maxWidth);
+                        image.SetMaxHeight(maxHeight);
                         doc.Add(image);
                     }
                 }

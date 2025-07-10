@@ -258,7 +258,7 @@ namespace MsgToPdfConverter.Services
             }
         }
 
-        // Insert embedded object without separator/grey page
+        // Insert embedded object without separator
         private static HashSet<string> processedArchiveHashes = new HashSet<string>(); // Archive deduplication
         private static int InsertEmbeddedObject_NoSeparator(InteropEmbeddedExtractor.ExtractedObjectInfo obj, PdfDocument outputPdf, int currentOutputPage, Action progressTick = null)
         {
@@ -421,7 +421,7 @@ namespace MsgToPdfConverter.Services
             catch { return false; }
         }
 
-        // Insert PDF file without separator/grey page
+        // Insert PDF file without separator
         private static int InsertPdfFile_NoSeparator(string pdfPath, PdfDocument outputPdf, int currentPage, string oleClass, Action progressTick = null)
         {
             Console.WriteLine($"[PDF-INSERT] *** PDF INSERTION START *** Inserting PDF: {Path.GetFileName(pdfPath)} after page {currentPage} (current total pages: {outputPdf.GetNumberOfPages()})");
@@ -479,7 +479,7 @@ namespace MsgToPdfConverter.Services
             return currentPage;
         }
 
-        // Insert MSG file without separator/grey page
+        // Insert MSG file without separator
         private static int InsertMsgFile_NoSeparator(string msgPath, PdfDocument outputPdf, int currentPage, Action progressTick = null)
         {
             Console.WriteLine($"[PDF-INSERT] Converting and inserting MSG: {Path.GetFileName(msgPath)} after page {currentPage}");
@@ -521,7 +521,7 @@ namespace MsgToPdfConverter.Services
             return currentPage;
         }
 
-        // Insert DOCX file without separator/grey page
+        // Insert DOCX file without separator
         private static int InsertDocxFile_NoSeparator(string docxPath, PdfDocument outputPdf, int currentPage, Action progressTick = null)
         {
             Console.WriteLine($"[PDF-INSERT] Converting and inserting DOCX: {Path.GetFileName(docxPath)} after page {currentPage}");
@@ -553,7 +553,7 @@ namespace MsgToPdfConverter.Services
             return currentPage;
         }
 
-        // Insert XLSX file without separator/grey page
+        // Insert XLSX file without separator
         private static int InsertXlsxFile_NoSeparator(string xlsxPath, PdfDocument outputPdf, int currentPage, Action progressTick = null)
         {
             Console.WriteLine($"[PDF-INSERT] *** XLSX PROCESSING START *** Converting and inserting XLSX: {Path.GetFileName(xlsxPath)} after page {currentPage}");
@@ -789,11 +789,18 @@ namespace MsgToPdfConverter.Services
                     case ".tiff":
                     case ".webp":
                     {
-                        // Use PdfService.AddImagePdf to create a temp PDF, then insert it
+                        // Create temp PDF with only the image, no scaling/margins/header (identical to single email logic)
                         string tempPdf = Path.Combine(Path.GetTempPath(), $"img2pdf_{Guid.NewGuid()}.pdf");
                         try
                         {
-                            PdfService.AddImagePdf(tempPdf, attachmentPath, Path.GetFileName(attachmentPath));
+                            using (var writer = new iText.Kernel.Pdf.PdfWriter(tempPdf))
+                            using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
+                            using (var docImg = new iText.Layout.Document(pdf))
+                            {
+                                var imgData = iText.IO.Image.ImageDataFactory.Create(attachmentPath);
+                                var image = new iText.Layout.Element.Image(imgData);
+                                docImg.Add(image);
+                            }
                             int result = InsertPdfFile_NoSeparator(tempPdf, outputPdf, currentPage, "Image", progressTick);
                             return result;
                         }
