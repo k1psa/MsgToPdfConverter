@@ -108,6 +108,7 @@ namespace MsgToPdfConverter.Services
                                     string htmlWithHeader = htmlResult.Html;
                                     var tempHtmlPath = System.IO.Path.Combine(baseTempDir, Guid.NewGuid() + ".html");
                                     System.IO.File.WriteAllText(tempHtmlPath, htmlWithHeader, System.Text.Encoding.UTF8);
+                                    sessionTempFiles.Add(tempHtmlPath);
                                     var inlineContentIds = emailService.GetInlineContentIds(htmlWithHeader);
                                     var psi = new System.Diagnostics.ProcessStartInfo
                                     {

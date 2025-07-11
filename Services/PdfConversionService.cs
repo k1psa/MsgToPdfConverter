@@ -125,7 +125,7 @@ namespace MsgToPdfConverter.Services
                 return;
 
             var tempPdfFiles = new List<string>();
-            string tempDir = Path.GetTempPath();
+            string tempDir = Path.Combine(Path.GetTempPath(), "MsgToPdfConverter");
 
             foreach (var att in attachments)
             {

@@ -129,10 +129,10 @@ namespace MsgToPdfConverter.Services
                     {
                         // Use only the main temp folder for nested MSGs
                         var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(msg, false);
-                        string nestedHtmlPath = Path.Combine(tempDir, Guid.NewGuid() + "_nested.html");
+                        string nestedHtmlPath = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), Guid.NewGuid() + "_nested.html");
                         File.WriteAllText(nestedHtmlPath, htmlResult.Html, System.Text.Encoding.UTF8);
                         allTempFiles.Add(nestedHtmlPath);
-                        string nestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested.pdf");
+                        string nestedPdf = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), Guid.NewGuid() + "_nested.pdf");
                         var psi = new System.Diagnostics.ProcessStartInfo
                         {
                             FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,

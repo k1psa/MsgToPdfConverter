@@ -120,10 +120,13 @@ namespace MsgToPdfConverter.Utils
                             string partExt = ".bin";
                             string uniqueSuffix = $"_{relId}_{Guid.NewGuid().ToString("N")}";
                             string partFile = Path.Combine(outputDir, $"Embedded_OpenXml_{xmlCounter}{uniqueSuffix}{partExt}");
-                            using (var fs = new FileStream(partFile, FileMode.Create, FileAccess.Write))
+                            var appTempDir = Path.Combine(Path.GetTempPath(), "MsgToPdfConverter");
+                            string partFileFixed = Path.Combine(appTempDir, $"Embedded_OpenXml_{xmlCounter}{uniqueSuffix}{partExt}");
+                            using (var fs = new FileStream(partFileFixed, FileMode.Create, FileAccess.Write))
                             {
                                 part.GetStream().CopyTo(fs);
                             }
+                            partFile = partFileFixed;
                             relIdToFile[relId] = partFile;
                             relIdToOleClass[relId] = "Package"; // Default, can be improved if needed
                             results.Add(new ExtractedObjectInfo { FilePath = partFile, PageNumber = -1, OleClass = "Package", DocumentOrderIndex = docOrderIndex, ExtractedFileName = Path.GetFileName(partFile) });
