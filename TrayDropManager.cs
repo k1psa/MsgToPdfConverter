@@ -24,10 +24,10 @@ namespace MsgToPdfConverter
             _dropWindow.DataDropped += OnDataDropped;
             _topmostTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
             _topmostTimer.Tick += (s, e) => {
+                // Only keep Topmost true, do not activate or focus
                 if (_dropWindowVisible)
                 {
                     _dropWindow.Topmost = true;
-                    _dropWindow.Activate();
                 }
             };
         }
@@ -64,8 +64,7 @@ namespace MsgToPdfConverter
                 _dropWindow.Top = screen.WorkingArea.Bottom - _dropWindow.Height - margin;
                 _dropWindow.Topmost = true;
                 _dropWindow.Show();
-                _dropWindow.Activate();
-                _dropWindow.Focus();
+                // Do NOT call Activate or Focus here
                 _dropWindowVisible = true;
                 _topmostTimer.Start();
             }
@@ -84,6 +83,34 @@ namespace MsgToPdfConverter
             {
                 _viewModel.HandleDrop(data);
             });
+        }
+
+        public bool IsDropWindowVisible => _dropWindowVisible;
+        public void HideDropWindow()
+        {
+            if (_dropWindowVisible)
+            {
+                _dropWindow.Hide();
+                _dropWindowVisible = false;
+                _topmostTimer.Stop();
+                Console.WriteLine("[DEBUG] Hiding drop window (from main window)");
+            }
+        }
+
+        public void ShowDropWindow()
+        {
+            if (!_dropWindowVisible)
+            {
+                var screen = System.Windows.Forms.Screen.PrimaryScreen;
+                int margin = 20;
+                _dropWindow.Left = screen.WorkingArea.Right - _dropWindow.Width - margin;
+                _dropWindow.Top = screen.WorkingArea.Bottom - _dropWindow.Height - margin;
+                _dropWindow.Topmost = true;
+                _dropWindow.Show();
+                // Do NOT call Activate or Focus here
+                _dropWindowVisible = true;
+                _topmostTimer.Start();
+            }
         }
     }
 }

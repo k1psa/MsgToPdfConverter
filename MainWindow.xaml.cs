@@ -48,8 +48,11 @@ namespace MsgToPdfConverter
             exitItem.Click += (s, e) => ExitFromTray();
             var resetItem = new System.Windows.Forms.ToolStripMenuItem("Reset Close Behavior");
             resetItem.Click += (s, e) => ResetCloseBehaviorFromTray();
+            var showDropWindowItem = new System.Windows.Forms.ToolStripMenuItem("Show Drop Window");
+            showDropWindowItem.Click += (s, e) => _trayDropManager.ShowDropWindow();
             contextMenu.Items.Add(restoreItem);
             contextMenu.Items.Add(resetItem);
+            contextMenu.Items.Add(showDropWindowItem);
             contextMenu.Items.Add(exitItem);
             _trayIcon.ContextMenuStrip = contextMenu;
 
@@ -153,9 +156,15 @@ namespace MsgToPdfConverter
 
         private void TrayIcon_DoubleClick(object sender, EventArgs e)
         {
+            // Show main window
             this.Show();
             this.WindowState = WindowState.Normal;
             _trayIcon.Visible = false;
+            // Hide drop window if visible
+            if (_trayDropManager != null && _trayDropManager.IsDropWindowVisible)
+            {
+                _trayDropManager.HideDropWindow();
+            }
         }
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)

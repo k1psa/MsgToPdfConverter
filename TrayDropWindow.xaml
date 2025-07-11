@@ -10,7 +10,8 @@
             <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
                 <TextBlock Text="Drop files here" Foreground="White" FontSize="16" HorizontalAlignment="Center"/>
                 <TextBlock TextWrapping="Wrap" TextAlignment="Center" Width="200"
-                           Text="Double-click this window\nto open the main window" Foreground="#FFCCCCCC" FontSize="12" Margin="0,8,0,0" HorizontalAlignment="Center"/>
+                           Text="Double-click this window
+to open the main window" Foreground="#FFCCCCCC" FontSize="12" Margin="0,8,0,0" HorizontalAlignment="Center"/>
             </StackPanel>
         </Border>
         <Button x:Name="CloseButton" Content="✕" Width="24" Height="24" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="4" Background="#00FFFFFF" BorderBrush="Transparent" Foreground="White" FontWeight="Bold" Cursor="Hand"/>
