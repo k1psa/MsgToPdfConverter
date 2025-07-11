@@ -9,6 +9,8 @@ namespace MsgToPdfConverter
     {
         public event Action<IDataObject> DataDropped;
 
+        public event Action ClosedByUser;
+
         public TrayDropWindow()
         {
             Console.WriteLine("[DEBUG] TrayDropWindow constructor");
@@ -91,7 +93,10 @@ namespace MsgToPdfConverter
             base.OnApplyTemplate();
             var closeButton = this.FindName("CloseButton") as System.Windows.Controls.Button;
             if (closeButton != null)
-                closeButton.Click += (s, e) => this.Hide();
+                closeButton.Click += (s, e) => {
+                    this.Hide();
+                    ClosedByUser?.Invoke();
+                };
         }
     }
 }

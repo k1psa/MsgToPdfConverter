@@ -22,6 +22,14 @@ namespace MsgToPdfConverter
             _viewModel = viewModel;
             _dropWindow = new TrayDropWindow();
             _dropWindow.DataDropped += OnDataDropped;
+            _dropWindow.ClosedByUser += () => {
+                if (_dropWindowVisible)
+                {
+                    _dropWindowVisible = false;
+                    _topmostTimer.Stop();
+                    Console.WriteLine("[DEBUG] Drop window closed by user (X button)");
+                }
+            };
             _topmostTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
             _topmostTimer.Tick += (s, e) => {
                 // Only keep Topmost true, do not activate or focus
