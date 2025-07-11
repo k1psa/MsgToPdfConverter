@@ -214,6 +214,10 @@ namespace MsgToPdfConverter
                 _trayIcon = null;
             }
             base.OnClosing(e);
+            // Ensure all background threads and tasks are stopped
+            System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeShutdown();
+            // As a last resort, force exit if still running
+            Environment.Exit(0);
         }
 
         private void RestoreFromTray()
@@ -242,6 +246,10 @@ namespace MsgToPdfConverter
                 }
                 this.Close();
                 Application.Current.Shutdown();
+                // Ensure all background threads and tasks are stopped
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeShutdown();
+                // As a last resort, force exit if still running
+                Environment.Exit(0);
             });
         }
 

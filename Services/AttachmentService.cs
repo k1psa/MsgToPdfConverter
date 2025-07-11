@@ -127,11 +127,14 @@ namespace MsgToPdfConverter.Services
                 {
                     if (!extractOriginalOnly)
                     {
+                        // Always use a temp folder in %temp% for nested MSGs
+                        string nestedTempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MsgToPdf_Nested_" + Guid.NewGuid());
+                        System.IO.Directory.CreateDirectory(nestedTempDir);
                         var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(msg, false);
-                        string nestedHtmlPath = Path.Combine(tempDir, Guid.NewGuid() + "_nested.html");
+                        string nestedHtmlPath = Path.Combine(nestedTempDir, Guid.NewGuid() + "_nested.html");
                         File.WriteAllText(nestedHtmlPath, htmlResult.Html, System.Text.Encoding.UTF8);
                         allTempFiles.Add(nestedHtmlPath);
-                        string nestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested.pdf");
+                        string nestedPdf = Path.Combine(nestedTempDir, Guid.NewGuid() + "_nested.pdf");
                         var psi = new System.Diagnostics.ProcessStartInfo
                         {
                             FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
@@ -154,6 +157,8 @@ namespace MsgToPdfConverter.Services
                         }
                         // Progress tick for MSG body
                         progressTick?.Invoke();
+                        // Clean up nested temp dir if empty
+                        try { if (System.IO.Directory.Exists(nestedTempDir) && System.IO.Directory.GetFiles(nestedTempDir).Length == 0) System.IO.Directory.Delete(nestedTempDir); } catch { }
                     }
                 }
                 catch (Exception ex)
