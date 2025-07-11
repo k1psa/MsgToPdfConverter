@@ -1590,7 +1590,8 @@ namespace MsgToPdfConverter.Services
                         File.WriteAllBytes(outPath, embedded.Data);
                         allTempFiles.Add(outPath);
 
-                        // Don't call progressTick here - it will be called during PDF insertion
+                        // Call progressTick here to update UI for each embedded object extracted
+                        progressTick?.Invoke();
                         count++;
                     }
                 }

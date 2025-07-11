@@ -327,7 +327,7 @@ namespace MsgToPdfConverter
                 
                 // Delay resetting file progress to let user see 100% completion
 #pragma warning disable CS4014 // Because this call is not awaited, execution continues before call is completed
-                Task.Delay(1500).ContinueWith(_ =>
+                Task.Delay(2000).ContinueWith(_ =>
                 {
                     Application.Current.Dispatcher.Invoke(() =>
                     {
