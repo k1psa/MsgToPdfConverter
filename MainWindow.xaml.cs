@@ -8,6 +8,7 @@ namespace MsgToPdfConverter
     {
         private MainWindowViewModel _viewModel;
         private System.Windows.Forms.NotifyIcon _trayIcon;
+        private TrayDropManager _trayDropManager;
 
         public MainWindow()
         {
@@ -51,6 +52,10 @@ namespace MsgToPdfConverter
             contextMenu.Items.Add(resetItem);
             contextMenu.Items.Add(exitItem);
             _trayIcon.ContextMenuStrip = contextMenu;
+
+            // Initialize and enable tray drop manager
+            _trayDropManager = new TrayDropManager(_trayIcon, _viewModel);
+            _trayDropManager.Enable();
         }
 
         // Drag-and-drop event handlers delegate to ViewModel
