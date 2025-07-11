@@ -17,6 +17,7 @@ namespace MsgToPdfConverter
             this.DragEnter += TrayDropWindow_DragEnter;
             this.DragOver += TrayDropWindow_DragOver;
             this.Drop += TrayDropWindow_Drop;
+            this.MouseLeftButtonDown += TrayDropWindow_MouseLeftButtonDown;
         }
 
         private void TrayDropWindow_DragEnter(object sender, DragEventArgs e)
@@ -58,6 +59,25 @@ namespace MsgToPdfConverter
                 DataDropped?.Invoke(e.Data);
             }
             // Do not hide the window after drop; let user close it manually
+        }
+
+        private void TrayDropWindow_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.ClickCount == 2)
+            {
+                // Open main window on double-click, but do NOT close this drop window
+                var app = System.Windows.Application.Current;
+                foreach (Window win in app.Windows)
+                {
+                    if (win is MainWindow mainWin)
+                    {
+                        mainWin.Show();
+                        mainWin.WindowState = WindowState.Normal;
+                        mainWin.Activate();
+                        break;
+                    }
+                }
+            }
         }
 
         public new void Show()
