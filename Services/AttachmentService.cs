@@ -175,7 +175,8 @@ namespace MsgToPdfConverter.Services
             var typedAttachments = new List<Storage.Attachment>();
             var nestedMessages = new List<Storage.Message>();
 
-            // Separate attachments and nested messages
+            // Separate attachments and nested messages + DEDUPLICATION LOGIC
+            var allAttachments = new List<Storage.Attachment>();
             foreach (var att in msg.Attachments)
             {
                 if (att is Storage.Attachment a)
@@ -196,11 +197,100 @@ namespace MsgToPdfConverter.Services
                         continue;
                     }
 
-                    Console.WriteLine($"[MSG] Depth {depth} - Including attachment for processing: {a.FileName}");
-
-                    typedAttachments.Add(a);
+                    allAttachments.Add(a);
                 }
-                else if (att is Storage.Message nestedMsg)
+            }
+
+            // DEDUPLICATION: Group by base filename and prefer Office files over PDFs
+            var attachmentsToSkip = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var duplicateGroups = allAttachments
+                .GroupBy(a => Path.GetFileNameWithoutExtension(a.FileName ?? ""), StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1)
+                .ToList();
+
+            foreach (var group in duplicateGroups)
+            {
+                var groupList = group.ToList();
+                Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Found {groupList.Count} files with base name '{group.Key}':");
+                
+                foreach (var att in groupList)
+                {
+                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} -   {att.FileName}");
+                }
+
+                var officeFiles = groupList.Where(a => {
+                    var ext = Path.GetExtension(a.FileName ?? "").ToLowerInvariant();
+                    return ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx";
+                }).ToList();
+
+                var pdfFiles = groupList.Where(a => {
+                    var ext = Path.GetExtension(a.FileName ?? "").ToLowerInvariant();
+                    return ext == ".pdf";
+                }).ToList();
+
+                // If we have both Office and PDF files, prefer Office files (they may contain embedded objects)
+                if (officeFiles.Count > 0 && pdfFiles.Count > 0)
+                {
+                    // Keep the first Office file, skip all PDF files
+                    var keepOfficeFile = officeFiles.First();
+                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Keeping Office file: {keepOfficeFile.FileName}");
+                    
+                    foreach (var pdfFile in pdfFiles)
+                    {
+                        Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Skipping PDF duplicate: {pdfFile.FileName}");
+                        attachmentsToSkip.Add(pdfFile.FileName ?? "");
+                    }
+                    
+                    // If there are multiple Office files, keep only the first one
+                    for (int i = 1; i < officeFiles.Count; i++)
+                    {
+                        Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Skipping duplicate Office file: {officeFiles[i].FileName}");
+                        attachmentsToSkip.Add(officeFiles[i].FileName ?? "");
+                    }
+                }
+                else if (officeFiles.Count > 1)
+                {
+                    // Multiple Office files with same base name - keep first one
+                    var keepOfficeFile = officeFiles.First();
+                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Keeping first Office file: {keepOfficeFile.FileName}");
+                    
+                    for (int i = 1; i < officeFiles.Count; i++)
+                    {
+                        Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Skipping duplicate Office file: {officeFiles[i].FileName}");
+                        attachmentsToSkip.Add(officeFiles[i].FileName ?? "");
+                    }
+                }
+                else if (pdfFiles.Count > 1)
+                {
+                    // Multiple PDF files with same base name - keep first one
+                    var keepPdfFile = pdfFiles.First();
+                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Keeping first PDF file: {keepPdfFile.FileName}");
+                    
+                    for (int i = 1; i < pdfFiles.Count; i++)
+                    {
+                        Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Skipping duplicate PDF file: {pdfFiles[i].FileName}");
+                        attachmentsToSkip.Add(pdfFiles[i].FileName ?? "");
+                    }
+                }
+            }
+
+            // Build final lists, skipping duplicates
+            foreach (var a in allAttachments)
+            {
+                if (attachmentsToSkip.Contains(a.FileName ?? ""))
+                {
+                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} - SKIPPING (as planned): {a.FileName}");
+                    continue;
+                }
+
+                Console.WriteLine($"[MSG] Depth {depth} - Including attachment for processing: {a.FileName}");
+                typedAttachments.Add(a);
+            }
+
+            // Handle nested messages
+            foreach (var att in msg.Attachments)
+            {
+                if (att is Storage.Message nestedMsg)
                 {
                     Console.WriteLine($"[MSG] Depth {depth} - Found nested MSG: {nestedMsg.Subject ?? "No Subject"}");
                     nestedMessages.Add(nestedMsg);

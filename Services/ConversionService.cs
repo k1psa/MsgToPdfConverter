@@ -124,6 +124,8 @@ namespace MsgToPdfConverter.Services
                                 var nestedMessages = new List<Storage.Message>();
                                 if (msg.Attachments != null && msg.Attachments.Count > 0)
                                 {
+                                    // First, collect all non-inline attachments
+                                    var allAttachments = new List<Storage.Attachment>();
                                     foreach (var att in msg.Attachments)
                                     {
                                         if (att is Storage.Attachment a)
@@ -137,12 +139,98 @@ namespace MsgToPdfConverter.Services
                                                 if (attachmentService.IsLikelySignatureImage(a))
                                                     continue;
                                             }
-                                            typedAttachments.Add(a);
+                                            allAttachments.Add(a);
                                         }
                                         else if (att is Storage.Message nestedMsg)
                                         {
                                             nestedMessages.Add(nestedMsg);
                                         }
+                                    }
+
+                                    // DEDUPLICATION: Group by base filename and prefer Office files over PDFs
+                                    var attachmentsToSkip = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                    var duplicateGroups = allAttachments
+                                        .GroupBy(a => Path.GetFileNameWithoutExtension(a.FileName ?? ""), StringComparer.OrdinalIgnoreCase)
+                                        .Where(g => g.Count() > 1)
+                                        .ToList();
+
+                                    foreach (var group in duplicateGroups)
+                                    {
+                                        var groupList = group.ToList();
+                                        Console.WriteLine($"[DEDUP] Found {groupList.Count} files with base name '{group.Key}':");
+                                        
+                                        foreach (var att in groupList)
+                                        {
+                                            Console.WriteLine($"[DEDUP]   {att.FileName}");
+                                        }
+
+                                        var officeFiles = groupList.Where(a => {
+                                            var fileExt = Path.GetExtension(a.FileName ?? "").ToLowerInvariant();
+                                            return fileExt == ".doc" || fileExt == ".docx" || fileExt == ".xls" || fileExt == ".xlsx";
+                                        }).ToList();
+
+                                        var pdfFiles = groupList.Where(a => {
+                                            var fileExt = Path.GetExtension(a.FileName ?? "").ToLowerInvariant();
+                                            return fileExt == ".pdf";
+                                        }).ToList();
+
+                                        // If we have both Office and PDF files, prefer Office files (they may contain embedded objects)
+                                        if (officeFiles.Count > 0 && pdfFiles.Count > 0)
+                                        {
+                                            // Keep the first Office file, skip all PDF files
+                                            var keepOfficeFile = officeFiles.First();
+                                            Console.WriteLine($"[DEDUP] Keeping Office file: {keepOfficeFile.FileName}");
+                                            
+                                            foreach (var pdfFile in pdfFiles)
+                                            {
+                                                Console.WriteLine($"[DEDUP] Skipping PDF duplicate: {pdfFile.FileName}");
+                                                attachmentsToSkip.Add(pdfFile.FileName ?? "");
+                                            }
+                                            
+                                            // If there are multiple Office files, keep only the first one
+                                            for (int j = 1; j < officeFiles.Count; j++)
+                                            {
+                                                Console.WriteLine($"[DEDUP] Skipping duplicate Office file: {officeFiles[j].FileName}");
+                                                attachmentsToSkip.Add(officeFiles[j].FileName ?? "");
+                                            }
+                                        }
+                                        else if (officeFiles.Count > 1)
+                                        {
+                                            // Multiple Office files with same base name - keep first one
+                                            var keepOfficeFile = officeFiles.First();
+                                            Console.WriteLine($"[DEDUP] Keeping first Office file: {keepOfficeFile.FileName}");
+                                            
+                                            for (int j = 1; j < officeFiles.Count; j++)
+                                            {
+                                                Console.WriteLine($"[DEDUP] Skipping duplicate Office file: {officeFiles[j].FileName}");
+                                                attachmentsToSkip.Add(officeFiles[j].FileName ?? "");
+                                            }
+                                        }
+                                        else if (pdfFiles.Count > 1)
+                                        {
+                                            // Multiple PDF files with same base name - keep first one
+                                            var keepPdfFile = pdfFiles.First();
+                                            Console.WriteLine($"[DEDUP] Keeping first PDF file: {keepPdfFile.FileName}");
+                                            
+                                            for (int j = 1; j < pdfFiles.Count; j++)
+                                            {
+                                                Console.WriteLine($"[DEDUP] Skipping duplicate PDF file: {pdfFiles[j].FileName}");
+                                                attachmentsToSkip.Add(pdfFiles[j].FileName ?? "");
+                                            }
+                                        }
+                                    }
+
+                                    // Build final list, skipping duplicates
+                                    foreach (var a in allAttachments)
+                                    {
+                                        if (attachmentsToSkip.Contains(a.FileName ?? ""))
+                                        {
+                                            Console.WriteLine($"[DEDUP] SKIPPING (as planned): {a.FileName}");
+                                            continue;
+                                        }
+
+                                        Console.WriteLine($"[DEDUP] Including attachment for processing: {a.FileName}");
+                                        typedAttachments.Add(a);
                                     }
                                 }
                                 var allPdfFiles = new List<string> { pdfFilePath };
