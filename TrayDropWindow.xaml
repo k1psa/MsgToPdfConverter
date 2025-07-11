@@ -5,7 +5,10 @@
         WindowStyle="None" AllowsTransparency="True" Background="#FF2222AA"
         Topmost="True" ShowInTaskbar="False" ResizeMode="NoResize"
         AllowDrop="True">
-    <Border CornerRadius="10" Background="#AA333333" BorderBrush="#FFAAAAAA" BorderThickness="2">
-        <TextBlock Text="Drop files here" Foreground="White" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-    </Border>
+    <Grid>
+        <Border CornerRadius="10" Background="#AA333333" BorderBrush="#FFAAAAAA" BorderThickness="2">
+            <TextBlock Text="Drop files here" Foreground="White" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+        <Button x:Name="CloseButton" Content="✕" Width="24" Height="24" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="4" Background="#00FFFFFF" BorderBrush="Transparent" Foreground="White" FontWeight="Bold" Cursor="Hand"/>
+    </Grid>
 </Window>

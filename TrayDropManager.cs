@@ -36,33 +36,45 @@ namespace MsgToPdfConverter
         {
             Console.WriteLine("[DEBUG] TrayDropManager.Enable() called");
             _trayIcon.MouseClick += TrayIcon_MouseClick;
+            if (_trayIcon.ContextMenuStrip != null)
+            {
+                _trayIcon.ContextMenuStrip.Opening += (s, e) =>
+                {
+                    if (_dropWindowVisible)
+                    {
+                        _dropWindow.Hide();
+                        _dropWindowVisible = false;
+                        _topmostTimer.Stop();
+                        Console.WriteLine("[DEBUG] Hiding drop window due to context menu");
+                    }
+                };
+            }
         }
 
         private void TrayIcon_MouseClick(object sender, MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Left)
+            if (e.Button != MouseButtons.Left)
+                return;
+            if (!_dropWindowVisible)
             {
-                if (!_dropWindowVisible)
-                {
-                    // Position the drop window just above the taskbar, right-aligned
-                    var screen = System.Windows.Forms.Screen.PrimaryScreen;
-                    int margin = 20;
-                    _dropWindow.Left = screen.WorkingArea.Right - _dropWindow.Width - margin;
-                    _dropWindow.Top = screen.WorkingArea.Bottom - _dropWindow.Height - margin;
-                    _dropWindow.Topmost = true;
-                    _dropWindow.Show();
-                    _dropWindow.Activate();
-                    _dropWindow.Focus();
-                    _dropWindowVisible = true;
-                    _topmostTimer.Start();
-                }
-                else
-                {
-                    _dropWindow.Hide();
-                    _dropWindowVisible = false;
-                    _topmostTimer.Stop();
-                    Console.WriteLine("[DEBUG] Hiding drop window");
-                }
+                // Position the drop window just above the taskbar, right-aligned
+                var screen = System.Windows.Forms.Screen.PrimaryScreen;
+                int margin = 20;
+                _dropWindow.Left = screen.WorkingArea.Right - _dropWindow.Width - margin;
+                _dropWindow.Top = screen.WorkingArea.Bottom - _dropWindow.Height - margin;
+                _dropWindow.Topmost = true;
+                _dropWindow.Show();
+                _dropWindow.Activate();
+                _dropWindow.Focus();
+                _dropWindowVisible = true;
+                _topmostTimer.Start();
+            }
+            else
+            {
+                _dropWindow.Hide();
+                _dropWindowVisible = false;
+                _topmostTimer.Stop();
+                Console.WriteLine("[DEBUG] Hiding drop window");
             }
         }
 

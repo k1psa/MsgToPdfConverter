@@ -57,13 +57,21 @@ namespace MsgToPdfConverter
             {
                 DataDropped?.Invoke(e.Data);
             }
-            this.Hide();
+            // Do not hide the window after drop; let user close it manually
         }
 
         public new void Show()
         {
             Console.WriteLine("[DEBUG] TrayDropWindow.Show() called");
             base.Show();
+        }
+
+        public override void OnApplyTemplate()
+        {
+            base.OnApplyTemplate();
+            var closeButton = this.FindName("CloseButton") as System.Windows.Controls.Button;
+            if (closeButton != null)
+                closeButton.Click += (s, e) => this.Hide();
         }
     }
 }
