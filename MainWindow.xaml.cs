@@ -214,6 +214,8 @@ namespace MsgToPdfConverter
                 _trayIcon = null;
             }
             base.OnClosing(e);
+            // Ensure application exits cleanly
+            Application.Current.Shutdown();
         }
 
         private void RestoreFromTray()
