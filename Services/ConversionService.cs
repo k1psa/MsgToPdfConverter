@@ -62,11 +62,10 @@ namespace MsgToPdfConverter.Services
         )
         {
             int success = 0, fail = 0, processed = 0;
-            // Create a base temp directory and a unique subfolder for this conversion session
+            // Always use a single temp folder for all temp/intermediate files
             string baseTempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MsgToPdfConverter");
             System.IO.Directory.CreateDirectory(baseTempDir);
-            string sessionTempDir = System.IO.Path.Combine(baseTempDir, Guid.NewGuid().ToString());
-            System.IO.Directory.CreateDirectory(sessionTempDir);
+            string sessionTempDir = baseTempDir;
             // Track all temp files created during this session
             var sessionTempFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             try
@@ -93,25 +92,21 @@ namespace MsgToPdfConverter.Services
                                 try
                                 {
                                     msg = new Storage.Message(filePath);
-                                    // --- Set up progress max for this file ---
                                     int fileProgress = 0;
                                     int totalCount = attachmentService.CountAllProcessableItems(msg);
                                     updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
-                                    // ---
                                     string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
                                     string msgBaseName = System.IO.Path.GetFileNameWithoutExtension(filePath);
-                                    string msgDir = sessionTempDir; // Use temp dir for all temp/intermediate files
-                                    // Generate unique PDF filename to avoid conflicts when files have same base name but different extensions
+                                    string msgDir = baseTempDir;
                                     string uniquePdfName = GenerateUniquePdfFileName(filePath, msgDir, selectedFiles);
                                     string pdfBaseName = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName);
                                     string pdfFilePath = System.IO.Path.Combine(msgDir, $"{pdfBaseName} - {datePart}.pdf");
-                                    // Define outputPdf for final output location
                                     string outputPdf = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
                                     if (System.IO.File.Exists(pdfFilePath))
                                         System.IO.File.Delete(pdfFilePath);
                                     var htmlResult = emailService.BuildEmailHtmlWithInlineImages(msg, false);
                                     string htmlWithHeader = htmlResult.Html;
-                                    var tempHtmlPath = System.IO.Path.Combine(sessionTempDir, Guid.NewGuid() + ".html");
+                                    var tempHtmlPath = System.IO.Path.Combine(baseTempDir, Guid.NewGuid() + ".html");
                                     System.IO.File.WriteAllText(tempHtmlPath, htmlWithHeader, System.Text.Encoding.UTF8);
                                     var inlineContentIds = emailService.GetInlineContentIds(htmlWithHeader);
                                     var psi = new System.Diagnostics.ProcessStartInfo
@@ -129,7 +124,7 @@ namespace MsgToPdfConverter.Services
                                     if (proc.ExitCode != 0)
                                         throw new Exception($"HtmlToPdfWorker failed: {proc.StandardError.ReadToEnd()}");
                                     GC.Collect();
-                                GC.WaitForPendingFinalizers();
+                                    GC.WaitForPendingFinalizers();
                                 // --- Attachment/merge logic ---
                                 var typedAttachments = new List<Storage.Attachment>();
                                 var nestedMessages = new List<Storage.Message>();
@@ -414,10 +409,8 @@ namespace MsgToPdfConverter.Services
                         updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
                         
                         string outputPdf = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
-                        // Use a unique temp dir for all attachment processing
-                        // Use a subfolder within baseTempDir for non-MSG files
-                        string tempDir = System.IO.Path.Combine(baseTempDir, "Attach_" + Guid.NewGuid().ToString());
-                        System.IO.Directory.CreateDirectory(tempDir);
+                        // Use only the main temp folder for all attachment processing
+                        string tempDir = baseTempDir;
                         var tempFiles = new List<string>();
                         var allPdfFiles = new List<string>();
                         var allTempFiles = new List<string>();
@@ -584,59 +577,24 @@ namespace MsgToPdfConverter.Services
             }
             finally
             {
-                // Clean up the session temp directory if empty (optional, as files are deleted individually)
+                // Delete all files and subfolders in baseTempDir after conversion
                 try
                 {
-                    if (System.IO.Directory.Exists(sessionTempDir))
+                    if (System.IO.Directory.Exists(baseTempDir))
                     {
-                        // Delete all files in sessionTempDir
-                        foreach (var file in System.IO.Directory.GetFiles(sessionTempDir, "*", SearchOption.AllDirectories))
+                        // Delete all files
+                        foreach (var file in System.IO.Directory.GetFiles(baseTempDir, "*", SearchOption.AllDirectories))
                         {
                             try { System.IO.File.Delete(file); } catch { }
                         }
-                        // Delete all subfolders in sessionTempDir
-                        foreach (var dir in System.IO.Directory.GetDirectories(sessionTempDir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+                        // Delete all subfolders
+                        foreach (var dir in System.IO.Directory.GetDirectories(baseTempDir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
                         {
                             try { System.IO.Directory.Delete(dir, true); } catch { }
                         }
-                        // Delete sessionTempDir itself
-                        try { System.IO.Directory.Delete(sessionTempDir, true); } catch { }
+                        // Delete baseTempDir itself
+                        try { System.IO.Directory.Delete(baseTempDir, true); } catch { }
                     }
-                    // Recursively delete all empty subfolders under baseTempDir
-                    try
-                    {
-                        if (System.IO.Directory.Exists(baseTempDir))
-                        {
-                            var allDirs = System.IO.Directory.GetDirectories(baseTempDir, "*", SearchOption.AllDirectories)
-                                .OrderByDescending(d => d.Length).ToList();
-                            foreach (var dir in allDirs)
-                            {
-                                try
-                                {
-                                    if (System.IO.Directory.GetFiles(dir).Length == 0 && System.IO.Directory.GetDirectories(dir).Length == 0)
-                                        System.IO.Directory.Delete(dir);
-                                }
-                                catch { }
-                            }
-                            // Finally, delete baseTempDir if empty
-                            if (System.IO.Directory.GetFiles(baseTempDir).Length == 0 && System.IO.Directory.GetDirectories(baseTempDir).Length == 0)
-                                System.IO.Directory.Delete(baseTempDir);
-                        }
-                    }
-                    catch { }
-
-                    // Delete only the temp files created by this app (tracked in sessionTempFiles)
-                    try
-                    {
-                        foreach (var tempFile in sessionTempFiles)
-                        {
-                            if (!string.IsNullOrEmpty(tempFile) && System.IO.File.Exists(tempFile))
-                            {
-                                try { System.IO.File.Delete(tempFile); } catch { }
-                            }
-                        }
-                    }
-                    catch { }
                 }
                 catch { }
             }
