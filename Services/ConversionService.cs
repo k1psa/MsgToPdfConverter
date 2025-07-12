@@ -130,9 +130,107 @@ namespace MsgToPdfConverter.Services
             }
             if (appendAttachments && (msg.Attachments == null || msg.Attachments.Count == 0))
             {
-                Console.WriteLine($"[DEBUG] No attachments to process for file: {filePath}. Skipping attachment processing.");
-                conversionSucceeded = true;
+                Console.WriteLine($"[DEBUG] No attachments to process for file: {filePath}. Will convert main message body only.");
+                // Always convert the main message body to PDF
+                string datePart_noatt = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
+                string msgBaseName_noatt = System.IO.Path.GetFileNameWithoutExtension(filePath);
+                string msgDir_noatt = baseTempDir;
+                string uniquePdfName_noatt = GenerateUniquePdfFileName(filePath, msgDir_noatt, selectedFiles);
+                string pdfBaseName_noatt = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName_noatt);
+                string pdfFilePath_noatt = System.IO.Path.Combine(msgDir_noatt, $"{pdfBaseName_noatt} - {datePart_noatt}.pdf");
+                string outputPdf_noatt = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
+                if (System.IO.File.Exists(pdfFilePath_noatt))
+                    System.IO.File.Delete(pdfFilePath_noatt);
+                var htmlResult_noatt = emailService.BuildEmailHtmlWithInlineImages(msg, false);
+                if (emailService == null)
+                {
+                    showMessageBox($"[ERROR] emailService is null when building HTML for MSG file: {filePath}");
+                    fail++;
+                    continue;
+                }
+                if (string.IsNullOrEmpty(htmlResult_noatt.Html))
+                {
+                    showMessageBox($"[ERROR] Failed to build HTML for MSG file: {filePath}");
+                    fail++;
+                    continue;
+                }
+                string htmlWithHeader_noatt = htmlResult_noatt.Html;
+                var tempHtmlPath_noatt = System.IO.Path.Combine(baseTempDir, Guid.NewGuid() + ".html");
+                if (string.IsNullOrEmpty(tempHtmlPath_noatt))
+                {
+                    showMessageBox($"[ERROR] tempHtmlPath is null or empty for MSG file: {filePath}");
+                    fail++;
+                    continue;
+                }
+                if (string.IsNullOrEmpty(pdfFilePath_noatt))
+                {
+                    showMessageBox($"[ERROR] pdfFilePath is null or empty for MSG file: {filePath}");
+                    fail++;
+                    continue;
+                }
+                System.IO.File.WriteAllText(tempHtmlPath_noatt, htmlWithHeader_noatt, System.Text.Encoding.UTF8);
+                sessionTempFiles.Add(tempHtmlPath_noatt);
+                var inlineContentIds_noatt = emailService.GetInlineContentIds(htmlWithHeader_noatt) ?? new HashSet<string>();
+                var psi_noatt = new System.Diagnostics.ProcessStartInfo();
+                psi_noatt.FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                psi_noatt.Arguments = $"--html2pdf \"{tempHtmlPath_noatt}\" \"{pdfFilePath_noatt}\"";
+                psi_noatt.UseShellExecute = false;
+                psi_noatt.CreateNoWindow = true;
+                psi_noatt.RedirectStandardOutput = true;
+                psi_noatt.RedirectStandardError = true;
+                var proc_noatt = System.Diagnostics.Process.Start(psi_noatt);
+                if (proc_noatt == null)
+                {
+                    showMessageBox($"[ERROR] Failed to start HtmlToPdfWorker process for MSG file: {filePath}");
+                    fail++;
+                    continue;
+                }
+                if (inlineContentIds_noatt == null)
+                    showMessageBox($"[WARN] inlineContentIds is null for MSG file: {filePath}");
+                proc_noatt.WaitForExit();
+                System.IO.File.Delete(tempHtmlPath_noatt);
+                if (proc_noatt.ExitCode != 0)
+                {
+                    showMessageBox($"[ERROR] HtmlToPdfWorker failed: {proc_noatt.StandardError.ReadToEnd()}");
+                    fail++;
+                    continue;
+                }
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                // Always copy the final PDF to the output folder
+                if (!string.Equals(pdfFilePath_noatt, outputPdf_noatt, StringComparison.OrdinalIgnoreCase) && System.IO.File.Exists(pdfFilePath_noatt))
+                {
+                    try
+                    {
+                        if (System.IO.File.Exists(outputPdf_noatt))
+                            System.IO.File.Delete(outputPdf_noatt);
+                        System.IO.File.Copy(pdfFilePath_noatt, outputPdf_noatt, true);
+                        Console.WriteLine($"[DEBUG] Copied {pdfFilePath_noatt} to {outputPdf_noatt}");
+                        // Delete temp PDF after copying
+                        try {
+                            if (System.IO.File.Exists(pdfFilePath_noatt))
+                                System.IO.File.Delete(pdfFilePath_noatt);
+                            Console.WriteLine($"[DEBUG] Deleted temp PDF: {pdfFilePath_noatt}");
+                        } catch { }
+                    }
+                    catch (Exception moveEx)
+                    {
+                        Console.WriteLine($"[ERROR] Failed to copy file: {moveEx.Message}");
+                        outputPdf_noatt = pdfFilePath_noatt;
+                    }
+                }
+                else if (System.IO.File.Exists(outputPdf_noatt))
+                {
+                    Console.WriteLine($"[DEBUG] Output PDF already exists at {outputPdf_noatt}");
+                }
+                else if (System.IO.File.Exists(pdfFilePath_noatt))
+                {
+                    outputPdf_noatt = pdfFilePath_noatt;
+                }
+                generatedPdfs?.Add(outputPdf_noatt);
                 success++;
+                conversionSucceeded = true;
+                updateFileProgress?.Invoke(100, 100);
                 continue;
             }
             if (msg.Sender == null)
