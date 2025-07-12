@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -8,21 +9,68 @@ namespace MsgToPdfConverter.Services
     {
         public List<string> AddFiles(List<string> currentFiles, IEnumerable<string> newFiles)
         {
-            var set = new HashSet<string>(currentFiles);
             string[] supportedExtensions = new[] { ".msg", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".7z", ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
-            
-            foreach (var file in newFiles)
+
+            // Use a HashSet to store hashes for deduplication
+            var hashSet = new HashSet<string>();
+            var result = new List<string>();
+
+            // Helper to compute file hash
+            string GetFileHash(string path)
             {
-                if (!set.Contains(file) && File.Exists(file))
+                try
+                {
+                    using (var stream = File.OpenRead(path))
+                    {
+                        using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                        {
+                            var hash = sha256.ComputeHash(stream);
+                            return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                        }
+                    }
+                }
+                catch
+                {
+                    return null;
+                }
+            }
+
+            // Add current files first, tracking their hashes
+            foreach (var file in currentFiles)
+            {
+                if (File.Exists(file))
                 {
                     string ext = Path.GetExtension(file).ToLowerInvariant();
                     if (supportedExtensions.Contains(ext))
                     {
-                        set.Add(file);
+                        string hash = GetFileHash(file);
+                        if (hash != null && !hashSet.Contains(hash))
+                        {
+                            hashSet.Add(hash);
+                            result.Add(file);
+                        }
                     }
                 }
             }
-            return set.ToList();
+
+            // Add new files, skip if hash already exists (i.e. identical content)
+            foreach (var file in newFiles)
+            {
+                if (File.Exists(file))
+                {
+                    string ext = Path.GetExtension(file).ToLowerInvariant();
+                    if (supportedExtensions.Contains(ext))
+                    {
+                        string hash = GetFileHash(file);
+                        if (hash != null && !hashSet.Contains(hash))
+                        {
+                            hashSet.Add(hash);
+                            result.Add(file);
+                        }
+                    }
+                }
+            }
+            return result;
         }
 
         public List<string> AddFilesFromDirectory(List<string> currentFiles, string directory)

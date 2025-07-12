@@ -91,6 +91,7 @@ namespace MsgToPdfConverter.Services
                     var fileGroupStream = (MemoryStream)data.GetData("FileGroupDescriptorW");
                     fileGroupStream.Position = 0;
                     var fileNames = GetFileNamesFromFileGroupDescriptorW(fileGroupStream);
+                    System.Diagnostics.Debug.WriteLine($"[OutlookImportService] FileGroupDescriptorW present. Attachment count: {fileNames.Length}");
                     for (int i = 0; i < fileNames.Length; i++)
                     {
                         string originalName = fileNames[i];
@@ -107,7 +108,9 @@ namespace MsgToPdfConverter.Services
                         }
                         // The actual file data is in the FileContents stream
                         string fileContentsFormat = i == 0 ? "FileContents" : $"FileContents{i}";
-                        if (data.GetDataPresent(fileContentsFormat))
+                        bool hasFileContents = data.GetDataPresent(fileContentsFormat);
+                        System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Attachment {i}: {originalName}, FileContentsFormat: {fileContentsFormat}, HasFileContents: {hasFileContents}");
+                        if (hasFileContents)
                         {
                             using (var fileStream = (MemoryStream)data.GetData(fileContentsFormat))
                             using (var outStream = File.Create(destPath))
@@ -127,6 +130,7 @@ namespace MsgToPdfConverter.Services
                 else
                 {
                     result.SkippedFiles.Add("No FileGroupDescriptorW present");
+                    System.Diagnostics.Debug.WriteLine($"[OutlookImportService] No FileGroupDescriptorW present in drop data.");
                 }
             }
             catch (Exception ex)
