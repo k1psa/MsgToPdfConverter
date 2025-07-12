@@ -288,8 +288,27 @@ namespace MsgToPdfConverter.Services
                 var outlookApp = System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application") as Microsoft.Office.Interop.Outlook.Application;
                 if (outlookApp != null)
                 {
+                    Microsoft.Office.Interop.Outlook.MailItem parentMailItem = null;
                     var inspector = outlookApp.ActiveInspector();
-                    if (inspector != null && inspector.CurrentItem is Microsoft.Office.Interop.Outlook.MailItem parentMailItem)
+                    if (inspector != null && inspector.CurrentItem is Microsoft.Office.Interop.Outlook.MailItem mailItemInspector)
+                    {
+                        parentMailItem = mailItemInspector;
+                        Console.WriteLine("[OutlookImportService] Using ActiveInspector for child MSG extraction.");
+                    }
+                    else
+                    {
+                        var explorer = outlookApp.ActiveExplorer();
+                        if (explorer != null && explorer.Selection != null && explorer.Selection.Count > 0)
+                        {
+                            var selectedItem = explorer.Selection[1];
+                            if (selectedItem is Microsoft.Office.Interop.Outlook.MailItem mailItemExplorer)
+                            {
+                                parentMailItem = mailItemExplorer;
+                                Console.WriteLine("[OutlookImportService] Using ActiveExplorer selection for child MSG extraction.");
+                            }
+                        }
+                    }
+                    if (parentMailItem != null)
                     {
                         if (draggedMsgHash != null)
                         {
@@ -405,7 +424,7 @@ namespace MsgToPdfConverter.Services
                     }
                     else
                     {
-                        result.SkippedFiles.Add("No active inspector or current item is not a MailItem");
+                        result.SkippedFiles.Add("No active inspector, no valid explorer selection, or current item is not a MailItem");
                     }
                 }
                 else
