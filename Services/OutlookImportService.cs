@@ -92,20 +92,29 @@ namespace MsgToPdfConverter.Services
                     fileGroupStream.Position = 0;
                     var fileNames = GetFileNamesFromFileGroupDescriptorW(fileGroupStream);
                     System.Diagnostics.Debug.WriteLine($"[OutlookImportService] FileGroupDescriptorW present. Attachment count: {fileNames.Length}");
+                    // Track hashes of already saved files in outputFolder
+                    var existingFiles = Directory.GetFiles(outputFolder);
+                    var existingHashes = new HashSet<string>();
+                    foreach (var file in existingFiles)
+                    {
+                        try
+                        {
+                            using (var stream = File.OpenRead(file))
+                            using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                            {
+                                var hash = sha256.ComputeHash(stream);
+                                string hashStr = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                                existingHashes.Add(hashStr);
+                            }
+                        }
+                        catch { }
+                    }
                     for (int i = 0; i < fileNames.Length; i++)
                     {
                         string originalName = fileNames[i];
                         string safeName = sanitizeFileName(Path.GetFileName(originalName));
                         string destPath = Path.Combine(outputFolder, safeName);
                         int counter = 1;
-                        while (File.Exists(destPath))
-                        {
-                            string nameWithoutExt = Path.GetFileNameWithoutExtension(safeName);
-                            string ext = Path.GetExtension(safeName);
-                            string uniqueFileName = $"{nameWithoutExt}_{counter}{ext}";
-                            destPath = Path.Combine(outputFolder, uniqueFileName);
-                            counter++;
-                        }
                         // The actual file data is in the FileContents stream
                         string fileContentsFormat = i == 0 ? "FileContents" : $"FileContents{i}";
                         bool hasFileContents = data.GetDataPresent(fileContentsFormat);
@@ -113,12 +122,38 @@ namespace MsgToPdfConverter.Services
                         if (hasFileContents)
                         {
                             using (var fileStream = (MemoryStream)data.GetData(fileContentsFormat))
-                            using (var outStream = File.Create(destPath))
                             {
-                                fileStream.WriteTo(outStream);
+                                // Compute hash of incoming file
+                                fileStream.Position = 0;
+                                using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                                {
+                                    var hash = sha256.ComputeHash(fileStream);
+                                    string hashStr = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                                    if (existingHashes.Contains(hashStr))
+                                    {
+                                        result.SkippedFiles.Add(originalName);
+                                        System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Skipped saving duplicate attachment (identical content): {originalName}");
+                                        continue;
+                                    }
+                                    existingHashes.Add(hashStr);
+                                }
+                                fileStream.Position = 0;
+                                // Find a unique file name
+                                while (File.Exists(destPath))
+                                {
+                                    string nameWithoutExt = Path.GetFileNameWithoutExtension(safeName);
+                                    string ext = Path.GetExtension(safeName);
+                                    string uniqueFileName = $"{nameWithoutExt}_{counter}{ext}";
+                                    destPath = Path.Combine(outputFolder, uniqueFileName);
+                                    counter++;
+                                }
+                                using (var outStream = File.Create(destPath))
+                                {
+                                    fileStream.WriteTo(outStream);
+                                }
+                                result.ExtractedFiles.Add(destPath);
+                                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Saved attachment: {destPath}");
                             }
-                            result.ExtractedFiles.Add(destPath);
-                            System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Saved attachment: {destPath}");
                         }
                         else
                         {

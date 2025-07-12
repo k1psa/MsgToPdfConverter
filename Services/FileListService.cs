@@ -9,18 +9,27 @@ namespace MsgToPdfConverter.Services
     {
         public List<string> AddFiles(List<string> currentFiles, IEnumerable<string> newFiles)
         {
-            string[] supportedExtensions = new[] { ".msg", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".7z", ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
 
-            // Use a HashSet to store hashes for deduplication
-            var hashSet = new HashSet<string>();
+            string[] supportedExtensions = new[] { ".msg", ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".7z", ".jpg", ".jpeg", ".png", ".bmp", ".gif" };
+            var extToHashSet = new Dictionary<string, HashSet<string>>();
             var result = new List<string>();
 
-            // Helper to compute file hash
+            // Helper to compute file hash with robust error handling
             string GetFileHash(string path)
             {
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] GetFileHash: Path is null or empty.");
+                    return null;
+                }
+                if (!File.Exists(path))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] GetFileHash: File does not exist: {path}");
+                    return null;
+                }
                 try
                 {
-                    using (var stream = File.OpenRead(path))
+                    using (var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                     {
                         using (var sha256 = System.Security.Cryptography.SHA256.Create())
                         {
@@ -29,45 +38,87 @@ namespace MsgToPdfConverter.Services
                         }
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] GetFileHash: Exception for {path}: {ex.Message}");
                     return null;
                 }
             }
 
-            // Add current files first, tracking their hashes
+
+            // Add current files first, tracking their hashes by extension
             foreach (var file in currentFiles)
             {
-                if (File.Exists(file))
+                if (string.IsNullOrWhiteSpace(file))
                 {
-                    string ext = Path.GetExtension(file).ToLowerInvariant();
-                    if (supportedExtensions.Contains(ext))
-                    {
-                        string hash = GetFileHash(file);
-                        if (hash != null && !hashSet.Contains(hash))
-                        {
-                            hashSet.Add(hash);
-                            result.Add(file);
-                        }
-                    }
+                    System.Diagnostics.Debug.WriteLine("[FileListService] Skipping null or empty file path in currentFiles.");
+                    continue;
+                }
+                if (!File.Exists(file))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] File does not exist: {file}");
+                    continue;
+                }
+                string ext = Path.GetExtension(file)?.ToLowerInvariant();
+                if (string.IsNullOrEmpty(ext) || !supportedExtensions.Contains(ext))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] Unsupported extension: {file}");
+                    continue;
+                }
+                string hash = GetFileHash(file);
+                if (hash == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] Could not compute hash for: {file}. Skipping file.");
+                    continue;
+                }
+                if (!extToHashSet.ContainsKey(ext))
+                    extToHashSet[ext] = new HashSet<string>();
+                if (!extToHashSet[ext].Contains(hash))
+                {
+                    extToHashSet[ext].Add(hash);
+                    result.Add(file);
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] Duplicate file skipped (same hash and extension): {file}");
                 }
             }
 
-            // Add new files, skip if hash already exists (i.e. identical content)
+            // Add new files, skip if hash already exists for the same extension
             foreach (var file in newFiles)
             {
-                if (File.Exists(file))
+                if (string.IsNullOrWhiteSpace(file))
                 {
-                    string ext = Path.GetExtension(file).ToLowerInvariant();
-                    if (supportedExtensions.Contains(ext))
-                    {
-                        string hash = GetFileHash(file);
-                        if (hash != null && !hashSet.Contains(hash))
-                        {
-                            hashSet.Add(hash);
-                            result.Add(file);
-                        }
-                    }
+                    System.Diagnostics.Debug.WriteLine("[FileListService] Skipping null or empty file path in newFiles.");
+                    continue;
+                }
+                if (!File.Exists(file))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] File does not exist: {file}");
+                    continue;
+                }
+                string ext = Path.GetExtension(file)?.ToLowerInvariant();
+                if (string.IsNullOrEmpty(ext) || !supportedExtensions.Contains(ext))
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] Unsupported extension: {file}");
+                    continue;
+                }
+                string hash = GetFileHash(file);
+                if (hash == null)
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] Could not compute hash for: {file}. Skipping file.");
+                    continue;
+                }
+                if (!extToHashSet.ContainsKey(ext))
+                    extToHashSet[ext] = new HashSet<string>();
+                if (!extToHashSet[ext].Contains(hash))
+                {
+                    extToHashSet[ext].Add(hash);
+                    result.Add(file);
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"[FileListService] Duplicate file skipped (same hash and extension): {file}");
                 }
             }
             return result;

@@ -111,6 +111,27 @@ namespace MsgToPdfConverter.Services
 
         public void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5, string headerText = null, List<string> parentChain = null, Action progressTick = null)
         {
+            if (msg == null)
+            {
+                Console.WriteLine($"[ERROR] Null Storage.Message passed to ProcessMsgAttachmentsRecursively.");
+                return;
+            }
+            if (allPdfFiles == null)
+            {
+                Console.WriteLine($"[ERROR] allPdfFiles is null in ProcessMsgAttachmentsRecursively.");
+                return;
+            }
+            if (allTempFiles == null)
+            {
+                Console.WriteLine($"[ERROR] allTempFiles is null in ProcessMsgAttachmentsRecursively.");
+                return;
+            }
+            if (tempDir == null)
+            {
+                Console.WriteLine($"[ERROR] tempDir is null in ProcessMsgAttachmentsRecursively.");
+                return;
+            }
+
             if (depth > maxDepth)
             {
                 Console.WriteLine($"[MSG] Max recursion depth {maxDepth} reached, skipping further processing");
@@ -120,6 +141,21 @@ namespace MsgToPdfConverter.Services
             {
                 parentChain = new List<string>();
             }
+
+            // Additional null checks for MSG properties
+            if (msg.Subject == null)
+            {
+                Console.WriteLine("[DEBUG] MSG subject is null.");
+            }
+            if (msg.Attachments == null)
+            {
+                Console.WriteLine("[DEBUG] MSG attachments collection is null.");
+            }
+            if (msg.BodyText == null && msg.BodyHtml == null)
+            {
+                Console.WriteLine("[DEBUG] MSG body is null (both text and HTML).");
+            }
+
             if (depth > 0)
             {
                 // For nested MSGs, process the body as a PDF (if not extractOriginalOnly)
@@ -129,8 +165,12 @@ namespace MsgToPdfConverter.Services
                     {
                         // Use only the main temp folder for nested MSGs
                         var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(msg, false);
+                        if (string.IsNullOrEmpty(htmlResult.Html))
+                        {
+                            Console.WriteLine("[DEBUG] htmlResult.Html is null or empty for nested MSG.");
+                        }
                         string nestedHtmlPath = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), Guid.NewGuid() + "_nested.html");
-                        File.WriteAllText(nestedHtmlPath, htmlResult.Html, System.Text.Encoding.UTF8);
+                        File.WriteAllText(nestedHtmlPath, htmlResult.Html ?? string.Empty, System.Text.Encoding.UTF8);
                         allTempFiles.Add(nestedHtmlPath);
                         string nestedPdf = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), Guid.NewGuid() + "_nested.pdf");
                         var psi = new System.Diagnostics.ProcessStartInfo
@@ -268,6 +308,27 @@ namespace MsgToPdfConverter.Services
 
         public string ProcessSingleAttachment(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles)
         {
+            if (att == null)
+            {
+                Console.WriteLine($"[ERROR] Null Storage.Attachment passed to ProcessSingleAttachment.");
+                return null;
+            }
+            if (attPath == null)
+            {
+                Console.WriteLine($"[ERROR] attPath is null in ProcessSingleAttachment.");
+                return null;
+            }
+            if (tempDir == null)
+            {
+                Console.WriteLine($"[ERROR] tempDir is null in ProcessSingleAttachment.");
+                return null;
+            }
+            if (allTempFiles == null)
+            {
+                Console.WriteLine($"[ERROR] allTempFiles is null in ProcessSingleAttachment.");
+                return null;
+            }
+
             string attName = att.FileName ?? "attachment";
             string ext = Path.GetExtension(attName).ToLowerInvariant();
             string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
@@ -363,6 +424,27 @@ namespace MsgToPdfConverter.Services
 
         public string ProcessZipAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false, Action progressTick = null)
         {
+            if (attPath == null)
+            {
+                Console.WriteLine($"[ERROR] attPath is null in ProcessZipAttachmentWithHierarchy.");
+                return null;
+            }
+            if (tempDir == null)
+            {
+                Console.WriteLine($"[ERROR] tempDir is null in ProcessZipAttachmentWithHierarchy.");
+                return null;
+            }
+            if (allTempFiles == null)
+            {
+                Console.WriteLine($"[ERROR] allTempFiles is null in ProcessZipAttachmentWithHierarchy.");
+                return null;
+            }
+            if (parentChain == null)
+            {
+                Console.WriteLine($"[ERROR] parentChain is null in ProcessZipAttachmentWithHierarchy.");
+                return null;
+            }
+
             try
             {
                 Console.WriteLine($"[ZIP] Processing ZIP file: {attPath}");
