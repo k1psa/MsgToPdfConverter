@@ -132,13 +132,11 @@ namespace MsgToPdfConverter.Services
             {
                 Console.WriteLine($"[DEBUG] No attachments to process for file: {filePath}. Will convert main message body only.");
                 // Always convert the main message body to PDF
-                string datePart_noatt = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
+                string datePart_noatt = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
                 string msgBaseName_noatt = System.IO.Path.GetFileNameWithoutExtension(filePath);
                 string msgDir_noatt = baseTempDir;
-                string uniquePdfName_noatt = GenerateUniquePdfFileName(filePath, msgDir_noatt, selectedFiles);
-                string pdfBaseName_noatt = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName_noatt);
-                string pdfFilePath_noatt = System.IO.Path.Combine(msgDir_noatt, $"{pdfBaseName_noatt} - {datePart_noatt}.pdf");
-                string outputPdf_noatt = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
+                string pdfFilePath_noatt = System.IO.Path.Combine(msgDir_noatt, $"{msgBaseName_noatt} - {datePart_noatt}.pdf");
+                string outputPdf_noatt = System.IO.Path.Combine(dir, $"{msgBaseName_noatt} - {datePart_noatt}.pdf");
                 if (System.IO.File.Exists(pdfFilePath_noatt))
                     System.IO.File.Delete(pdfFilePath_noatt);
                 var htmlResult_noatt = emailService.BuildEmailHtmlWithInlineImages(msg, false);
@@ -506,13 +504,17 @@ namespace MsgToPdfConverter.Services
                                     attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, false, 1, 5, nestedHeaderText, initialParentChain, () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
                                 }
                                 string mergedPdf = System.IO.Path.Combine(tempDir, System.IO.Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
-                                PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf);
+                                // Restore sent date in output PDF filename for merged PDFs
+                                string datePart_att = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
+                                string pdfBaseName_att = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName);
+                                string mergedPdfWithDate = System.IO.Path.Combine(tempDir, $"{pdfBaseName_att} - {datePart_att}_merged.pdf");
+                                PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdfWithDate);
                                 GC.Collect();
                                 GC.WaitForPendingFinalizers();
                                 // Build list of files to protect: all user-selected source files and all output files
                                 var filesToProtect = new HashSet<string>(selectedFiles.Select(f => Path.GetFullPath(f).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant()));
                                 filesToProtect.Add(Path.GetFullPath(pdfFilePath).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
-                                filesToProtect.Add(Path.GetFullPath(mergedPdf).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
+                                filesToProtect.Add(Path.GetFullPath(mergedPdfWithDate).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
                                 if (generatedPdfs != null)
                                 {
                                     foreach (var genPdf in generatedPdfs)
@@ -540,21 +542,25 @@ namespace MsgToPdfConverter.Services
                                     }
                                     catch { }
                                 }
-                                if (System.IO.File.Exists(mergedPdf))
+                                if (System.IO.File.Exists(mergedPdfWithDate))
                                 {
                                     if (System.IO.File.Exists(pdfFilePath))
                                         System.IO.File.Delete(pdfFilePath);
-                                    System.IO.File.Move(mergedPdf, pdfFilePath);
+                                    System.IO.File.Move(mergedPdfWithDate, pdfFilePath);
                                 }
-                                // Always copy the final PDF to the output folder
-                                if (!string.Equals(pdfFilePath, outputPdf, StringComparison.OrdinalIgnoreCase) && System.IO.File.Exists(pdfFilePath))
+                                // Always copy the final PDF to the output folder, using the sent date in the filename
+                                // Decide output filename: always include sent date, only use _merged if >1 PDF
+                                // Always use [BaseName] - [SentDate].pdf for output
+                                string outputFileName = $"{pdfBaseName_att} - {datePart_att}.pdf";
+                                string outputPdfFinal = System.IO.Path.Combine(dir, outputFileName);
+                                if (!string.Equals(pdfFilePath, outputPdfFinal, StringComparison.OrdinalIgnoreCase) && System.IO.File.Exists(pdfFilePath))
                                 {
                                     try
                                     {
-                                        if (System.IO.File.Exists(outputPdf))
-                                            System.IO.File.Delete(outputPdf);
-                                        System.IO.File.Copy(pdfFilePath, outputPdf, true);
-                                        Console.WriteLine($"[DEBUG] Copied {pdfFilePath} to {outputPdf}");
+                                        if (System.IO.File.Exists(outputPdfFinal))
+                                            System.IO.File.Delete(outputPdfFinal);
+                                        System.IO.File.Copy(pdfFilePath, outputPdfFinal, true);
+                                        Console.WriteLine($"[DEBUG] Copied {pdfFilePath} to {outputPdfFinal}");
                                         // Delete temp PDF after copying
                                         try {
                                             if (System.IO.File.Exists(pdfFilePath))
@@ -565,18 +571,18 @@ namespace MsgToPdfConverter.Services
                                     catch (Exception moveEx)
                                     {
                                         Console.WriteLine($"[ERROR] Failed to copy file: {moveEx.Message}");
-                                        outputPdf = pdfFilePath;
+                                        outputPdfFinal = pdfFilePath;
                                     }
                                 }
-                                else if (System.IO.File.Exists(outputPdf))
+                                else if (System.IO.File.Exists(outputPdfFinal))
                                 {
-                                    Console.WriteLine($"[DEBUG] Output PDF already exists at {outputPdf}");
+                                    Console.WriteLine($"[DEBUG] Output PDF already exists at {outputPdfFinal}");
                                 }
                                 else if (System.IO.File.Exists(pdfFilePath))
                                 {
-                                    outputPdf = pdfFilePath;
+                                    outputPdfFinal = pdfFilePath;
                                 }
-                                generatedPdfs?.Add(outputPdf);
+                                generatedPdfs?.Add(outputPdfFinal);
                                 success++;
                                 conversionSucceeded = true;
                                 // Mark file progress as complete
