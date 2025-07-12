@@ -79,6 +79,8 @@ namespace MsgToPdfConverter.Services
                     bool conversionSucceeded = false;
                     try
                     {
+                        Console.WriteLine($"[DEBUG] Starting conversion for file index {i}: {filePath}");
+                        Console.WriteLine($"[DEBUG] appendAttachments={appendAttachments}, selectedOutputFolder={selectedOutputFolder}, extractOriginalOnly={extractOriginalOnly}, combineAllPdfs={combineAllPdfs}");
                         if (string.IsNullOrWhiteSpace(filePath))
                         {
                             showMessageBox($"[ERROR] Skipping null or empty file path at index {i}.");
@@ -119,34 +121,45 @@ namespace MsgToPdfConverter.Services
                                         fail++;
                                         continue;
                                     }
-                                    if (msg == null)
-                                    {
-                                        showMessageBox($"[ERROR] Failed to load MSG file: {filePath}");
-                                        fail++;
-                                        continue;
-                                    }
-                                    if (msg.Sender == null)
-                                        showMessageBox($"[WARN] MSG file has null Sender: {filePath}");
-                                    if (msg.SentOn == null)
-                                        showMessageBox($"[WARN] MSG file has null SentOn: {filePath}");
-                                    if (msg.BodyText == null)
-                                        showMessageBox($"[WARN] MSG file has null BodyText: {filePath}");
-                                    if (msg.Attachments == null)
-                                        showMessageBox($"[WARN] MSG file has null Attachments: {filePath}");
-                                    if (msg.Attachments != null && msg.Attachments.Count == 0)
-                                        showMessageBox($"[INFO] MSG file has zero Attachments: {filePath}");
-                                    int fileProgress = 0;
-                                    int totalCount = 0;
-                                    try
-                                    {
-                                        totalCount = attachmentService.CountAllProcessableItems(msg);
-                                    }
-                                    catch (Exception attCountEx)
-                                    {
-                                        showMessageBox($"[ERROR] Could not count processable items: {attCountEx.Message}");
-                                        totalCount = 1;
-                                    }
-                                    updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
+            Console.WriteLine($"[DEBUG] msg loaded: {{Subject={msg?.Subject}, Sender={msg?.Sender}, SentOn={msg?.SentOn}, Attachments={(msg?.Attachments == null ? "null" : msg.Attachments.Count.ToString())}}}");
+            if (msg == null)
+            {
+                showMessageBox($"[ERROR] Failed to load MSG file: {filePath}");
+                fail++;
+                continue;
+            }
+            if (appendAttachments && (msg.Attachments == null || msg.Attachments.Count == 0))
+            {
+                Console.WriteLine($"[DEBUG] No attachments to process for file: {filePath}. Skipping attachment processing.");
+                conversionSucceeded = true;
+                success++;
+                continue;
+            }
+            if (msg.Sender == null)
+                showMessageBox($"[WARN] MSG file has null Sender: {filePath}");
+            if (msg.SentOn == null)
+                showMessageBox($"[WARN] MSG file has null SentOn: {filePath}");
+            if (msg.BodyText == null)
+                showMessageBox($"[WARN] MSG file has null BodyText: {filePath}");
+            if (msg.Attachments == null)
+                showMessageBox($"[WARN] MSG file has null Attachments: {filePath}");
+            if (msg.Attachments != null && msg.Attachments.Count == 0)
+                showMessageBox($"[INFO] MSG file has zero Attachments: {filePath}");
+            int fileProgress = 0;
+            int totalCount = 0;
+            try
+            {
+                Console.WriteLine($"[DEBUG] Calling attachmentService.CountAllProcessableItems(msg)");
+                totalCount = attachmentService.CountAllProcessableItems(msg);
+                Console.WriteLine($"[DEBUG] attachmentService.CountAllProcessableItems(msg) returned: {totalCount}");
+            }
+            catch (Exception attCountEx)
+            {
+                Console.WriteLine($"[ERROR] Exception in attachmentService.CountAllProcessableItems: {attCountEx.Message}");
+                showMessageBox($"[ERROR] Could not count processable items: {attCountEx.Message}");
+                totalCount = 1;
+            }
+            updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
                                     string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
                                     string msgBaseName = System.IO.Path.GetFileNameWithoutExtension(filePath);
                                     string msgDir = baseTempDir;
@@ -483,9 +496,9 @@ namespace MsgToPdfConverter.Services
                                 msg = null;
                                 GC.Collect();
                                 GC.WaitForPendingFinalizers();
-                                Console.WriteLine($"[DELETE] Should delete: {filePath}, deleteMsgAfterConversion={deleteFilesAfterConversion}");
                                 if (deleteFilesAfterConversion && conversionSucceeded && !combineAllPdfs) // <--- updated condition
                                 {
+                                    Console.WriteLine($"[DELETE] Should delete: {filePath}, deleteFilesAfterConversion={deleteFilesAfterConversion}, combineAllPdfs={combineAllPdfs}, appendAttachments={appendAttachments}");
                                     if (System.IO.File.Exists(filePath))
                                     {
                                         Console.WriteLine($"[DELETE] Attempting to delete: {filePath}");

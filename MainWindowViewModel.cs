@@ -214,17 +214,31 @@ namespace MsgToPdfConverter
                 }
             }
             Console.WriteLine($"Starting conversion for {SelectedFiles.Count} files. Output folder: {SelectedOutputFolder}");
-            Console.WriteLine($"[DEBUG] Passing DeleteMsgAfterConversion: {DeleteFilesAfterConversion}");
+            Console.WriteLine($"[DEBUG] Passing DeleteFilesAfterConversion: {DeleteFilesAfterConversion}");
+            if (SelectedFiles == null)
+                Console.WriteLine("[DEBUG] SelectedFiles is null!");
+            else
+                Console.WriteLine($"[DEBUG] SelectedFiles: [{string.Join(", ", SelectedFiles)}]");
             IsConverting = true;
             ProgressValue = 0;
             ProgressMax = SelectedFiles.Count;
             ProcessingStatus = "";
+            if (_emailService == null) Console.WriteLine("[DEBUG] _emailService is null!");
+            if (_attachmentService == null) Console.WriteLine("[DEBUG] _attachmentService is null!");
+            if (_outlookImportService == null) Console.WriteLine("[DEBUG] _outlookImportService is null!");
+            if (_fileListService == null) Console.WriteLine("[DEBUG] _fileListService is null!");
             var conversionService = new ConversionService();
             try
             {
                 List<string> generatedPdfs = new List<string>();
-                var result = await Task.Run(() =>
+                var (success, fail, processed, cancelled) = await Task.Run(() =>
                 {
+                    if (conversionService == null)
+                    {
+                        Console.WriteLine("[DEBUG] conversionService is null!");
+                        // Return default tuple
+                        return (0, 0, 0, false);
+                    }
                     var res = conversionService.ConvertFilesWithAttachments(
                         new System.Collections.Generic.List<string>(SelectedFiles),
                         SelectedOutputFolder,
@@ -234,12 +248,12 @@ namespace MsgToPdfConverter
                         CombineAllPdfs, // <--- pass combineAllPdfs
                         _emailService,
                         _attachmentService,
-                        (processed, total, progress, statusText) =>
+                        (fileProcessed, total, progress, statusText) =>
                         {
                             ProcessingStatus = statusText;
-                            ProgressValue = processed;
+                            ProgressValue = fileProcessed;
                             // Remove direct IsProcessingFile set here
-                            Console.WriteLine($"Progress: {processed}/{total} - {statusText}");
+                            Console.WriteLine($"Progress: {fileProcessed}/{total} - {statusText}");
                         },
                         (current, max) =>
                         {
@@ -269,12 +283,38 @@ namespace MsgToPdfConverter
                         null, // no messagebox during conversion
                         generatedPdfs // <-- pass list to collect generated PDFs
                     );
+                    // Value tuple cannot be null, but check for default values
+                    if (res.Item1 == 0 && res.Item2 == 0 && res.Item3 == 0 && !res.Item4)
+                    {
+                        Console.WriteLine("[DEBUG] ConvertFilesWithAttachments returned default result! Possible error in conversion.");
+                    }
                     return res;
                 });
                 string statusMessage;
                 if (CombineAllPdfs && !string.IsNullOrEmpty(CombinedPdfOutputPath) && generatedPdfs.Count > 0)
                 {
-                    PdfAppendTest.AppendPdfs(generatedPdfs, CombinedPdfOutputPath);
+                    Console.WriteLine($"[DEBUG] Calling PdfAppendTest.AppendPdfs. generatedPdfs.Count={generatedPdfs.Count}, CombinedPdfOutputPath={CombinedPdfOutputPath}");
+                    try
+                    {
+                        if (generatedPdfs == null)
+                        {
+                            Console.WriteLine("[DEBUG] generatedPdfs is null!");
+                        }
+                        else if (generatedPdfs.Count == 0)
+                        {
+                            Console.WriteLine("[DEBUG] generatedPdfs is empty!");
+                        }
+                        if (string.IsNullOrEmpty(CombinedPdfOutputPath))
+                        {
+                            Console.WriteLine("[DEBUG] CombinedPdfOutputPath is null or empty!");
+                        }
+                        PdfAppendTest.AppendPdfs(generatedPdfs, CombinedPdfOutputPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[ERROR] Exception in PdfAppendTest.AppendPdfs: {ex.Message}");
+                        throw;
+                    }
                     // Always delete intermediate PDFs after combining
                     foreach (var pdf in generatedPdfs)
                     {
@@ -287,11 +327,52 @@ namespace MsgToPdfConverter
                     // Optionally delete original source files if requested
                     if (DeleteFilesAfterConversion)
                     {
-                        foreach (var src in SelectedFiles)
+                        Console.WriteLine($"[DEBUG] Entering file deletion loop. DeleteFilesAfterConversion={DeleteFilesAfterConversion}, AppendAttachments={AppendAttachments}");
+                        if (!DeleteFilesAfterConversion)
                         {
-                            if (!string.Equals(src, CombinedPdfOutputPath, StringComparison.OrdinalIgnoreCase))
+                            Console.WriteLine("[DELETE] Skipping deletion because DeleteFilesAfterConversion is false.");
+                        }
+                        else if (SelectedFiles == null)
+                        {
+                            Console.WriteLine("[DELETE] SelectedFiles is null!");
+                        }
+                        else
+                        {
+                            foreach (var src in SelectedFiles)
                             {
-                                try { if (File.Exists(src)) FileService.MoveFileToRecycleBin(src); } catch { }
+                                if (src == null)
+                                {
+                                    Console.WriteLine("[DELETE] Skipped null file reference in SelectedFiles.");
+                                    continue;
+                                }
+                                if (!string.IsNullOrEmpty(src) && !string.Equals(src, CombinedPdfOutputPath, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    try
+                                    {
+                                        if (File.Exists(src))
+                                        {
+                                            Console.WriteLine($"[DELETE] Deleting file: {src}");
+                                            FileService.MoveFileToRecycleBin(src);
+                                        }
+                                        else
+                                        {
+                                            Console.WriteLine($"[DELETE] File not found or already deleted: {src}");
+                                        }
+                                    }
+                                    catch (NullReferenceException nre)
+                                    {
+                                        Console.WriteLine($"[DELETE] NullReferenceException deleting file '{src}': {nre.Message}");
+                                        if (src == null) Console.WriteLine("[DELETE] src is null");
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[DELETE] Exception deleting file '{src}': {ex.Message}");
+                                    }
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[DELETE] Skipped empty or output file reference: {src}");
+                                }
                             }
                         }
                     }
@@ -299,9 +380,9 @@ namespace MsgToPdfConverter
                 }
                 else
                 {
-                    statusMessage = result.Cancelled
-                        ? $"Processing cancelled. Processed {result.Processed} files. Success: {result.Success}, Failed: {result.Fail}"
-                        : $"Processing completed. Total files: {SelectedFiles.Count}, Success: {result.Success}, Failed: {result.Fail}";
+                    statusMessage = cancelled
+                        ? $"Processing cancelled. Processed {processed} files. Success: {success}, Failed: {fail}"
+                        : $"Processing completed. Total files: {SelectedFiles.Count}, Success: {success}, Failed: {fail}";
                 }
                 Console.WriteLine(statusMessage);
                 // Ensure MessageBox is centered and on top, even if window is pinned
@@ -310,7 +391,7 @@ namespace MsgToPdfConverter
                 if (IsPinned && mainWindow2 != null) mainWindow2.Topmost = false;
                 // Use helper to center MessageBox within main window
                 MsgToPdfConverter.Utils.MessageBoxHelper.ShowCentered(mainWindow2, statusMessage, "Processing Results", MessageBoxButton.OK,
-                    (result.Fail > 0 && !CombineAllPdfs) ? MessageBoxImage.Warning : MessageBoxImage.Information);
+                    (fail > 0 && !CombineAllPdfs) ? MessageBoxImage.Warning : MessageBoxImage.Information);
                 if (IsPinned && mainWindow2 != null) mainWindow2.Topmost = wasTopmost2;
             }
             catch (Exception ex)
@@ -501,14 +582,21 @@ namespace MsgToPdfConverter
                             foreach (var extractedFile in resultChildMsg.ExtractedFiles)
                             {
                                 Console.WriteLine($"[DEBUG] Extracted file: {extractedFile}");
-                                if (!_selectedFiles.Contains(extractedFile))
+                                if (!string.IsNullOrEmpty(extractedFile) && File.Exists(extractedFile))
                                 {
-                                    _selectedFiles.Add(extractedFile);
-                                    Console.WriteLine($"[DEBUG] Added child MSG to list: {Path.GetFileName(extractedFile)}");
+                                    if (!_selectedFiles.Contains(extractedFile))
+                                    {
+                                        _selectedFiles.Add(extractedFile);
+                                        Console.WriteLine($"[DEBUG] Added child MSG to list: {Path.GetFileName(extractedFile)}");
+                                    }
+                                    else
+                                    {
+                                        Console.WriteLine($"[DEBUG] Child MSG already in list: {Path.GetFileName(extractedFile)}");
+                                    }
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[DEBUG] Child MSG already in list: {Path.GetFileName(extractedFile)}");
+                                    Console.WriteLine($"[DEBUG] Skipped non-existent or empty extracted file: {extractedFile}");
                                 }
                             }
                         }
