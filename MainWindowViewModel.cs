@@ -433,9 +433,16 @@ namespace MsgToPdfConverter
                 Console.WriteLine("[DEBUG] Outlook drag-and-drop detected!");
                 try
                 {
-                    // Try to get the filename from the drop (for attachments)
+                    // Check if this is a child MSG attachment by looking at the data formats
                     string[] formats = data.GetFormats();
-                    bool isAttachment = false;
+                    Console.WriteLine($"[DEBUG] Data formats: {string.Join(", ", formats)}");
+                    
+                    // Child MSG attachments have ZoneIdentifier but no RenPrivateMessages/RenPrivateLatestMessages
+                    // Parent emails have RenPrivateMessages and RenPrivateLatestMessages
+                    bool isChildMsgAttachment = data.GetDataPresent("ZoneIdentifier") && 
+                                               !data.GetDataPresent("RenPrivateMessages") && 
+                                               !data.GetDataPresent("RenPrivateLatestMessages");
+                    
                     string attachmentName = null;
                     if (data.GetDataPresent("FileGroupDescriptorW"))
                     {
@@ -453,12 +460,51 @@ namespace MsgToPdfConverter
                             if (nullIndex > 0)
                                 name = name.Substring(0, nullIndex);
                             attachmentName = name;
-                            // If the filename is not .msg, treat as attachment
-                            if (!string.IsNullOrEmpty(name) && !name.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-                                isAttachment = true;
                         }
                     }
-                    if (isAttachment && !string.IsNullOrEmpty(attachmentName))
+                    
+                    Console.WriteLine($"[DEBUG] Attachment name: {attachmentName}");
+                    Console.WriteLine($"[DEBUG] Is child MSG attachment: {isChildMsgAttachment}");
+                    
+                    // If it's a child MSG attachment, treat it as an email extraction
+                    if (isChildMsgAttachment && !string.IsNullOrEmpty(attachmentName) && 
+                        attachmentName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine($"[DEBUG] Detected child MSG attachment drop: {attachmentName} (treating as email)");
+                        string outputFolder = !string.IsNullOrEmpty(SelectedOutputFolder) ? SelectedOutputFolder : null;
+                        var mainWindow = Application.Current.MainWindow;
+                        if (string.IsNullOrEmpty(outputFolder))
+                        {
+                            if (IsPinned && mainWindow != null) mainWindow.Topmost = false;
+                            outputFolder = FileDialogHelper.OpenFolderDialog();
+                            if (IsPinned && mainWindow != null) mainWindow.Topmost = true;
+                        }
+                        if (string.IsNullOrEmpty(outputFolder))
+                            return;
+                        
+                        // Always use Outlook Inspector to save the correct MSG attachment
+                        Console.WriteLine("[DEBUG] Attempting to save child MSG using Outlook Inspector (direct SaveAsFile)...");
+                        var resultChildMsg = _outlookImportService.SaveChildMsgUsingInspector(attachmentName, outputFolder);
+                        if (!string.IsNullOrEmpty(resultChildMsg))
+                        {
+                            if (!_selectedFiles.Contains(resultChildMsg))
+                            {
+                                _selectedFiles.Add(resultChildMsg);
+                                Console.WriteLine($"[DEBUG] Saved and added child MSG: {Path.GetFileName(resultChildMsg)}");
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[DEBUG] Child MSG already in list: {Path.GetFileName(resultChildMsg)}");
+                            }
+                        }
+                        else
+                        {
+                            Console.WriteLine("[DEBUG] Failed to save child MSG using Inspector.");
+                        }
+                        return;
+                    }
+                    // Check if it's a non-MSG attachment
+                    else if (!string.IsNullOrEmpty(attachmentName) && !attachmentName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
                     {
                         Console.WriteLine($"[DEBUG] Detected Outlook attachment drop: {attachmentName}");
                         string outputFolder = !string.IsNullOrEmpty(SelectedOutputFolder) ? SelectedOutputFolder : null;
@@ -489,8 +535,8 @@ namespace MsgToPdfConverter
                         }
                         return;
                     }
-                    // Otherwise, treat as email
-                    Console.WriteLine("[DEBUG] Detected Outlook email drop (saving as .msg)");
+                    // Otherwise, treat as parent email
+                    Console.WriteLine("[DEBUG] Detected Outlook parent email drop (saving as .msg)");
                     string outputFolderEmail = !string.IsNullOrEmpty(SelectedOutputFolder) ? SelectedOutputFolder : null;
                     var mainWindowEmail = Application.Current.MainWindow;
                     if (string.IsNullOrEmpty(outputFolderEmail))
@@ -511,7 +557,7 @@ namespace MsgToPdfConverter
                         _selectedFiles.Add(file);
                     if (resultEmail.ExtractedFiles.Count > 0)
                     {
-                        Console.WriteLine($"[DEBUG] Successfully added {resultEmail.ExtractedFiles.Count} email(s) to the list:");
+                        Console.WriteLine($"[DEBUG] Successfully added {resultEmail.ExtractedFiles.Count} parent email(s) to the list:");
                         foreach (var file in resultEmail.ExtractedFiles)
                             Console.WriteLine($"[DEBUG] - {Path.GetFileName(file)}");
                     }
