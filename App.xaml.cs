@@ -26,6 +26,7 @@ namespace MsgToPdfConverter
 
         protected override void OnExit(ExitEventArgs e)
         {
+            Console.WriteLine("[DEBUG] App.OnExit called. Application is exiting.");
             // Cleanup resources if necessary
             base.OnExit(e);
         }

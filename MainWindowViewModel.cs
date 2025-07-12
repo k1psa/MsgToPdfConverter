@@ -385,13 +385,34 @@ namespace MsgToPdfConverter
                         : $"Processing completed. Total files: {SelectedFiles.Count}, Success: {success}, Failed: {fail}";
                 }
                 Console.WriteLine(statusMessage);
+                Console.WriteLine("[DEBUG] About to show completion dialog.");
                 // Ensure MessageBox is centered and on top, even if window is pinned
                 var mainWindow2 = Application.Current?.MainWindow;
                 bool wasTopmost2 = mainWindow2 != null && mainWindow2.Topmost;
+                // If minimized, restore before showing dialog
+                if (mainWindow2 != null)
+                {
+                    if (mainWindow2.WindowState == WindowState.Minimized)
+                    {
+                        Console.WriteLine("[DEBUG] Main window is minimized, restoring before dialog.");
+                        mainWindow2.WindowState = WindowState.Normal;
+                        mainWindow2.Show();
+                        mainWindow2.Activate();
+                    }
+                    // If window is hidden (tray), show and activate
+                    if (!mainWindow2.IsVisible)
+                    {
+                        Console.WriteLine("[DEBUG] Main window is not visible (tray), showing before dialog.");
+                        mainWindow2.Show();
+                        mainWindow2.WindowState = WindowState.Normal;
+                        mainWindow2.Activate();
+                    }
+                }
                 if (IsPinned && mainWindow2 != null) mainWindow2.Topmost = false;
                 // Use helper to center MessageBox within main window
                 MsgToPdfConverter.Utils.MessageBoxHelper.ShowCentered(mainWindow2, statusMessage, "Processing Results", MessageBoxButton.OK,
                     (fail > 0 && !CombineAllPdfs) ? MessageBoxImage.Warning : MessageBoxImage.Information);
+                Console.WriteLine("[DEBUG] Completion dialog closed.");
                 if (IsPinned && mainWindow2 != null) mainWindow2.Topmost = wasTopmost2;
             }
             catch (Exception ex)

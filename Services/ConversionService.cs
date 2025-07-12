@@ -804,22 +804,21 @@ namespace MsgToPdfConverter.Services
                 {
                     if (System.IO.Directory.Exists(baseTempDir))
                     {
-                        // Delete all files
                         foreach (var file in System.IO.Directory.GetFiles(baseTempDir, "*", SearchOption.AllDirectories))
                         {
                             try { System.IO.File.Delete(file); } catch { }
                         }
-                        // Delete all subfolders
                         foreach (var dir in System.IO.Directory.GetDirectories(baseTempDir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
                         {
                             try { System.IO.Directory.Delete(dir, true); } catch { }
                         }
-                        // Delete baseTempDir itself
                         try { System.IO.Directory.Delete(baseTempDir, true); } catch { }
                     }
                 }
                 catch { }
             }
+            Console.WriteLine("[DEBUG] ConversionService.ConvertFilesWithAttachments: Finished and returning.");
+            // Removed GC.Collect and GC.WaitForPendingFinalizers here to prevent freeze
             return (success, fail, processed, isCancellationRequested());
         }
 
