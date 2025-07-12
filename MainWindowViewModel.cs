@@ -482,24 +482,43 @@ namespace MsgToPdfConverter
                         if (string.IsNullOrEmpty(outputFolder))
                             return;
                         
-                        // Always use Outlook Inspector to save the correct MSG attachment
-                        Console.WriteLine("[DEBUG] Attempting to save child MSG using Outlook Inspector (direct SaveAsFile)...");
-                        var resultChildMsg = _outlookImportService.SaveChildMsgUsingInspector(attachmentName, outputFolder);
-                        if (!string.IsNullOrEmpty(resultChildMsg))
+                        // Extract child MSG attachments and warn if ambiguous
+                        var resultChildMsg = _outlookImportService.ExtractChildMsgFromDragDrop(data, outputFolder, FileService.SanitizeFileName, attachmentName);
+                        Console.WriteLine($"[DEBUG] Child MSG extraction result: Extracted={resultChildMsg.ExtractedFiles.Count}, Skipped={resultChildMsg.SkippedFiles.Count}");
+                        if (resultChildMsg.ExtractedFiles.Count > 1)
                         {
-                            if (!_selectedFiles.Contains(resultChildMsg))
+                            // Show warning to user about ambiguity
+                            var msgBoxWindow = Application.Current?.MainWindow;
+                            bool wasTopmost = msgBoxWindow != null && msgBoxWindow.Topmost;
+                            if (IsPinned && msgBoxWindow != null) msgBoxWindow.Topmost = false;
+                            MsgToPdfConverter.Utils.MessageBoxHelper.ShowCentered(msgBoxWindow,
+                                $"Warning: Multiple MSG attachments with the name '{attachmentName}' were found. All of them were extracted.",
+                                "Ambiguous MSG Extraction", MessageBoxButton.OK, MessageBoxImage.Warning);
+                            if (IsPinned && msgBoxWindow != null) msgBoxWindow.Topmost = wasTopmost;
+                        }
+                        if (resultChildMsg.ExtractedFiles.Count > 0)
+                        {
+                            foreach (var extractedFile in resultChildMsg.ExtractedFiles)
                             {
-                                _selectedFiles.Add(resultChildMsg);
-                                Console.WriteLine($"[DEBUG] Saved and added child MSG: {Path.GetFileName(resultChildMsg)}");
-                            }
-                            else
-                            {
-                                Console.WriteLine($"[DEBUG] Child MSG already in list: {Path.GetFileName(resultChildMsg)}");
+                                Console.WriteLine($"[DEBUG] Extracted file: {extractedFile}");
+                                if (!_selectedFiles.Contains(extractedFile))
+                                {
+                                    _selectedFiles.Add(extractedFile);
+                                    Console.WriteLine($"[DEBUG] Added child MSG to list: {Path.GetFileName(extractedFile)}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"[DEBUG] Child MSG already in list: {Path.GetFileName(extractedFile)}");
+                                }
                             }
                         }
                         else
                         {
-                            Console.WriteLine("[DEBUG] Failed to save child MSG using Inspector.");
+                            Console.WriteLine("[DEBUG] No files were extracted from child MSG");
+                        }
+                        if (resultChildMsg.SkippedFiles.Count > 0)
+                        {
+                            Console.WriteLine($"[DEBUG] Skipped files: {string.Join(", ", resultChildMsg.SkippedFiles)}");
                         }
                         return;
                     }
