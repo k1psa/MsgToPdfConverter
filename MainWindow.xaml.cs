@@ -119,7 +119,7 @@ namespace MsgToPdfConverter
 
         private void FilesListBox_DragEnter(object sender, DragEventArgs e)
         {
-            Console.WriteLine("FilesListBox_DragEnter event triggered");
+            // Removed noisy debug line
             if (e.Data.GetDataPresent(DataFormats.FileDrop) ||
                 e.Data.GetDataPresent("FileGroupDescriptorW") ||
                 e.Data.GetDataPresent("FileGroupDescriptor"))
@@ -133,7 +133,7 @@ namespace MsgToPdfConverter
         }
         private void FilesListBox_DragOver(object sender, DragEventArgs e)
         {
-            Console.WriteLine("FilesListBox_DragOver event triggered");
+            // Removed noisy debug line
             FilesListBox_DragEnter(sender, e);
         }
         private void FilesListBox_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
@@ -214,8 +214,12 @@ namespace MsgToPdfConverter
                 _trayIcon = null;
             }
             base.OnClosing(e);
+            // Ensure all background threads and tasks are stopped
+            System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeShutdown();
             // Ensure application exits cleanly
             Application.Current.Shutdown();
+            // As a last resort, force exit if still running
+            Environment.Exit(0);
         }
 
         private void RestoreFromTray()
@@ -244,6 +248,10 @@ namespace MsgToPdfConverter
                 }
                 this.Close();
                 Application.Current.Shutdown();
+                // Ensure all background threads and tasks are stopped
+                System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeShutdown();
+                // As a last resort, force exit if still running
+                Environment.Exit(0);
             });
         }
 

@@ -389,7 +389,7 @@ namespace MsgToPdfConverter.Services
                     {
                         // Save the inline image to a temp file
                         string ext = Path.GetExtension(att.FileName) ?? ".bin";
-                        string tempFile = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString() + ext);
+                        string tempFile = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), Guid.NewGuid().ToString() + ext);
                         File.WriteAllBytes(tempFile, att.Data);
                         tempFiles.Add(tempFile);
                         // Replace src="cid:..." with src="file:///..."
@@ -429,10 +429,11 @@ namespace MsgToPdfConverter.Services
             // Save HTML to temp file for debugging
             try
             {
-                string debugHtmlPath = Path.Combine(Path.GetTempPath(), $"debug_email_{DateTime.Now:yyyyMMdd_HHmmss}.html");
+                string debugHtmlPath = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), $"debug_email_{DateTime.Now:yyyyMMdd_HHmmss}.html");
                 File.WriteAllText(debugHtmlPath, html, System.Text.Encoding.UTF8);
                 Console.WriteLine($"[DEBUG-HTML] Saved generated HTML to: {debugHtmlPath}");
                 Console.WriteLine($"[DEBUG-HTML] Sample body content: {(body?.Length > 200 ? body.Substring(0, 200) + "..." : body)}");
+                tempFiles.Add(debugHtmlPath);
             }
             catch (Exception ex)
             {

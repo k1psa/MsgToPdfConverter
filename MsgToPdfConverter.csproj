@@ -9,9 +9,9 @@
     <StartupObject>MsgToPdfConverter.App</StartupObject>
     <PlatformTarget>x64</PlatformTarget>
     <ApplicationIcon>icon.ico</ApplicationIcon>    <!-- Version Information -->
-    <AssemblyVersion>1.5.0.0</AssemblyVersion>
-    <FileVersion>1.5.0.0</FileVersion>
-    <Version>1.5.0</Version>
+    <AssemblyVersion>1.6.0.0</AssemblyVersion>
+    <FileVersion>1.6.0.0</FileVersion>
+    <Version>1.6.0</Version>
     <AssemblyTitle>MSG to PDF Converter</AssemblyTitle>
     <AssemblyDescription>Converts Outlook .msg files to PDF format with Greek/Unicode character
       support</AssemblyDescription>

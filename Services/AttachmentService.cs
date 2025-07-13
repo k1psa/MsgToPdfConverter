@@ -111,6 +111,27 @@ namespace MsgToPdfConverter.Services
 
         public void ProcessMsgAttachmentsRecursively(Storage.Message msg, List<string> allPdfFiles, List<string> allTempFiles, string tempDir, bool extractOriginalOnly, int depth = 0, int maxDepth = 5, string headerText = null, List<string> parentChain = null, Action progressTick = null)
         {
+            if (msg == null)
+            {
+                Console.WriteLine($"[ERROR] Null Storage.Message passed to ProcessMsgAttachmentsRecursively.");
+                return;
+            }
+            if (allPdfFiles == null)
+            {
+                Console.WriteLine($"[ERROR] allPdfFiles is null in ProcessMsgAttachmentsRecursively.");
+                return;
+            }
+            if (allTempFiles == null)
+            {
+                Console.WriteLine($"[ERROR] allTempFiles is null in ProcessMsgAttachmentsRecursively.");
+                return;
+            }
+            if (tempDir == null)
+            {
+                Console.WriteLine($"[ERROR] tempDir is null in ProcessMsgAttachmentsRecursively.");
+                return;
+            }
+
             if (depth > maxDepth)
             {
                 Console.WriteLine($"[MSG] Max recursion depth {maxDepth} reached, skipping further processing");
@@ -120,6 +141,21 @@ namespace MsgToPdfConverter.Services
             {
                 parentChain = new List<string>();
             }
+
+            // Additional null checks for MSG properties
+            if (msg.Subject == null)
+            {
+                Console.WriteLine("[DEBUG] MSG subject is null.");
+            }
+            if (msg.Attachments == null)
+            {
+                Console.WriteLine("[DEBUG] MSG attachments collection is null.");
+            }
+            if (msg.BodyText == null && msg.BodyHtml == null)
+            {
+                Console.WriteLine("[DEBUG] MSG body is null (both text and HTML).");
+            }
+
             if (depth > 0)
             {
                 // For nested MSGs, process the body as a PDF (if not extractOriginalOnly)
@@ -127,11 +163,16 @@ namespace MsgToPdfConverter.Services
                 {
                     if (!extractOriginalOnly)
                     {
+                        // Use only the main temp folder for nested MSGs
                         var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(msg, false);
-                        string nestedHtmlPath = Path.Combine(tempDir, Guid.NewGuid() + "_nested.html");
-                        File.WriteAllText(nestedHtmlPath, htmlResult.Html, System.Text.Encoding.UTF8);
+                        if (string.IsNullOrEmpty(htmlResult.Html))
+                        {
+                            Console.WriteLine("[DEBUG] htmlResult.Html is null or empty for nested MSG.");
+                        }
+                        string nestedHtmlPath = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), Guid.NewGuid() + "_nested.html");
+                        File.WriteAllText(nestedHtmlPath, htmlResult.Html ?? string.Empty, System.Text.Encoding.UTF8);
                         allTempFiles.Add(nestedHtmlPath);
-                        string nestedPdf = Path.Combine(tempDir, Guid.NewGuid() + "_nested.pdf");
+                        string nestedPdf = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), Guid.NewGuid() + "_nested.pdf");
                         var psi = new System.Diagnostics.ProcessStartInfo
                         {
                             FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
@@ -201,90 +242,26 @@ namespace MsgToPdfConverter.Services
                 }
             }
 
-            // DEDUPLICATION: Group by base filename and prefer Office files over PDFs
-            var attachmentsToSkip = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var duplicateGroups = allAttachments
-                .GroupBy(a => Path.GetFileNameWithoutExtension(a.FileName ?? ""), StringComparer.OrdinalIgnoreCase)
-                .Where(g => g.Count() > 1)
-                .ToList();
-
-            foreach (var group in duplicateGroups)
-            {
-                var groupList = group.ToList();
-                Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Found {groupList.Count} files with base name '{group.Key}':");
-                
-                foreach (var att in groupList)
-                {
-                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} -   {att.FileName}");
-                }
-
-                var officeFiles = groupList.Where(a => {
-                    var ext = Path.GetExtension(a.FileName ?? "").ToLowerInvariant();
-                    return ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx";
-                }).ToList();
-
-                var pdfFiles = groupList.Where(a => {
-                    var ext = Path.GetExtension(a.FileName ?? "").ToLowerInvariant();
-                    return ext == ".pdf";
-                }).ToList();
-
-                // If we have both Office and PDF files, prefer Office files (they may contain embedded objects)
-                if (officeFiles.Count > 0 && pdfFiles.Count > 0)
-                {
-                    // Keep the first Office file, skip all PDF files
-                    var keepOfficeFile = officeFiles.First();
-                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Keeping Office file: {keepOfficeFile.FileName}");
-                    
-                    foreach (var pdfFile in pdfFiles)
-                    {
-                        Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Skipping PDF duplicate: {pdfFile.FileName}");
-                        attachmentsToSkip.Add(pdfFile.FileName ?? "");
-                    }
-                    
-                    // If there are multiple Office files, keep only the first one
-                    for (int i = 1; i < officeFiles.Count; i++)
-                    {
-                        Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Skipping duplicate Office file: {officeFiles[i].FileName}");
-                        attachmentsToSkip.Add(officeFiles[i].FileName ?? "");
-                    }
-                }
-                else if (officeFiles.Count > 1)
-                {
-                    // Multiple Office files with same base name - keep first one
-                    var keepOfficeFile = officeFiles.First();
-                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Keeping first Office file: {keepOfficeFile.FileName}");
-                    
-                    for (int i = 1; i < officeFiles.Count; i++)
-                    {
-                        Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Skipping duplicate Office file: {officeFiles[i].FileName}");
-                        attachmentsToSkip.Add(officeFiles[i].FileName ?? "");
-                    }
-                }
-                else if (pdfFiles.Count > 1)
-                {
-                    // Multiple PDF files with same base name - keep first one
-                    var keepPdfFile = pdfFiles.First();
-                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Keeping first PDF file: {keepPdfFile.FileName}");
-                    
-                    for (int i = 1; i < pdfFiles.Count; i++)
-                    {
-                        Console.WriteLine($"[MSG-DEDUP] Depth {depth} - Skipping duplicate PDF file: {pdfFiles[i].FileName}");
-                        attachmentsToSkip.Add(pdfFiles[i].FileName ?? "");
-                    }
-                }
-            }
-
-            // Build final lists, skipping duplicates
+            // Deduplication only applies within the current attachment group, not across hierarchy boundaries.
+            // If two files have the same name but come from different sources (e.g., one outside and one inside a nested MSG/ZIP/7z), both are processed independently.
+            // Only skip true duplicates within the same attachment list (e.g., two identical files attached to the same email).
+            var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var a in allAttachments)
             {
-                if (attachmentsToSkip.Contains(a.FileName ?? ""))
+                if (a.FileName == null)
                 {
-                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} - SKIPPING (as planned): {a.FileName}");
+                    typedAttachments.Add(a);
                     continue;
                 }
-
-                Console.WriteLine($"[MSG] Depth {depth} - Including attachment for processing: {a.FileName}");
-                typedAttachments.Add(a);
+                if (!seenNames.Contains(a.FileName))
+                {
+                    typedAttachments.Add(a);
+                    seenNames.Add(a.FileName);
+                }
+                else
+                {
+                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} - SKIPPING true duplicate: {a.FileName}");
+                }
             }
 
             // Handle nested messages
@@ -331,6 +308,27 @@ namespace MsgToPdfConverter.Services
 
         public string ProcessSingleAttachment(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles)
         {
+            if (att == null)
+            {
+                Console.WriteLine($"[ERROR] Null Storage.Attachment passed to ProcessSingleAttachment.");
+                return null;
+            }
+            if (attPath == null)
+            {
+                Console.WriteLine($"[ERROR] attPath is null in ProcessSingleAttachment.");
+                return null;
+            }
+            if (tempDir == null)
+            {
+                Console.WriteLine($"[ERROR] tempDir is null in ProcessSingleAttachment.");
+                return null;
+            }
+            if (allTempFiles == null)
+            {
+                Console.WriteLine($"[ERROR] allTempFiles is null in ProcessSingleAttachment.");
+                return null;
+            }
+
             string attName = att.FileName ?? "attachment";
             string ext = Path.GetExtension(attName).ToLowerInvariant();
             string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
@@ -426,6 +424,27 @@ namespace MsgToPdfConverter.Services
 
         public string ProcessZipAttachmentWithHierarchy(string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false, Action progressTick = null)
         {
+            if (attPath == null)
+            {
+                Console.WriteLine($"[ERROR] attPath is null in ProcessZipAttachmentWithHierarchy.");
+                return null;
+            }
+            if (tempDir == null)
+            {
+                Console.WriteLine($"[ERROR] tempDir is null in ProcessZipAttachmentWithHierarchy.");
+                return null;
+            }
+            if (allTempFiles == null)
+            {
+                Console.WriteLine($"[ERROR] allTempFiles is null in ProcessZipAttachmentWithHierarchy.");
+                return null;
+            }
+            if (parentChain == null)
+            {
+                Console.WriteLine($"[ERROR] parentChain is null in ProcessZipAttachmentWithHierarchy.");
+                return null;
+            }
+
             try
             {
                 Console.WriteLine($"[ZIP] Processing ZIP file: {attPath}");
@@ -1014,99 +1033,163 @@ namespace MsgToPdfConverter.Services
             }
             else
             {
-                // For standalone files, use the file name from the path
                 attName = Path.GetFileName(attPath) ?? "file";
             }
-            
+
             string ext = Path.GetExtension(attName).ToLowerInvariant();
             string attPdf = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(attName) + ".pdf");
             string finalAttachmentPdf = null;
 
             try
             {
+                // Ensure tempDir exists before any file operations
+                if (!Directory.Exists(tempDir))
+                {
+                    Directory.CreateDirectory(tempDir);
+                }
                 if (ext == ".pdf")
                 {
-                    // Return PDF directly without header
-                    finalAttachmentPdf = attPath;
-                }
-                else if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".gif")
-                {
-                    // Create image-only PDF without header
-                    // 1. Create header PDF (with hierarchy graphic/text)
-                    // string headerPdf = Path.Combine(tempDir, Guid.NewGuid() + "_header.pdf");
-                    // CreateHierarchyHeaderPdf(parentChain, currentItem, headerText, headerPdf);
-                    // 2. Create image-only PDF
-                    string imagePdf = Path.Combine(tempDir, Guid.NewGuid() + "_image.pdf");
-                    using (var writer = new iText.Kernel.Pdf.PdfWriter(imagePdf))
-                    using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
-                    using (var docImg = new iText.Layout.Document(pdf))
+                    // If dropped file is a PDF, copy it to temp/output folder as a new file
+                    string outputPdf = Path.Combine(tempDir, Guid.NewGuid() + "_copy.pdf");
+                    if (File.Exists(attPath))
                     {
-                        var imgData = iText.IO.Image.ImageDataFactory.Create(attPath);
-                        var image = new iText.Layout.Element.Image(imgData);
-                        docImg.Add(image);
+                        File.Copy(attPath, outputPdf, true);
+                        finalAttachmentPdf = outputPdf;
+                        allTempFiles.Add(finalAttachmentPdf);
                     }
-                    // 3. Merge header and image PDF
-                    finalAttachmentPdf = imagePdf;
-                    // finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_merged.pdf");
-                    // _appendPdfs(new List<string> { headerPdf, imagePdf }, finalAttachmentPdf);
-                    // allTempFiles.Add(headerPdf);
-                    // allTempFiles.Add(imagePdf);
-                    allTempFiles.Add(finalAttachmentPdf);
-                }
-                else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
-                {
-                    // Set progress callback for embedding operations
-                    if (progressTick != null)
+                    else
                     {
-                        PdfEmbeddedInsertionService.SetProgressCallback(progressTick);
+                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
+                        _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Source PDF not found)", null);
+                        allTempFiles.Add(finalAttachmentPdf);
                     }
-                    
-                    if (_tryConvertOfficeToPdf(attPath, attPdf))
+                }
+                else if (ext == ".msg")
+                {
+                    // If dropped file is a MSG, process it as a nested message
+                    if (File.Exists(attPath))
                     {
-                        // Return converted PDF directly without header
-                        finalAttachmentPdf = attPdf;
-                        allTempFiles.Add(attPdf);
-                        // --- Embedded OLE/Package extraction ---
-                        if (File.Exists(attPath))
+                        using (var nestedMsg = new Storage.Message(attPath))
                         {
-                            // Extract embedded objects but don't call progress ticks yet
-                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, null);
-                            Console.WriteLine($"[OFFICE-PROGRESS] File {attName} has {embeddedCount} embedded objects");
-                            
-                            // If this file has embedded objects, the progress ticks will be called 
-                            // during PDF insertion operations. If no embedded objects, call tick once.
-                            if (embeddedCount == 0 && progressTick != null)
+                            var nestedPdfFiles = new List<string>();
+                            var nestedTempFiles = new List<string>();
+                            ProcessMsgAttachmentsRecursively(nestedMsg, nestedPdfFiles, nestedTempFiles, tempDir, extractOriginalOnly, 1, 5, $"Nested Email: {nestedMsg.Subject ?? attName}", new List<string>(parentChain));
+                            allTempFiles.AddRange(nestedTempFiles);
+                            if (nestedPdfFiles.Count > 0)
                             {
-                                progressTick();
-                                Console.WriteLine($"[OFFICE-PROGRESS] Called progress tick for {attName} (no embedded objects)");
+                                if (nestedPdfFiles.Count == 1)
+                                {
+                                    finalAttachmentPdf = nestedPdfFiles[0];
+                                }
+                                else
+                                {
+                                    finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_msg_merged.pdf");
+                                    _appendPdfs(nestedPdfFiles, finalAttachmentPdf);
+                                    allTempFiles.Add(finalAttachmentPdf);
+                                }
                             }
-                            // For files with embedded objects, progress ticks will be called during 
-                            // PDF insertion operations (one tick per embedded object)
+                            else
+                            {
+                                finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_msg_error.pdf");
+                                _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(No content could be extracted)", null);
+                                allTempFiles.Add(finalAttachmentPdf);
+                            }
                         }
                     }
                     else
                     {
-                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
-                        _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Conversion failed)", null);
+                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_msg_error.pdf");
+                        _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Source MSG not found)", null);
                         allTempFiles.Add(finalAttachmentPdf);
                     }
-                    
-                    // Clear progress callback
+                }
+                else if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp" || ext == ".gif")
+                {
+                    if (File.Exists(attPath))
+                    {
+                        string imagePdf = Path.Combine(tempDir, Guid.NewGuid() + "_image.pdf");
+                        using (var writer = new iText.Kernel.Pdf.PdfWriter(imagePdf))
+                        using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
+                        using (var docImg = new iText.Layout.Document(pdf))
+                        {
+                            var imgData = iText.IO.Image.ImageDataFactory.Create(attPath);
+                            var image = new iText.Layout.Element.Image(imgData);
+                            docImg.Add(image);
+                        }
+                        finalAttachmentPdf = imagePdf;
+                        allTempFiles.Add(finalAttachmentPdf);
+                    }
+                    else
+                    {
+                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_image_error.pdf");
+                        _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Source image not found)", null);
+                        allTempFiles.Add(finalAttachmentPdf);
+                    }
+                }
+                else if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
+                {
+                    if (progressTick != null)
+                    {
+                        PdfEmbeddedInsertionService.SetProgressCallback(progressTick);
+                    }
+                    if (File.Exists(attPath))
+                    {
+                        if (_tryConvertOfficeToPdf(attPath, attPdf))
+                        {
+                            finalAttachmentPdf = attPdf;
+                            allTempFiles.Add(attPdf);
+                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, null);
+                            if (embeddedCount == 0 && progressTick != null)
+                            {
+                                progressTick();
+                            }
+                        }
+                        else
+                        {
+                            finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_placeholder.pdf");
+                            _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Conversion failed)", null);
+                            allTempFiles.Add(finalAttachmentPdf);
+                        }
+                    }
+                    else
+                    {
+                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_office_error.pdf");
+                        _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Source Office file not found)", null);
+                        allTempFiles.Add(finalAttachmentPdf);
+                    }
                     PdfEmbeddedInsertionService.SetProgressCallback(null);
                 }
                 else if (ext == ".zip")
                 {
-                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, progressTick);
-                    if (finalAttachmentPdf != null)
+                    if (File.Exists(attPath))
                     {
+                        finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, progressTick);
+                        if (finalAttachmentPdf != null)
+                        {
+                            allTempFiles.Add(finalAttachmentPdf);
+                        }
+                    }
+                    else
+                    {
+                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_error.pdf");
+                        _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Source ZIP not found)", null);
                         allTempFiles.Add(finalAttachmentPdf);
                     }
                 }
                 else if (ext == ".7z")
                 {
-                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, progressTick);
-                    if (finalAttachmentPdf != null)
+                    if (File.Exists(attPath))
                     {
+                        finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, progressTick);
+                        if (finalAttachmentPdf != null)
+                        {
+                            allTempFiles.Add(finalAttachmentPdf);
+                        }
+                    }
+                    else
+                    {
+                        finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_error.pdf");
+                        _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Source 7z not found)", null);
                         allTempFiles.Add(finalAttachmentPdf);
                     }
                 }

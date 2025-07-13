@@ -91,31 +91,69 @@ namespace MsgToPdfConverter.Services
                     var fileGroupStream = (MemoryStream)data.GetData("FileGroupDescriptorW");
                     fileGroupStream.Position = 0;
                     var fileNames = GetFileNamesFromFileGroupDescriptorW(fileGroupStream);
+                    System.Diagnostics.Debug.WriteLine($"[OutlookImportService] FileGroupDescriptorW present. Attachment count: {fileNames.Length}");
+                    // Track hashes of already saved files in outputFolder
+                    var existingFiles = Directory.GetFiles(outputFolder);
+                    var existingHashes = new HashSet<string>();
+                    foreach (var file in existingFiles)
+                    {
+                        try
+                        {
+                            using (var stream = File.OpenRead(file))
+                            using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                            {
+                                var hash = sha256.ComputeHash(stream);
+                                string hashStr = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                                existingHashes.Add(hashStr);
+                            }
+                        }
+                        catch { }
+                    }
                     for (int i = 0; i < fileNames.Length; i++)
                     {
                         string originalName = fileNames[i];
                         string safeName = sanitizeFileName(Path.GetFileName(originalName));
                         string destPath = Path.Combine(outputFolder, safeName);
                         int counter = 1;
-                        while (File.Exists(destPath))
-                        {
-                            string nameWithoutExt = Path.GetFileNameWithoutExtension(safeName);
-                            string ext = Path.GetExtension(safeName);
-                            string uniqueFileName = $"{nameWithoutExt}_{counter}{ext}";
-                            destPath = Path.Combine(outputFolder, uniqueFileName);
-                            counter++;
-                        }
                         // The actual file data is in the FileContents stream
                         string fileContentsFormat = i == 0 ? "FileContents" : $"FileContents{i}";
-                        if (data.GetDataPresent(fileContentsFormat))
+                        bool hasFileContents = data.GetDataPresent(fileContentsFormat);
+                        System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Attachment {i}: {originalName}, FileContentsFormat: {fileContentsFormat}, HasFileContents: {hasFileContents}");
+                        if (hasFileContents)
                         {
                             using (var fileStream = (MemoryStream)data.GetData(fileContentsFormat))
-                            using (var outStream = File.Create(destPath))
                             {
-                                fileStream.WriteTo(outStream);
+                                // Compute hash of incoming file
+                                fileStream.Position = 0;
+                                using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                                {
+                                    var hash = sha256.ComputeHash(fileStream);
+                                    string hashStr = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                                    if (existingHashes.Contains(hashStr))
+                                    {
+                                        result.SkippedFiles.Add(originalName);
+                                        System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Skipped saving duplicate attachment (identical content): {originalName}");
+                                        continue;
+                                    }
+                                    existingHashes.Add(hashStr);
+                                }
+                                fileStream.Position = 0;
+                                // Find a unique file name
+                                while (File.Exists(destPath))
+                                {
+                                    string nameWithoutExt = Path.GetFileNameWithoutExtension(safeName);
+                                    string ext = Path.GetExtension(safeName);
+                                    string uniqueFileName = $"{nameWithoutExt}_{counter}{ext}";
+                                    destPath = Path.Combine(outputFolder, uniqueFileName);
+                                    counter++;
+                                }
+                                using (var outStream = File.Create(destPath))
+                                {
+                                    fileStream.WriteTo(outStream);
+                                }
+                                result.ExtractedFiles.Add(destPath);
+                                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Saved attachment: {destPath}");
                             }
-                            result.ExtractedFiles.Add(destPath);
-                            System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Saved attachment: {destPath}");
                         }
                         else
                         {
@@ -127,6 +165,7 @@ namespace MsgToPdfConverter.Services
                 else
                 {
                     result.SkippedFiles.Add("No FileGroupDescriptorW present");
+                    System.Diagnostics.Debug.WriteLine($"[OutlookImportService] No FileGroupDescriptorW present in drop data.");
                 }
             }
             catch (Exception ex)
@@ -134,6 +173,270 @@ namespace MsgToPdfConverter.Services
                 System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Exception extracting attachment: {ex.Message}");
                 result.SkippedFiles.Add("Attachment could not be extracted: " + ex.Message);
             }
+            return result;
+        }
+
+        public OutlookImportResult ExtractChildMsgFromDragDrop(IDataObject data, string outputFolder, Func<string, string> sanitizeFileName, string expectedFileName)
+        {
+            var result = new OutlookImportResult();
+            Console.WriteLine("[OutlookImportService] Starting child MSG extraction (hash-based)...");
+            try
+            {
+                // 1. Get hash of dragged MSG data
+                string draggedMsgHash = null;
+                byte[] draggedBytes = null;
+                Stream draggedStream = null;
+                object fileContentsObj = null;
+                object fileContents0Obj = null;
+                bool fileContentsPresent = data.GetDataPresent("FileContents");
+                bool fileContents0Present = data.GetDataPresent("FileContents0");
+                Console.WriteLine($"[OutlookImportService] FileContents present: {fileContentsPresent}");
+                Console.WriteLine($"[OutlookImportService] FileContents0 present: {fileContents0Present}");
+                if (fileContentsPresent)
+                {
+                    fileContentsObj = data.GetData("FileContents");
+                    if (fileContentsObj == null)
+                    {
+                        Console.WriteLine("[OutlookImportService] FileContents value is null");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[OutlookImportService] FileContents type: {fileContentsObj.GetType().FullName}");
+                        try
+                        {
+                            if (fileContentsObj is MemoryStream ms)
+                            {
+                                Console.WriteLine($"[OutlookImportService] FileContents MemoryStream length: {ms.Length}");
+                                draggedStream = ms;
+                            }
+                            else if (fileContentsObj is Stream s)
+                            {
+                                Console.WriteLine($"[OutlookImportService] FileContents Stream length: {s.Length}");
+                                draggedStream = s;
+                            }
+                            else if (fileContentsObj is byte[] arr)
+                            {
+                                Console.WriteLine($"[OutlookImportService] FileContents byte[] length: {arr.Length}");
+                                draggedBytes = arr;
+                            }
+                            else
+                            {
+                                Console.WriteLine("[OutlookImportService] FileContents is of unknown type");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[OutlookImportService] Exception reading FileContents: {ex.Message}");
+                        }
+                    }
+                }
+                else if (fileContents0Present)
+                {
+                    fileContents0Obj = data.GetData("FileContents0");
+                    if (fileContents0Obj == null)
+                    {
+                        Console.WriteLine("[OutlookImportService] FileContents0 value is null");
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[OutlookImportService] FileContents0 type: {fileContents0Obj.GetType().FullName}");
+                        try
+                        {
+                            if (fileContents0Obj is MemoryStream ms)
+                            {
+                                Console.WriteLine($"[OutlookImportService] FileContents0 MemoryStream length: {ms.Length}");
+                                draggedStream = ms;
+                            }
+                            else if (fileContents0Obj is Stream s)
+                            {
+                                Console.WriteLine($"[OutlookImportService] FileContents0 Stream length: {s.Length}");
+                                draggedStream = s;
+                            }
+                            else if (fileContents0Obj is byte[] arr)
+                            {
+                                Console.WriteLine($"[OutlookImportService] FileContents0 byte[] length: {arr.Length}");
+                                draggedBytes = arr;
+                            }
+                            else
+                            {
+                                Console.WriteLine("[OutlookImportService] FileContents0 is of unknown type");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[OutlookImportService] Exception reading FileContents0: {ex.Message}");
+                        }
+                    }
+                }
+                if (draggedStream != null)
+                {
+                    draggedStream.Position = 0;
+                    using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                    {
+                        var hash = sha256.ComputeHash(draggedStream);
+                        draggedMsgHash = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                    }
+                }
+                else if (draggedBytes != null)
+                {
+                    using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                    {
+                        var hash = sha256.ComputeHash(draggedBytes);
+                        draggedMsgHash = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                    }
+                }
+                var outlookApp = System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application") as Microsoft.Office.Interop.Outlook.Application;
+                if (outlookApp != null)
+                {
+                    Microsoft.Office.Interop.Outlook.MailItem parentMailItem = null;
+                    var inspector = outlookApp.ActiveInspector();
+                    if (inspector != null && inspector.CurrentItem is Microsoft.Office.Interop.Outlook.MailItem mailItemInspector)
+                    {
+                        parentMailItem = mailItemInspector;
+                        Console.WriteLine("[OutlookImportService] Using ActiveInspector for child MSG extraction.");
+                    }
+                    else
+                    {
+                        var explorer = outlookApp.ActiveExplorer();
+                        if (explorer != null && explorer.Selection != null && explorer.Selection.Count > 0)
+                        {
+                            var selectedItem = explorer.Selection[1];
+                            if (selectedItem is Microsoft.Office.Interop.Outlook.MailItem mailItemExplorer)
+                            {
+                                parentMailItem = mailItemExplorer;
+                                Console.WriteLine("[OutlookImportService] Using ActiveExplorer selection for child MSG extraction.");
+                            }
+                        }
+                    }
+                    if (parentMailItem != null)
+                    {
+                        if (draggedMsgHash != null)
+                        {
+                            bool found = false;
+                            for (int i = 1; i <= parentMailItem.Attachments.Count; i++)
+                            {
+                                var attachment = parentMailItem.Attachments[i];
+                                string attName = attachment.FileName?.Trim();
+                                if (attachment.Type == Microsoft.Office.Interop.Outlook.OlAttachmentType.olEmbeddeditem && attName != null && attName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
+                                {
+                                    // Save to temp file
+                                    string tempPath = Path.GetTempFileName();
+                                    string tempMsgPath = Path.ChangeExtension(tempPath, ".msg");
+                                    try
+                                    {
+                                        attachment.SaveAsFile(tempMsgPath);
+                                        // Compute hash
+                                        using (var fileStream = File.OpenRead(tempMsgPath))
+                                        using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                                        {
+                                            var hash = sha256.ComputeHash(fileStream);
+                                            string attHash = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                                            Console.WriteLine($"[OutlookImportService] Attachment '{attName}' hash: {attHash}");
+                                            if (attHash == draggedMsgHash)
+                                            {
+                                                // Found the correct attachment
+                                                string safeFileName = sanitizeFileName(attName);
+                                                string destPath = Path.Combine(outputFolder, safeFileName);
+                                                int counter = 1;
+                                                while (File.Exists(destPath))
+                                                {
+                                                    string nameWithoutExt = Path.GetFileNameWithoutExtension(safeFileName);
+                                                    string ext = Path.GetExtension(safeFileName);
+                                                    string uniqueFileName = $"{nameWithoutExt}_{counter}{ext}";
+                                                    destPath = Path.Combine(outputFolder, uniqueFileName);
+                                                    counter++;
+                                                }
+                                                File.Copy(tempMsgPath, destPath, true);
+                                                result.ExtractedFiles.Add(destPath);
+                                                Console.WriteLine($"[OutlookImportService] Successfully saved child MSG (hash match): {destPath}");
+                                                found = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[OutlookImportService] Error saving/checking attachment '{attName}': {ex.Message}");
+                                    }
+                                    finally
+                                    {
+                                        try { if (File.Exists(tempMsgPath)) File.Delete(tempMsgPath); } catch { }
+                                        try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                                    }
+                                }
+                            }
+                            if (!found)
+                            {
+                                result.SkippedFiles.Add($"No matching child MSG found by hash for: {expectedFileName}");
+                            }
+                        }
+                        else
+                        {
+                            // Fallback: extract all MSG attachments with matching name
+                            int extractedCount = 0;
+                            for (int i = 1; i <= parentMailItem.Attachments.Count; i++)
+                            {
+                                var attachment = parentMailItem.Attachments[i];
+                                string attName = attachment.FileName?.Trim();
+                                if (attachment.Type == Microsoft.Office.Interop.Outlook.OlAttachmentType.olEmbeddeditem && attName != null && attName.Equals(expectedFileName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    string tempPath = Path.GetTempFileName();
+                                    string tempMsgPath = Path.ChangeExtension(tempPath, ".msg");
+                                    try
+                                    {
+                                        attachment.SaveAsFile(tempMsgPath);
+                                        string safeFileName = sanitizeFileName(attName);
+                                        string destPath = Path.Combine(outputFolder, safeFileName);
+                                        int counter = 1;
+                                        while (File.Exists(destPath))
+                                        {
+                                            string nameWithoutExt = Path.GetFileNameWithoutExtension(safeFileName);
+                                            string ext = Path.GetExtension(safeFileName);
+                                            string uniqueFileName = $"{nameWithoutExt}_{counter}{ext}";
+                                            destPath = Path.Combine(outputFolder, uniqueFileName);
+                                            counter++;
+                                        }
+                                        File.Copy(tempMsgPath, destPath, true);
+                                        result.ExtractedFiles.Add(destPath);
+                                        Console.WriteLine($"[OutlookImportService] Fallback: saved child MSG by name: {destPath}");
+                                        extractedCount++;
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Console.WriteLine($"[OutlookImportService] Error saving fallback attachment '{attName}': {ex.Message}");
+                                    }
+                                    finally
+                                    {
+                                        try { if (File.Exists(tempMsgPath)) File.Delete(tempMsgPath); } catch { }
+                                        try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                                    }
+                                }
+                            }
+                            if (extractedCount > 1)
+                            {
+                                Console.WriteLine($"[OutlookImportService] Fallback: Multiple child MSGs with same name extracted: {extractedCount}");
+                            }
+                            if (extractedCount == 0)
+                            {
+                                result.SkippedFiles.Add($"No child MSG found by name for: {expectedFileName}");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        result.SkippedFiles.Add("No active inspector, no valid explorer selection, or current item is not a MailItem");
+                    }
+                }
+                else
+                {
+                    result.SkippedFiles.Add("Outlook app not found");
+                }
+            }
+            catch (Exception ex)
+            {
+                result.SkippedFiles.Add("Child MSG could not be extracted: " + ex.Message);
+            }
+            Console.WriteLine($"[OutlookImportService] Child MSG extraction complete. Found {result.ExtractedFiles.Count} files, skipped {result.SkippedFiles.Count}");
             return result;
         }
 

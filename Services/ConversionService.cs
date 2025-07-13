@@ -62,63 +62,265 @@ namespace MsgToPdfConverter.Services
         )
         {
             int success = 0, fail = 0, processed = 0;
-            for (int i = 0; i < selectedFiles.Count; i++)
+            // Always use a single temp folder for all temp/intermediate files
+            string baseTempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MsgToPdfConverter");
+            System.IO.Directory.CreateDirectory(baseTempDir);
+            string sessionTempDir = baseTempDir;
+            // Track all temp files created during this session
+            var sessionTempFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            try
             {
-                if (isCancellationRequested())
-                    break;
-                processed++;
-                string filePath = selectedFiles[i];
-                bool conversionSucceeded = false;
-                try
+                for (int i = 0; i < selectedFiles.Count; i++)
                 {
-                    updateProgress(processed, selectedFiles.Count, i, $"Processing file {processed}/{selectedFiles.Count}: {System.IO.Path.GetFileName(selectedFiles[i])}");
-                    string ext = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
-                    string dir = !string.IsNullOrEmpty(selectedOutputFolder) ? selectedOutputFolder : System.IO.Path.GetDirectoryName(filePath);
-                    string baseName = System.IO.Path.GetFileNameWithoutExtension(filePath);
-                    if (ext == ".msg")
+                    if (isCancellationRequested())
+                        break;
+                    processed++;
+                    string filePath = selectedFiles[i];
+                    bool conversionSucceeded = false;
+                    try
                     {
-                        if (appendAttachments)
+                        Console.WriteLine($"[DEBUG] Starting conversion for file index {i}: {filePath}");
+                        Console.WriteLine($"[DEBUG] appendAttachments={appendAttachments}, selectedOutputFolder={selectedOutputFolder}, extractOriginalOnly={extractOriginalOnly}, combineAllPdfs={combineAllPdfs}");
+                        if (string.IsNullOrWhiteSpace(filePath))
                         {
-                            Storage.Message msg = null;
-                            try
+                            showMessageBox($"[ERROR] Skipping null or empty file path at index {i}.");
+                            fail++;
+                            continue;
+                        }
+                        if (!System.IO.File.Exists(filePath))
+                        {
+                            showMessageBox($"[ERROR] File does not exist: {filePath}");
+                            fail++;
+                            continue;
+                        }
+                        string extCheck = System.IO.Path.GetExtension(filePath)?.ToLowerInvariant();
+                        if (string.IsNullOrEmpty(extCheck))
+                        {
+                            showMessageBox($"[ERROR] Could not determine extension for: {filePath}");
+                            fail++;
+                            continue;
+                        }
+                        // ...existing code...
+                    {
+                        updateProgress(processed, selectedFiles.Count, i, $"Processing file {processed}/{selectedFiles.Count}: {System.IO.Path.GetFileName(selectedFiles[i])}");
+                        string ext = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
+                        string dir = !string.IsNullOrEmpty(selectedOutputFolder) ? selectedOutputFolder : System.IO.Path.GetDirectoryName(filePath);
+                        string baseName = System.IO.Path.GetFileNameWithoutExtension(filePath);
+                        // Use sessionTempDir for all temp/intermediate files
+                        if (ext == ".msg")
+                        {
+                            if (appendAttachments)
                             {
-                                msg = new Storage.Message(filePath);
-                                // --- Set up progress max for this file ---
-                                int fileProgress = 0;
-                                int totalCount = attachmentService.CountAllProcessableItems(msg);
-                                updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
-                                // ---
-                                string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
-                                string msgBaseName = System.IO.Path.GetFileNameWithoutExtension(filePath);
-                                string msgDir = !string.IsNullOrEmpty(selectedOutputFolder) ? selectedOutputFolder : System.IO.Path.GetDirectoryName(filePath);
-                                
-                                // Generate unique PDF filename to avoid conflicts when files have same base name but different extensions
-                                string uniquePdfName = GenerateUniquePdfFileName(filePath, msgDir, selectedFiles);
-                                string pdfBaseName = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName);
-                                string pdfFilePath = System.IO.Path.Combine(msgDir, $"{pdfBaseName} - {datePart}.pdf");
-                                if (System.IO.File.Exists(pdfFilePath))
-                                    System.IO.File.Delete(pdfFilePath);
-                                var htmlResult = emailService.BuildEmailHtmlWithInlineImages(msg, false);
-                                string htmlWithHeader = htmlResult.Html;
-                                var tempHtmlPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid() + ".html");
-                                System.IO.File.WriteAllText(tempHtmlPath, htmlWithHeader, System.Text.Encoding.UTF8);
-                                var inlineContentIds = emailService.GetInlineContentIds(htmlWithHeader);
-                                var psi = new System.Diagnostics.ProcessStartInfo
+                                Storage.Message msg = null;
+                                try
                                 {
-                                    FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName,
-                                    Arguments = $"--html2pdf \"{tempHtmlPath}\" \"{pdfFilePath}\"",
-                                    UseShellExecute = false,
-                                    CreateNoWindow = true,
-                                    RedirectStandardOutput = true,
-                                    RedirectStandardError = true
-                                };
-                                var proc = System.Diagnostics.Process.Start(psi);
-                                proc.WaitForExit();
-                                System.IO.File.Delete(tempHtmlPath);
-                                if (proc.ExitCode != 0)
-                                    throw new Exception($"HtmlToPdfWorker failed: {proc.StandardError.ReadToEnd()}");
-                                GC.Collect();
-                                GC.WaitForPendingFinalizers();
+                                    try {
+                                        msg = new Storage.Message(filePath);
+                                    } catch (Exception msgEx) {
+                                        showMessageBox($"[ERROR] Exception loading MSG file: {filePath} - {msgEx.Message}");
+                                        fail++;
+                                        continue;
+                                    }
+            Console.WriteLine($"[DEBUG] msg loaded: {{Subject={msg?.Subject}, Sender={msg?.Sender}, SentOn={msg?.SentOn}, Attachments={(msg?.Attachments == null ? "null" : msg.Attachments.Count.ToString())}}}");
+            if (msg == null)
+            {
+                showMessageBox($"[ERROR] Failed to load MSG file: {filePath}");
+                fail++;
+                continue;
+            }
+            if (appendAttachments && (msg.Attachments == null || msg.Attachments.Count == 0))
+            {
+                Console.WriteLine($"[DEBUG] No attachments to process for file: {filePath}. Will convert main message body only.");
+                // Always convert the main message body to PDF
+                string datePart_noatt = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
+                string msgBaseName_noatt = System.IO.Path.GetFileNameWithoutExtension(filePath);
+                string msgDir_noatt = baseTempDir;
+                string pdfFilePath_noatt = System.IO.Path.Combine(msgDir_noatt, $"{msgBaseName_noatt} - {datePart_noatt}.pdf");
+                string outputPdf_noatt = System.IO.Path.Combine(dir, $"{msgBaseName_noatt} - {datePart_noatt}.pdf");
+                if (System.IO.File.Exists(pdfFilePath_noatt))
+                    System.IO.File.Delete(pdfFilePath_noatt);
+                var htmlResult_noatt = emailService.BuildEmailHtmlWithInlineImages(msg, false);
+                if (emailService == null)
+                {
+                    showMessageBox($"[ERROR] emailService is null when building HTML for MSG file: {filePath}");
+                    fail++;
+                    continue;
+                }
+                if (string.IsNullOrEmpty(htmlResult_noatt.Html))
+                {
+                    showMessageBox($"[ERROR] Failed to build HTML for MSG file: {filePath}");
+                    fail++;
+                    continue;
+                }
+                string htmlWithHeader_noatt = htmlResult_noatt.Html;
+                var tempHtmlPath_noatt = System.IO.Path.Combine(baseTempDir, Guid.NewGuid() + ".html");
+                if (string.IsNullOrEmpty(tempHtmlPath_noatt))
+                {
+                    showMessageBox($"[ERROR] tempHtmlPath is null or empty for MSG file: {filePath}");
+                    fail++;
+                    continue;
+                }
+                if (string.IsNullOrEmpty(pdfFilePath_noatt))
+                {
+                    showMessageBox($"[ERROR] pdfFilePath is null or empty for MSG file: {filePath}");
+                    fail++;
+                    continue;
+                }
+                System.IO.File.WriteAllText(tempHtmlPath_noatt, htmlWithHeader_noatt, System.Text.Encoding.UTF8);
+                sessionTempFiles.Add(tempHtmlPath_noatt);
+                var inlineContentIds_noatt = emailService.GetInlineContentIds(htmlWithHeader_noatt) ?? new HashSet<string>();
+                var psi_noatt = new System.Diagnostics.ProcessStartInfo();
+                psi_noatt.FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                psi_noatt.Arguments = $"--html2pdf \"{tempHtmlPath_noatt}\" \"{pdfFilePath_noatt}\"";
+                psi_noatt.UseShellExecute = false;
+                psi_noatt.CreateNoWindow = true;
+                psi_noatt.RedirectStandardOutput = true;
+                psi_noatt.RedirectStandardError = true;
+                var proc_noatt = System.Diagnostics.Process.Start(psi_noatt);
+                if (proc_noatt == null)
+                {
+                    showMessageBox($"[ERROR] Failed to start HtmlToPdfWorker process for MSG file: {filePath}");
+                    fail++;
+                    continue;
+                }
+                if (inlineContentIds_noatt == null)
+                    showMessageBox($"[WARN] inlineContentIds is null for MSG file: {filePath}");
+                proc_noatt.WaitForExit();
+                System.IO.File.Delete(tempHtmlPath_noatt);
+                if (proc_noatt.ExitCode != 0)
+                {
+                    showMessageBox($"[ERROR] HtmlToPdfWorker failed: {proc_noatt.StandardError.ReadToEnd()}");
+                    fail++;
+                    continue;
+                }
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                // Always copy the final PDF to the output folder
+                if (!string.Equals(pdfFilePath_noatt, outputPdf_noatt, StringComparison.OrdinalIgnoreCase) && System.IO.File.Exists(pdfFilePath_noatt))
+                {
+                    try
+                    {
+                        if (System.IO.File.Exists(outputPdf_noatt))
+                            System.IO.File.Delete(outputPdf_noatt);
+                        System.IO.File.Copy(pdfFilePath_noatt, outputPdf_noatt, true);
+                        Console.WriteLine($"[DEBUG] Copied {pdfFilePath_noatt} to {outputPdf_noatt}");
+                        // Delete temp PDF after copying
+                        try {
+                            if (System.IO.File.Exists(pdfFilePath_noatt))
+                                System.IO.File.Delete(pdfFilePath_noatt);
+                            Console.WriteLine($"[DEBUG] Deleted temp PDF: {pdfFilePath_noatt}");
+                        } catch { }
+                    }
+                    catch (Exception moveEx)
+                    {
+                        Console.WriteLine($"[ERROR] Failed to copy file: {moveEx.Message}");
+                        outputPdf_noatt = pdfFilePath_noatt;
+                    }
+                }
+                else if (System.IO.File.Exists(outputPdf_noatt))
+                {
+                    Console.WriteLine($"[DEBUG] Output PDF already exists at {outputPdf_noatt}");
+                }
+                else if (System.IO.File.Exists(pdfFilePath_noatt))
+                {
+                    outputPdf_noatt = pdfFilePath_noatt;
+                }
+                generatedPdfs?.Add(outputPdf_noatt);
+                success++;
+                conversionSucceeded = true;
+                updateFileProgress?.Invoke(100, 100);
+                continue;
+            }
+            if (msg.Sender == null)
+                showMessageBox($"[WARN] MSG file has null Sender: {filePath}");
+            if (msg.SentOn == null)
+                showMessageBox($"[WARN] MSG file has null SentOn: {filePath}");
+            if (msg.BodyText == null)
+                showMessageBox($"[WARN] MSG file has null BodyText: {filePath}");
+            if (msg.Attachments == null)
+                showMessageBox($"[WARN] MSG file has null Attachments: {filePath}");
+            if (msg.Attachments != null && msg.Attachments.Count == 0)
+                showMessageBox($"[INFO] MSG file has zero Attachments: {filePath}");
+            int fileProgress = 0;
+            int totalCount = 0;
+            try
+            {
+                Console.WriteLine($"[DEBUG] Calling attachmentService.CountAllProcessableItems(msg)");
+                totalCount = attachmentService.CountAllProcessableItems(msg);
+                Console.WriteLine($"[DEBUG] attachmentService.CountAllProcessableItems(msg) returned: {totalCount}");
+            }
+            catch (Exception attCountEx)
+            {
+                Console.WriteLine($"[ERROR] Exception in attachmentService.CountAllProcessableItems: {attCountEx.Message}");
+                showMessageBox($"[ERROR] Could not count processable items: {attCountEx.Message}");
+                totalCount = 1;
+            }
+            updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
+                                    string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
+                                    string msgBaseName = System.IO.Path.GetFileNameWithoutExtension(filePath);
+                                    string msgDir = baseTempDir;
+                                    string uniquePdfName = GenerateUniquePdfFileName(filePath, msgDir, selectedFiles);
+                                    string pdfBaseName = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName);
+                                    string pdfFilePath = System.IO.Path.Combine(msgDir, $"{pdfBaseName} - {datePart}.pdf");
+                                    string outputPdf = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
+                                    if (System.IO.File.Exists(pdfFilePath))
+                                        System.IO.File.Delete(pdfFilePath);
+                                    var htmlResult = emailService.BuildEmailHtmlWithInlineImages(msg, false);
+                                    if (emailService == null)
+                                    {
+                                        showMessageBox($"[ERROR] emailService is null when building HTML for MSG file: {filePath}");
+                                        fail++;
+                                        continue;
+                                    }
+                                    if (string.IsNullOrEmpty(htmlResult.Html))
+                                    {
+                                        showMessageBox($"[ERROR] Failed to build HTML for MSG file: {filePath}");
+                                        fail++;
+                                        continue;
+                                    }
+                                    string htmlWithHeader = htmlResult.Html;
+                                    var tempHtmlPath = System.IO.Path.Combine(baseTempDir, Guid.NewGuid() + ".html");
+                                    if (string.IsNullOrEmpty(tempHtmlPath))
+                                    {
+                                        showMessageBox($"[ERROR] tempHtmlPath is null or empty for MSG file: {filePath}");
+                                        fail++;
+                                        continue;
+                                    }
+                                    if (string.IsNullOrEmpty(pdfFilePath))
+                                    {
+                                        showMessageBox($"[ERROR] pdfFilePath is null or empty for MSG file: {filePath}");
+                                        fail++;
+                                        continue;
+                                    }
+                                    System.IO.File.WriteAllText(tempHtmlPath, htmlWithHeader, System.Text.Encoding.UTF8);
+                                    sessionTempFiles.Add(tempHtmlPath);
+                                    var inlineContentIds = emailService.GetInlineContentIds(htmlWithHeader) ?? new HashSet<string>();
+                                    var psi = new System.Diagnostics.ProcessStartInfo();
+                                    psi.FileName = System.Diagnostics.Process.GetCurrentProcess().MainModule.FileName;
+                                    psi.Arguments = $"--html2pdf \"{tempHtmlPath}\" \"{pdfFilePath}\"";
+                                    psi.UseShellExecute = false;
+                                    psi.CreateNoWindow = true;
+                                    psi.RedirectStandardOutput = true;
+                                    psi.RedirectStandardError = true;
+                                    var proc = System.Diagnostics.Process.Start(psi);
+                                    if (proc == null)
+                                    {
+                                        showMessageBox($"[ERROR] Failed to start HtmlToPdfWorker process for MSG file: {filePath}");
+                                        fail++;
+                                        continue;
+                                    }
+                                    if (inlineContentIds == null)
+                                        showMessageBox($"[WARN] inlineContentIds is null for MSG file: {filePath}");
+                                    proc.WaitForExit();
+                                    System.IO.File.Delete(tempHtmlPath);
+                                    if (proc.ExitCode != 0)
+                                    {
+                                        showMessageBox($"[ERROR] HtmlToPdfWorker failed: {proc.StandardError.ReadToEnd()}");
+                                        fail++;
+                                        continue;
+                                    }
+                                    GC.Collect();
+                                    GC.WaitForPendingFinalizers();
                                 // --- Attachment/merge logic ---
                                 var typedAttachments = new List<Storage.Attachment>();
                                 var nestedMessages = new List<Storage.Message>();
@@ -128,6 +330,11 @@ namespace MsgToPdfConverter.Services
                                     var allAttachments = new List<Storage.Attachment>();
                                     foreach (var att in msg.Attachments)
                                     {
+                                        if (att == null)
+                                        {
+                                            showMessageBox($"[ERROR] Null attachment found in MSG file: {filePath}");
+                                            continue;
+                                        }
                                         if (att is Storage.Attachment a)
                                         {
                                             string ext2 = System.IO.Path.GetExtension(a.FileName ?? "").ToLowerInvariant();
@@ -136,6 +343,11 @@ namespace MsgToPdfConverter.Services
                                             {
                                                 if (a.IsInline == true || (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '"', '\'', ' '))))
                                                     continue;
+                                                if (attachmentService == null)
+                                                {
+                                                    showMessageBox($"[ERROR] attachmentService is null when checking signature image for: {a.FileName}");
+                                                    continue;
+                                                }
                                                 if (attachmentService.IsLikelySignatureImage(a))
                                                     continue;
                                             }
@@ -143,6 +355,11 @@ namespace MsgToPdfConverter.Services
                                         }
                                         else if (att is Storage.Message nestedMsg)
                                         {
+                                            if (nestedMsg == null)
+                                            {
+                                                showMessageBox($"[ERROR] Null nested message found in MSG file: {filePath}");
+                                                continue;
+                                            }
                                             nestedMessages.Add(nestedMsg);
                                         }
                                     }
@@ -235,7 +452,7 @@ namespace MsgToPdfConverter.Services
                                 }
                                 var allPdfFiles = new List<string> { pdfFilePath };
                                 var allTempFiles = new List<string>();
-                                string tempDir = System.IO.Path.GetDirectoryName(pdfFilePath);
+                                string tempDir = sessionTempDir;
                                 for (int attIndex = 0; attIndex < typedAttachments.Count; attIndex++)
                                 {
                                     var att = typedAttachments[attIndex];
@@ -246,9 +463,23 @@ namespace MsgToPdfConverter.Services
                                     {
                                         System.IO.File.WriteAllBytes(attPath, att.Data);
                                         allTempFiles.Add(attPath);
+                                        sessionTempFiles.Add(attPath);
                                         var attachmentParentChain = new List<string> { msg.Subject ?? System.IO.Path.GetFileName(filePath) };
+                                if (msg.Subject == null)
+                                    showMessageBox($"[WARN] MSG file has null Subject: {filePath}");
                                         // Pass progressTick to ensure every processed file increments progress
                                         string finalAttachmentPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, attachmentParentChain, attName, false, () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
+                                        if (attachmentService == null)
+                                        {
+                                            showMessageBox($"[ERROR] attachmentService is null when processing attachment: {attName}");
+                                            continue;
+                                        }
+                                    if (emailService == null)
+                                    {
+                                        showMessageBox($"[ERROR] emailService is null when building HTML for MSG file: {filePath}");
+                                        fail++;
+                                        continue;
+                                    }
                                         if (finalAttachmentPdf != null)
                                             allPdfFiles.Add(finalAttachmentPdf);
                                     }
@@ -260,6 +491,7 @@ namespace MsgToPdfConverter.Services
                                         PdfService.AddHeaderPdf(errorPdf, enhancedErrorText);
                                         allPdfFiles.Add(errorPdf);
                                         allTempFiles.Add(errorPdf);
+                                        sessionTempFiles.Add(errorPdf);
                                     }
                                 }
                                 for (int nestedIndex = 0; nestedIndex < nestedMessages.Count; nestedIndex++)
@@ -272,13 +504,17 @@ namespace MsgToPdfConverter.Services
                                     attachmentService.ProcessMsgAttachmentsRecursively(nestedMsg, allPdfFiles, allTempFiles, tempDir, false, 1, 5, nestedHeaderText, initialParentChain, () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
                                 }
                                 string mergedPdf = System.IO.Path.Combine(tempDir, System.IO.Path.GetFileNameWithoutExtension(pdfFilePath) + "_merged.pdf");
-                                PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf);
+                                // Restore sent date in output PDF filename for merged PDFs
+                                string datePart_att = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
+                                string pdfBaseName_att = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName);
+                                string mergedPdfWithDate = System.IO.Path.Combine(tempDir, $"{pdfBaseName_att} - {datePart_att}_merged.pdf");
+                                PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdfWithDate);
                                 GC.Collect();
                                 GC.WaitForPendingFinalizers();
                                 // Build list of files to protect: all user-selected source files and all output files
                                 var filesToProtect = new HashSet<string>(selectedFiles.Select(f => Path.GetFullPath(f).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant()));
                                 filesToProtect.Add(Path.GetFullPath(pdfFilePath).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
-                                filesToProtect.Add(Path.GetFullPath(mergedPdf).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
+                                filesToProtect.Add(Path.GetFullPath(mergedPdfWithDate).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
                                 if (generatedPdfs != null)
                                 {
                                     foreach (var genPdf in generatedPdfs)
@@ -306,16 +542,49 @@ namespace MsgToPdfConverter.Services
                                     }
                                     catch { }
                                 }
-                                if (System.IO.File.Exists(mergedPdf))
+                                if (System.IO.File.Exists(mergedPdfWithDate))
                                 {
                                     if (System.IO.File.Exists(pdfFilePath))
                                         System.IO.File.Delete(pdfFilePath);
-                                    System.IO.File.Move(mergedPdf, pdfFilePath);
+                                    System.IO.File.Move(mergedPdfWithDate, pdfFilePath);
                                 }
-                                generatedPdfs?.Add(pdfFilePath);
+                                // Always copy the final PDF to the output folder, using the sent date in the filename
+                                // Decide output filename: always include sent date, only use _merged if >1 PDF
+                                // Always use [BaseName] - [SentDate].pdf for output
+                                string outputFileName = $"{pdfBaseName_att} - {datePart_att}.pdf";
+                                string outputPdfFinal = System.IO.Path.Combine(dir, outputFileName);
+                                if (!string.Equals(pdfFilePath, outputPdfFinal, StringComparison.OrdinalIgnoreCase) && System.IO.File.Exists(pdfFilePath))
+                                {
+                                    try
+                                    {
+                                        if (System.IO.File.Exists(outputPdfFinal))
+                                            System.IO.File.Delete(outputPdfFinal);
+                                        System.IO.File.Copy(pdfFilePath, outputPdfFinal, true);
+                                        Console.WriteLine($"[DEBUG] Copied {pdfFilePath} to {outputPdfFinal}");
+                                        // Delete temp PDF after copying
+                                        try {
+                                            if (System.IO.File.Exists(pdfFilePath))
+                                                System.IO.File.Delete(pdfFilePath);
+                                            Console.WriteLine($"[DEBUG] Deleted temp PDF: {pdfFilePath}");
+                                        } catch { }
+                                    }
+                                    catch (Exception moveEx)
+                                    {
+                                        Console.WriteLine($"[ERROR] Failed to copy file: {moveEx.Message}");
+                                        outputPdfFinal = pdfFilePath;
+                                    }
+                                }
+                                else if (System.IO.File.Exists(outputPdfFinal))
+                                {
+                                    Console.WriteLine($"[DEBUG] Output PDF already exists at {outputPdfFinal}");
+                                }
+                                else if (System.IO.File.Exists(pdfFilePath))
+                                {
+                                    outputPdfFinal = pdfFilePath;
+                                }
+                                generatedPdfs?.Add(outputPdfFinal);
                                 success++;
                                 conversionSucceeded = true;
-                                
                                 // Mark file progress as complete
                                 updateFileProgress?.Invoke(totalCount, totalCount);
                             }
@@ -331,9 +600,9 @@ namespace MsgToPdfConverter.Services
                                 msg = null;
                                 GC.Collect();
                                 GC.WaitForPendingFinalizers();
-                                Console.WriteLine($"[DELETE] Should delete: {filePath}, deleteMsgAfterConversion={deleteFilesAfterConversion}");
                                 if (deleteFilesAfterConversion && conversionSucceeded && !combineAllPdfs) // <--- updated condition
                                 {
+                                    Console.WriteLine($"[DELETE] Should delete: {filePath}, deleteFilesAfterConversion={deleteFilesAfterConversion}, combineAllPdfs={combineAllPdfs}, appendAttachments={appendAttachments}");
                                     if (System.IO.File.Exists(filePath))
                                     {
                                         Console.WriteLine($"[DELETE] Attempting to delete: {filePath}");
@@ -372,10 +641,11 @@ namespace MsgToPdfConverter.Services
                         updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
                         
                         string outputPdf = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
+                        // Use only the main temp folder for all attachment processing
+                        string tempDir = baseTempDir;
                         var tempFiles = new List<string>();
                         var allPdfFiles = new List<string>();
                         var allTempFiles = new List<string>();
-                        string tempDir = dir;
                         string headerText = $"File: {System.IO.Path.GetFileName(filePath)}";
                         var parentChain = new List<string> { System.IO.Path.GetFileName(filePath) };
                         string processedPdf = null;
@@ -384,6 +654,9 @@ namespace MsgToPdfConverter.Services
                             processedPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(
                                 null, filePath, tempDir, headerText, allTempFiles, parentChain, baseName, extractOriginalOnly,
                                 () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
+                            // Track all temp files created in allTempFiles
+                            foreach (var tempF in allTempFiles)
+                                sessionTempFiles.Add(tempF);
                             if (!string.IsNullOrEmpty(processedPdf))
                                 allPdfFiles.Add(processedPdf);
                         }
@@ -404,60 +677,62 @@ namespace MsgToPdfConverter.Services
                                 retryCount++;
                             }
                         }
-                        // Remove any zero-page PDFs
-                        allPdfFiles.RemoveAll(pdfPath => {
+                        // Log page counts and robustly filter zero-page PDFs before merging
+                        var validPdfFiles = new List<string>();
+                        foreach (var pdfPath in allPdfFiles)
+                        {
                             try
                             {
                                 using (var pdfDoc = PdfSharp.Pdf.IO.PdfReader.Open(pdfPath, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import))
                                 {
-                                    if (pdfDoc.PageCount == 0)
+                                    Console.WriteLine($"[DEBUG] PDF: {pdfPath}, PageCount: {pdfDoc.PageCount}");
+                                    if (pdfDoc.PageCount > 0)
+                                    {
+                                        validPdfFiles.Add(pdfPath);
+                                    }
+                                    else
                                     {
                                         Console.WriteLine($"[ERROR] PDF has zero pages: {pdfPath}");
                                         showMessageBox($"Error: PDF generated from '{System.IO.Path.GetFileName(filePath)}' has no pages and will be skipped.");
-                                        return true;
                                     }
                                 }
                             }
                             catch (Exception pdfEx)
                             {
                                 Console.WriteLine($"[ERROR] Failed to open PDF for page count check: {pdfEx.Message}");
-                                return true;
+                                showMessageBox($"Error: PDF generated from '{System.IO.Path.GetFileName(filePath)}' could not be opened and will be skipped.");
                             }
-                            return false;
-                        });
-                        // Merge if more than one PDF, else just move/rename
-                        string finalPdf = outputPdf;
-                        if (allPdfFiles.Count > 1)
+                        }
+                        // Merge if more than one valid PDF, else just move/rename
+                        string finalPdf = null;
+                        if (validPdfFiles.Count > 1)
                         {
                             string mergedPdf = System.IO.Path.Combine(tempDir, baseName + "_merged.pdf");
-                            PdfAppendTest.AppendPdfs(allPdfFiles, mergedPdf);
+                            PdfAppendTest.AppendPdfs(validPdfFiles, mergedPdf);
                             finalPdf = mergedPdf;
                         }
-                        else if (allPdfFiles.Count == 1)
+                        else if (validPdfFiles.Count == 1)
                         {
-                            finalPdf = allPdfFiles[0];
+                            finalPdf = validPdfFiles[0];
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[ERROR] No valid PDFs to merge for {System.IO.Path.GetFileName(filePath)}");
                         }
                         Console.WriteLine($"[DEBUG] finalPdf: {finalPdf}, outputPdf: {outputPdf}");
-                        if (!string.Equals(finalPdf, outputPdf, StringComparison.OrdinalIgnoreCase) && System.IO.File.Exists(finalPdf))
+                        // Always move/copy the final PDF to the output folder if it exists
+                        if (!string.IsNullOrEmpty(finalPdf) && System.IO.File.Exists(finalPdf))
                         {
                             try
                             {
                                 if (System.IO.File.Exists(outputPdf))
                                     System.IO.File.Delete(outputPdf);
-                                if (deleteFilesAfterConversion)
-                                {
-                                    System.IO.File.Move(finalPdf, outputPdf);
-                                    Console.WriteLine($"[DEBUG] Moved {finalPdf} to {outputPdf}");
-                                }
-                                else
-                                {
-                                    System.IO.File.Copy(finalPdf, outputPdf, true);
-                                    Console.WriteLine($"[DEBUG] Copied {finalPdf} to {outputPdf}");
-                                }
+                                System.IO.File.Copy(finalPdf, outputPdf, true);
+                                Console.WriteLine($"[DEBUG] Copied {finalPdf} to {outputPdf}");
                             }
                             catch (Exception moveEx)
                             {
-                                Console.WriteLine($"[ERROR] Failed to move/copy file: {moveEx.Message}");
+                                Console.WriteLine($"[ERROR] Failed to copy file: {moveEx.Message}");
                                 outputPdf = finalPdf;
                             }
                         }
@@ -465,7 +740,7 @@ namespace MsgToPdfConverter.Services
                         {
                             Console.WriteLine($"[DEBUG] Output PDF already exists at {outputPdf}");
                         }
-                        else if (System.IO.File.Exists(finalPdf))
+                        else if (!string.IsNullOrEmpty(finalPdf) && System.IO.File.Exists(finalPdf))
                         {
                             // If outputPdf does not exist but finalPdf does, treat as output
                             outputPdf = finalPdf;
@@ -485,18 +760,10 @@ namespace MsgToPdfConverter.Services
                             fail++;
                         }
                         // Cleanup temp files, but never delete the output PDF
-                        foreach (var tempFile in allTempFiles)
-                        {
-                            try {
-                                if (System.IO.File.Exists(tempFile) && !string.Equals(tempFile, outputPdf, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    System.IO.File.Delete(tempFile);
-                                    Console.WriteLine($"[DEBUG] Deleted temp file: {tempFile}");
-                                }
-                            } catch { }
-                        }
+                        // Do NOT delete temp files here; cleanup will happen at the end of the batch after all files are processed.
                     }
                 }
+            }
                 catch (Exception ex)
                 {
                     showMessageBox($"Error processing {System.IO.Path.GetFileName(filePath)}: {ex.Message}");
@@ -528,7 +795,30 @@ namespace MsgToPdfConverter.Services
                         }
                     }
                 }
+                }
             }
+            finally
+            {
+                // Delete all files and subfolders in baseTempDir after conversion
+                try
+                {
+                    if (System.IO.Directory.Exists(baseTempDir))
+                    {
+                        foreach (var file in System.IO.Directory.GetFiles(baseTempDir, "*", SearchOption.AllDirectories))
+                        {
+                            try { System.IO.File.Delete(file); } catch { }
+                        }
+                        foreach (var dir in System.IO.Directory.GetDirectories(baseTempDir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
+                        {
+                            try { System.IO.Directory.Delete(dir, true); } catch { }
+                        }
+                        try { System.IO.Directory.Delete(baseTempDir, true); } catch { }
+                    }
+                }
+                catch { }
+            }
+            Console.WriteLine("[DEBUG] ConversionService.ConvertFilesWithAttachments: Finished and returning.");
+            // Removed GC.Collect and GC.WaitForPendingFinalizers here to prevent freeze
             return (success, fail, processed, isCancellationRequested());
         }
 
@@ -570,25 +860,34 @@ namespace MsgToPdfConverter.Services
             try
             {
                 updateFileProgress?.Invoke(10, 100); // Starting MSG processing
-                
                 Storage.Message msg = new Storage.Message(msgFilePath);
                 updateFileProgress?.Invoke(30, 100); // MSG file loaded
-                
                 string datePart = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmms");
-                
-                // Generate unique PDF filename to avoid conflicts when files have the same base name but different extensions
                 string uniquePdfName = GenerateUniquePdfFileName(msgFilePath, outputDir, selectedFiles);
                 string baseName = System.IO.Path.GetFileNameWithoutExtension(uniquePdfName);
                 string pdfFilePath = System.IO.Path.Combine(outputDir, $"{baseName} - {datePart}.pdf");
                 if (System.IO.File.Exists(pdfFilePath))
                     System.IO.File.Delete(pdfFilePath);
-                
+
                 updateFileProgress?.Invoke(50, 100); // Converting to HTML
                 var htmlResult = emailService.BuildEmailHtmlWithInlineImages(msg, false);
                 string htmlWithHeader = htmlResult.Html;
                 var tempHtmlPath = System.IO.Path.Combine(System.IO.Path.GetTempPath(), Guid.NewGuid() + ".html");
                 System.IO.File.WriteAllText(tempHtmlPath, htmlWithHeader, System.Text.Encoding.UTF8);
-                
+
+                // Check for referenced temp files (attachments/images) and log missing ones
+                if (htmlResult.TempFiles != null)
+                {
+                    foreach (var tempFile in htmlResult.TempFiles)
+                    {
+                        if (!System.IO.File.Exists(tempFile))
+                        {
+                            Console.WriteLine($"Warning: Referenced attachment or image missing: {tempFile}. Skipping this file.");
+                            // Optionally, remove the reference from HTML if needed
+                        }
+                    }
+                }
+
                 updateFileProgress?.Invoke(70, 100); // Starting PDF conversion
                 var psi = new System.Diagnostics.ProcessStartInfo
                 {
@@ -600,14 +899,14 @@ namespace MsgToPdfConverter.Services
                     RedirectStandardError = true
                 };
                 var proc = System.Diagnostics.Process.Start(psi);
-                
+
                 updateFileProgress?.Invoke(85, 100); // PDF conversion in progress
                 proc.WaitForExit();
                 System.IO.File.Delete(tempHtmlPath);
-                
+
                 if (proc.ExitCode != 0)
                     throw new Exception($"HtmlToPdfWorker failed");
-                
+
                 updateFileProgress?.Invoke(95, 100); // PDF conversion completed
                 generatedPdfs?.Add(pdfFilePath);
                 return true;

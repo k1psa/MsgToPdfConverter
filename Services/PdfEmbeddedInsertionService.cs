@@ -652,7 +652,10 @@ namespace MsgToPdfConverter.Services
                     var htmlResult = _emailConverterService.BuildEmailHtmlWithInlineImages(msg, false);
                     string html = htmlResult.Html;
                     var tempHtmlPath = Path.Combine(Path.GetTempPath(), $"msg2pdf_{Guid.NewGuid()}.html");
-                    File.WriteAllText(tempHtmlPath, html, System.Text.Encoding.UTF8);
+                    var appTempDir = Path.Combine(Path.GetTempPath(), "MsgToPdfConverter");
+                    var tempHtmlPathFixed = Path.Combine(appTempDir, $"msg2pdf_{Guid.NewGuid()}.html");
+                    File.WriteAllText(tempHtmlPathFixed, html, System.Text.Encoding.UTF8);
+                    tempHtmlPath = tempHtmlPathFixed;
 
                     var psi = new System.Diagnostics.ProcessStartInfo
                     {
@@ -676,9 +679,10 @@ namespace MsgToPdfConverter.Services
                     else
                     {
                         // Dump HTML to debug file for inspection
-                        var debugHtmlPath = tempHtmlPath + ".fail.html";
+                        var debugHtmlPath = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), $"debug_email_{DateTime.Now:yyyyMMdd_HHmmss}_fail.html");
                         File.WriteAllText(debugHtmlPath, html, System.Text.Encoding.UTF8);
                         Console.WriteLine($"[PDF-INSERT] HtmlToPdfWorker failed.\nSTDOUT: {stdOut}\nSTDERR: {stdErr}\nHTML dumped to: {debugHtmlPath}");
+                        // Optionally: track for cleanup if you have a temp file list in this context
                         return false;
                     }
                 }
