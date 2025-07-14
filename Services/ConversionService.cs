@@ -468,7 +468,7 @@ namespace MsgToPdfConverter.Services
                                 if (msg.Subject == null)
                                     showMessageBox($"[WARN] MSG file has null Subject: {filePath}");
                                         // Pass progressTick to ensure every processed file increments progress
-                                        string finalAttachmentPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, attachmentParentChain, attName, false, () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
+                                        string finalAttachmentPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(att, attPath, tempDir, headerText, allTempFiles, allPdfFiles, attachmentParentChain, attName, false, () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
                                         if (attachmentService == null)
                                         {
                                             showMessageBox($"[ERROR] attachmentService is null when processing attachment: {attName}");
@@ -652,7 +652,7 @@ namespace MsgToPdfConverter.Services
                         try
                         {
                             processedPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(
-                                null, filePath, tempDir, headerText, allTempFiles, parentChain, baseName, extractOriginalOnly,
+                                null, filePath, tempDir, headerText, allTempFiles, allPdfFiles, parentChain, baseName, extractOriginalOnly,
                                 () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
                             // Track all temp files created in allTempFiles
                             foreach (var tempF in allTempFiles)

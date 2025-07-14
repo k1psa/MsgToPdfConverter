@@ -219,6 +219,15 @@ namespace MsgToPdfConverter.Utils
                             string ext = Path.GetExtension(fileName).ToLowerInvariant();
                             string contentType = ext == ".pdf" ? "application/pdf" : "application/octet-stream";
                             Console.WriteLine($"[DEBUG] OLE extracted file: {fileName}, size: {fileData.Length}, contentType: {contentType}");
+                            // Extra debug for Word/Excel files in standard OLE Package
+                            if (ext == ".doc" || ext == ".docx")
+                            {
+                                Console.WriteLine($"[DEBUG] Embedded Word file detected: {fileName}");
+                            }
+                            if (ext == ".xls" || ext == ".xlsx")
+                            {
+                                Console.WriteLine($"[DEBUG] Embedded Excel file detected: {fileName}");
+                            }
                             // --- Filter out placeholder/fake files ---
                             var placeholderNames = new[] { "data.bin", "contents.bin", "objectpool.bin", "package.bin" };
                             bool isPlaceholder = string.IsNullOrWhiteSpace(fileName)
@@ -305,12 +314,37 @@ namespace MsgToPdfConverter.Utils
                     Console.WriteLine($"[DEBUG] Ole10Native total size: {totalSize}");
                     uint typeField = br.ReadUInt32();
                     Console.WriteLine($"[DEBUG] Ole10Native type field: {typeField}");
+                    long fileNameStart = br.BaseStream.Position;
                     string fileName = ReadNullTerminatedString(br);
-                    Console.WriteLine($"[DEBUG] Ole10Native filename: '{fileName}'");
+                    long fileNameEnd = br.BaseStream.Position;
+                    var fileNameBytes = data.Skip((int)fileNameStart).Take((int)(fileNameEnd - fileNameStart)).ToArray();
+                    long filePathStart = br.BaseStream.Position;
                     string filePath = ReadNullTerminatedString(br);
-                    Console.WriteLine($"[DEBUG] Ole10Native filepath: '{filePath}'");
+                    long filePathEnd = br.BaseStream.Position;
+                    var filePathBytes = data.Skip((int)filePathStart).Take((int)(filePathEnd - filePathStart)).ToArray();
+                    // Patch: If filename is missing first two chars, prepend from filepath
+                    if (filePath.Length > fileName.Length && filePath.EndsWith(fileName))
+                    {
+                        string prefix = filePath.Substring(0, filePath.Length - fileName.Length);
+                        if (prefix.Length >= 2)
+                        {
+                            fileName = prefix.Substring(prefix.Length - 2) + fileName;
+                            Console.WriteLine($"[DEBUG] PATCHED Ole10Native filename: '{fileName}' (added first 2 chars from filepath)");
+                        }
+                    }
+                    Console.WriteLine($"[DEBUG] Ole10Native filename: '{fileName}' (raw bytes: {BitConverter.ToString(fileNameBytes)})");
+                    Console.WriteLine($"[DEBUG] Ole10Native filepath: '{filePath}' (raw bytes: {BitConverter.ToString(filePathBytes)})");
                     long afterHeader = br.BaseStream.Position;
                     string ext = Path.GetExtension(fileName).ToLowerInvariant();
+                    // Extra debug for Word/Excel files in Ole10Native
+                    if (ext == ".doc" || ext == ".docx")
+                    {
+                        Console.WriteLine($"[DEBUG] Embedded Word file detected (Ole10Native): {fileName}");
+                    }
+                    if (ext == ".xls" || ext == ".xlsx")
+                    {
+                        Console.WriteLine($"[DEBUG] Embedded Excel file detected (Ole10Native): {fileName}");
+                    }
                     // Universal .7z handling: extract from 7z signature to end, then let TrimTo7zSignature handle truncation
                     if (ext == ".7z")
                     {

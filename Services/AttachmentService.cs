@@ -15,6 +15,38 @@ namespace MsgToPdfConverter.Services
 {
     public class AttachmentService
     {
+        public class EmbeddedObjectInfo
+        {
+            public string FilePath { get; set; }
+            public string ObjectType { get; set; } // e.g. "Word", "Excel", "OLE", etc.
+            public int InsertionIndex { get; set; } // Paragraph or page index after which to insert
+
+            public EmbeddedObjectInfo(string filePath, string objectType, int insertionIndex)
+            {
+                FilePath = filePath;
+                ObjectType = objectType;
+                InsertionIndex = insertionIndex;
+            }
+        }
+        /// <summary>
+        /// Deletes all files and folders in %temp%\msgtopdf
+        /// </summary>
+        public static void CleanupMsgToPdfTempFolder()
+        {
+            try
+            {
+                string tempDir = Path.Combine(Path.GetTempPath(), "MsgToPdfConverter");
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, true);
+                    Console.WriteLine($"[CLEANUP] Deleted temp folder: {tempDir}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[CLEANUP] Error deleting temp folder: {ex.Message}");
+            }
+        }
         private readonly Action<string, string, string> _addHeaderPdf;
         private readonly Func<string, string, bool> _tryConvertOfficeToPdf;
         private readonly Action<List<string>, string> _appendPdfs;
@@ -287,7 +319,7 @@ namespace MsgToPdfConverter.Services
                 var parentChainForAtt = new List<string>(parentChain);
                 parentChainForAtt.Add(msg.Subject ?? "MSG");
                 // Use hierarchy-aware processing and pass progressTick
-                var attPdf = ProcessSingleAttachmentWithHierarchy(a, attPath, tempDir, attHeader, allTempFiles, parentChainForAtt, currentItem, extractOriginalOnly, progressTick);
+                var attPdf = ProcessSingleAttachmentWithHierarchy(a, attPath, tempDir, attHeader, allTempFiles, allPdfFiles, parentChainForAtt, currentItem, extractOriginalOnly, progressTick);
                 if (attPdf != null)
                 {
                     allPdfFiles.Add(attPdf);
@@ -306,7 +338,7 @@ namespace MsgToPdfConverter.Services
             }
         }
 
-        public string ProcessSingleAttachment(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles)
+        public string ProcessSingleAttachment(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> allPdfFiles = null, Action progressTick = null)
         {
             if (att == null)
             {
@@ -375,9 +407,7 @@ namespace MsgToPdfConverter.Services
                         // --- Embedded OLE/Package extraction progress ---
                         if (File.Exists(attPath))
                         {
-                            // Only call ExtractEmbeddedObjectsWithProgress here, do NOT call progressTick (not available in this method)
-                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, null);
-                            // embeddedCount is the number of OLE/Package objects found and processed
+                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, allPdfFiles, progressTick);
                         }
                     }
                     else
@@ -1021,7 +1051,7 @@ namespace MsgToPdfConverter.Services
         /// <summary>
         /// Processes a single attachment with SmartArt hierarchy support
         /// </summary>
-        public string ProcessSingleAttachmentWithHierarchy(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false, Action progressTick = null)
+        public string ProcessSingleAttachmentWithHierarchy(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> allPdfFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false, Action progressTick = null)
         {
             Console.WriteLine($"[ATTACH-DEBUG] ENTER: attName={att?.FileName}, attPath={attPath}, tempDir={tempDir}, headerText={headerText}, parentChain=[{string.Join(" -> ", parentChain ?? new List<string>())}], currentItem={currentItem}, extractOriginalOnly={extractOriginalOnly}");
             
@@ -1138,7 +1168,7 @@ namespace MsgToPdfConverter.Services
                         {
                             finalAttachmentPdf = attPdf;
                             allTempFiles.Add(attPdf);
-                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, null);
+                            int embeddedCount = ExtractEmbeddedObjectsWithProgress(attPath, tempDir, allTempFiles, allPdfFiles, progressTick);
                             if (embeddedCount == 0 && progressTick != null)
                             {
                                 progressTick();
@@ -1656,24 +1686,54 @@ namespace MsgToPdfConverter.Services
         /// <summary>
         /// Extracts embedded OLE/Package objects from a DOCX/XLSX file. Progress ticks happen during PDF insertion.
         /// </summary>
-        private static int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tempDir, List<string> allTempFiles, Action progressTick)
+private int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tempDir, List<string> allTempFiles, List<string> allPdfFiles, Action progressTick)
         {
             int count = 0;
             try
             {
-                // Use DocxEmbeddedExtractor to extract embedded files (OLE/Package objects)
+                // Extract embedded Office files from DOCX (ZIP) 'embeddings' folder
+                if (Path.GetExtension(officeFilePath).Equals(".docx", StringComparison.OrdinalIgnoreCase))
+                {
+                    using (var archive = ZipFile.OpenRead(officeFilePath))
+                    {
+                        foreach (var entry in archive.Entries)
+                        {
+                            // Only process files in 'word/embeddings/'
+                            if (entry.FullName.StartsWith("word/embeddings/", StringComparison.OrdinalIgnoreCase))
+                            {
+                                string ext = Path.GetExtension(entry.Name).ToLowerInvariant();
+                                if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
+                                {
+                                    string outDir = Path.Combine(Path.GetTempPath(), "msgtopdf");
+                                    Directory.CreateDirectory(outDir);
+                                    string outPath = Path.Combine(outDir, entry.Name);
+                                    entry.ExtractToFile(outPath, true);
+                                    allTempFiles.Add(outPath);
+                                    // Convert to PDF using existing delegate
+                                    string pdfPath = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(entry.Name) + ".pdf");
+                                    if (_tryConvertOfficeToPdf != null && _tryConvertOfficeToPdf(outPath, pdfPath))
+                                    {
+                                        allTempFiles.Add(pdfPath);
+                                        if (allPdfFiles != null)
+                                            allPdfFiles.Add(pdfPath);
+                                    }
+                                    progressTick?.Invoke();
+                                    count++;
+                                }
+                            }
+                        }
+                    }
+                }
+                // Fallback to DocxEmbeddedExtractor for other embedded files
                 var embeddedFiles = MsgToPdfConverter.Utils.DocxEmbeddedExtractor.ExtractEmbeddedFiles(officeFilePath);
                 if (embeddedFiles != null)
                 {
                     foreach (var embedded in embeddedFiles)
                     {
-                        // Save the embedded file to disk
                         string safeName = string.IsNullOrWhiteSpace(embedded.FileName) ? $"Embedded_{Guid.NewGuid()}" : embedded.FileName;
                         string outPath = Path.Combine(tempDir, safeName);
                         File.WriteAllBytes(outPath, embedded.Data);
                         allTempFiles.Add(outPath);
-
-                        // Call progressTick here to update UI for each embedded object extracted
                         progressTick?.Invoke();
                         count++;
                     }

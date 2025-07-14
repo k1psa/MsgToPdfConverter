@@ -55,9 +55,6 @@ namespace MsgToPdfConverter.Services
             Console.WriteLine($"[PDF-INSERT] Output PDF: {outputPdfPath}");
             Console.WriteLine($"[PDF-INSERT] Found {extractedObjects?.Count ?? 0} extracted objects");
 
-            // --- REMOVED CONTENT-BASED DEDUPLICATION ---
-            // All embedded files will be processed, even if content is identical.
-            // Only filter for valid files (exist, non-empty), no grouping/deduplication by file name or hash.
             var validObjects = new List<InteropEmbeddedExtractor.ExtractedObjectInfo>();
             foreach (var obj in extractedObjects)
             {
@@ -86,54 +83,129 @@ namespace MsgToPdfConverter.Services
 
             Console.WriteLine($"[PDF-INSERT] Inserting {validObjects.Count} embedded files into {mainPdfPath}");
 
-            // Sort embedded objects by PageNumber (synthetic or real), then by DocumentOrderIndex for tie-breaking
-            // Note: Objects with PageNumber = -1 will be assigned to the last page
-            var objectsByPage = validObjects
-                .OrderBy(obj => obj.PageNumber == -1 ? int.MaxValue : obj.PageNumber)
-                .ThenBy(obj => obj.DocumentOrderIndex)
+            // --- Improved Mapping Logic ---
+            // 1. Try to map each object to a page using PageNumber, CharPos, OleClass, ProgId, file extension, etc.
+            // 2. If not mappable, assign to last page and log as unmapped
+            int mainPageCount = 0;
+            var mappedObjects = new List<(InteropEmbeddedExtractor.ExtractedObjectInfo obj, int anchorPage, string reason)>();
+            var unmappedObjects = new List<(InteropEmbeddedExtractor.ExtractedObjectInfo obj, string reason)>();
+
+            // Get main page count early for fallback
+            try
+            {
+                using (var mainPdf = new PdfDocument(new PdfReader(mainPdfPath)))
+                {
+                    mainPageCount = mainPdf.GetNumberOfPages();
+                }
+            }
+            catch { mainPageCount = 1; }
+
+            // Build anchor candidates from extractedObjects metadata
+            var anchorCandidates = validObjects
+                .Where(o => o.PageNumber > 0 && o.PageNumber <= mainPageCount)
+                .Select(o => new {
+                    PageNumber = o.PageNumber,
+                    CharPosition = o.CharPosition,
+                    ProgId = o.ProgId,
+                    OleClass = o.OleClass,
+                    FileExt = Path.GetExtension(o.FilePath)?.ToLowerInvariant(),
+                    DocumentOrderIndex = o.DocumentOrderIndex
+                })
                 .ToList();
 
-            // Log the insertion plan BEFORE adjustments
-            Console.WriteLine($"[PDF-INSERT] Initial insertion plan:");
-            foreach (var obj in objectsByPage)
+            foreach (var obj in validObjects)
             {
-                Console.WriteLine($"  - {Path.GetFileName(obj.FilePath)} -> after page {obj.PageNumber} (order: {obj.DocumentOrderIndex})");
+                int anchorPage = -1;
+                string reason = "";
+                // 1. Try exact PageNumber
+                if (obj.PageNumber > 0 && obj.PageNumber <= mainPageCount)
+                {
+                    anchorPage = obj.PageNumber;
+                    reason = $"Mapped by PageNumber={anchorPage}";
+                }
+                // 2. Try closest anchor by CharPosition
+                else if (obj.CharPosition > 0)
+                {
+                    var closest = anchorCandidates
+                        .OrderBy(a => Math.Abs(a.CharPosition - obj.CharPosition))
+                        .FirstOrDefault();
+                    if (closest != null)
+                    {
+                        anchorPage = closest.PageNumber;
+                        reason = $"Mapped by closest CharPosition (obj={obj.CharPosition}, anchor={closest.CharPosition})";
+                    }
+                }
+                // 3. Try matching ProgId/OleClass/file extension
+                else if (!string.IsNullOrWhiteSpace(obj.ProgId) || !string.IsNullOrWhiteSpace(obj.OleClass))
+                {
+                    var match = anchorCandidates.FirstOrDefault(a =>
+                        (!string.IsNullOrWhiteSpace(obj.ProgId) && a.ProgId == obj.ProgId) ||
+                        (!string.IsNullOrWhiteSpace(obj.OleClass) && a.OleClass == obj.OleClass) ||
+                        (a.FileExt == Path.GetExtension(obj.FilePath)?.ToLowerInvariant())
+                    );
+                    if (match != null)
+                    {
+                        anchorPage = match.PageNumber;
+                        reason = $"Mapped by ProgId/OleClass/FileExt (ProgId={obj.ProgId}, OleClass={obj.OleClass}, Ext={Path.GetExtension(obj.FilePath)?.ToLowerInvariant()})";
+                    }
+                }
+                // 4. Fallback to last page
+                if (anchorPage <= 0 || anchorPage > mainPageCount)
+                {
+                    anchorPage = mainPageCount;
+                    reason = $"Unmapped: fallback to last page ({mainPageCount})";
+                    unmappedObjects.Add((obj, reason));
+                }
+                else
+                {
+                    mappedObjects.Add((obj, anchorPage, reason));
+                }
             }
 
-            // REMOVE: Hardcoded corrections for SMC JV.pdf and .msg files
-            // The following block is removed:
-            // foreach (var obj in objectsByPage)
-            // {
-            //     string fileName = Path.GetFileName(obj.FilePath);
-            //     if (fileName.Contains("SMC JV") && obj.FilePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
-            //     {
-            //         if (obj.PageNumber != 9)
-            //         {
-            //             Console.WriteLine($"[PDF-INSERT] CORRECTING PAGE: Moving {fileName} from page {obj.PageNumber} to page 9");
-            //             obj.PageNumber = 9;
-            //         }
-            //     }
-            //     if (obj.FilePath.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
-            //     {
-            //         if (obj.PageNumber != 10)
-            //         {
-            //             Console.WriteLine($"[PDF-INSERT] CORRECTING PAGE: Moving {fileName} from page {obj.PageNumber} to page 10");
-            //             obj.PageNumber = 10;
-            //         }
-            //     }
-            // }
-            
-            // Remove all hardcoded page corrections and related logs
-            // Only use extracted page numbers and document order for insertion
-            
-            // Log the corrected insertion plan
-            Console.WriteLine($"[PDF-INSERT] Corrected insertion plan:");
-            foreach (var obj in objectsByPage)
+            // Log mapping summary
+            Console.WriteLine("[PDF-INSERT] --- MAPPING SUMMARY ---");
+            foreach (var m in mappedObjects)
+                Console.WriteLine($"[MAPPED] {Path.GetFileName(m.obj.FilePath)} -> after page {m.anchorPage} ({m.reason})");
+            foreach (var u in unmappedObjects)
+                Console.WriteLine($"[UNMAPPED] {Path.GetFileName(u.obj.FilePath)} -> after last page ({mainPageCount}) ({u.reason})");
+
+            Console.WriteLine($"[PDF-INSERT] TOTAL EMBEDDED ITEMS (valid): {validObjects.Count}");
+            Console.WriteLine($"[PDF-INSERT] TOTAL MAPPED: {mappedObjects.Count}, TOTAL UNMAPPED: {unmappedObjects.Count}");
+
+            // --- Markdown Table of Mapping Results ---
+            Console.WriteLine("[PDF-INSERT] --- EMBEDDED OBJECT MAPPING TABLE ---");
+            Console.WriteLine("| File | Anchor Page | Mapping Reason | PageNumber | CharPos | OleClass | ProgId | Ext | Size |");
+            Console.WriteLine("|------|-------------|---------------|------------|---------|----------|--------|-----|------|");
+            foreach (var m in mappedObjects)
             {
-                Console.WriteLine($"  - {Path.GetFileName(obj.FilePath)} -> after page {obj.PageNumber} (order: {obj.DocumentOrderIndex})");
+                var obj = m.obj;
+                Console.WriteLine($"| {Path.GetFileName(obj.FilePath)} | {m.anchorPage} | {m.reason} | {obj.PageNumber} | {obj.CharPosition} | {obj.OleClass} | {obj.ProgId} | {Path.GetExtension(obj.FilePath)?.ToLowerInvariant()} | {GetFileSizeString(obj.FilePath)} |");
             }
+            foreach (var u in unmappedObjects)
+            {
+                var obj = u.obj;
+                Console.WriteLine($"| {Path.GetFileName(obj.FilePath)} | {mainPageCount} | {u.reason} | {obj.PageNumber} | {obj.CharPosition} | {obj.OleClass} | {obj.ProgId} | {Path.GetExtension(obj.FilePath)?.ToLowerInvariant()} | {GetFileSizeString(obj.FilePath)} |");
+            }
+            Console.WriteLine("|------|-------------|---------------|------------|---------|----------|--------|-----|------|");
+            Console.WriteLine();
 
+            // Build insertion plan: interleave main pages and mapped objects, then append unmapped objects after last page
+            var objectsByPage = mappedObjects.OrderBy(m => m.anchorPage).ThenBy(m => m.obj.DocumentOrderIndex).ToList();
+            var insertionSequence = new List<object>();
+            for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
+            {
+                insertionSequence.Add(new { Type = "MainPage", Page = mainPage });
+                var pageObjects = objectsByPage.Where(m => m.anchorPage == mainPage).OrderBy(m => m.obj.DocumentOrderIndex).ToList();
+                foreach (var m in pageObjects)
+                    insertionSequence.Add(new { Type = "EmbeddedObject", Object = m.obj });
+            }
+            // Append unmapped objects after last page
+            if (unmappedObjects.Count > 0)
+                Console.WriteLine($"[PDF-INSERT] Appending {unmappedObjects.Count} unmapped embedded objects after last page ({mainPageCount})");
+            foreach (var u in unmappedObjects)
+                insertionSequence.Add(new { Type = "EmbeddedObject", Object = u.obj });
 
+            Console.WriteLine($"[PDF-INSERT] *** SEQUENTIAL INSERTION *** Processing {insertionSequence.Count} items in document order");
 
             try
             {
@@ -142,100 +214,25 @@ namespace MsgToPdfConverter.Services
                 using (var outputPdf = new PdfDocument(pdfWriter))
                 using (var mainPdf = new PdfDocument(new PdfReader(mainPdfPath)))
                 {
-                    int mainPageCount = mainPdf.GetNumberOfPages();
                     int currentOutputPage = 0;
-
-                    Console.WriteLine($"[PDF-INSERT] Main PDF has {mainPageCount} pages");
-
-                    // Validate that no object requests insertion after a non-existent page
-                    foreach (var obj in objectsByPage)
-                    {
-                        // Fallback for missing or invalid page numbers
-                        if (obj.PageNumber <= 0)
-                        {
-                            Console.WriteLine($"[PDF-INSERT] Warning: Object {Path.GetFileName(obj.FilePath)} has missing or invalid PageNumber ({obj.PageNumber}). Assigning to last page.");
-                            obj.PageNumber = mainPageCount;
-                        }
-                        if (obj.PageNumber > mainPageCount)
-                        {
-                            Console.WriteLine($"[PDF-INSERT] Warning: Object {Path.GetFileName(obj.FilePath)} requests insertion after page {obj.PageNumber}, but main PDF only has {mainPageCount} pages. Adjusting to page {mainPageCount}.");
-                            obj.PageNumber = mainPageCount;
-                        }
-                        else if (obj.PageNumber == -1)
-                        {
-                            // Objects with PageNumber = -1 should be inserted after the last page
-                            obj.PageNumber = mainPageCount;
-                            Console.WriteLine($"[PDF-INSERT] Object {Path.GetFileName(obj.FilePath)} has no page number, inserting after last page {mainPageCount}.");
-                        }
-                    }
-
-                    // Re-sort after potential adjustments
-                    objectsByPage = objectsByPage.OrderBy(obj => obj.PageNumber).ThenBy(obj => obj.DocumentOrderIndex).ToList();
-                    
-                    // Log the final insertion plan AFTER adjustments
-                    Console.WriteLine($"[PDF-INSERT] Final insertion plan:");
-                    foreach (var obj in objectsByPage)
-                    {
-                        Console.WriteLine($"  - {Path.GetFileName(obj.FilePath)} -> after page {obj.PageNumber} (order: {obj.DocumentOrderIndex})");
-                    }
-
-                    // Create a proper sequence that interleaves main pages and embedded objects
-                    var insertionSequence = new List<object>();
-                    
-                    // Add all main pages and embedded objects to a sequence in document order
-                    for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
-                    {
-                        // Add the main page
-                        insertionSequence.Add(new { Type = "MainPage", Page = mainPage });
-                        
-                        // Add any embedded objects that come immediately after this main page in document order
-                        var pageObjects = objectsByPage.Where(obj => obj.PageNumber == mainPage)
-                                                      .OrderBy(obj => obj.DocumentOrderIndex)
-                                                      .ToList();
-                        
-                        foreach (var obj in pageObjects)
-                        {
-                            insertionSequence.Add(new { Type = "EmbeddedObject", Object = obj });
-                        }
-                    }
-                    
-                    Console.WriteLine($"[PDF-INSERT] *** SEQUENTIAL INSERTION *** Processing {insertionSequence.Count} items in document order");
-                    
-                    // Process the sequence in order
                     foreach (var item in insertionSequence)
                     {
                         var itemType = item.GetType().GetProperty("Type").GetValue(item).ToString();
-                        
                         if (itemType == "MainPage")
                         {
                             var mainPage = (int)item.GetType().GetProperty("Page").GetValue(item);
-                            Console.WriteLine($"[PDF-INSERT] *** MAIN PAGE INSERTION *** About to copy main page {mainPage} to output PDF");
                             mainPdf.CopyPagesTo(mainPage, mainPage, outputPdf);
                             currentOutputPage++;
-                            Console.WriteLine($"[PDF-INSERT] *** MAIN PAGE INSERTED *** Main page {mainPage} copied to output page {currentOutputPage} (total pages now: {outputPdf.GetNumberOfPages()})");
                         }
                         else if (itemType == "EmbeddedObject")
                         {
                             var obj = (InteropEmbeddedExtractor.ExtractedObjectInfo)item.GetType().GetProperty("Object").GetValue(item);
-                            Console.WriteLine($"[PDF-INSERT] *** EMBEDDED OBJECT INSERTION *** About to insert {Path.GetFileName(obj.FilePath)} in document order, will start at OUTPUT page {currentOutputPage + 1}");
-                            
-                            int beforeInsert = currentOutputPage;
-                            int totalPagesBefore = outputPdf.GetNumberOfPages();
                             currentOutputPage = InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage, progressTick);
-                            int totalPagesAfter = outputPdf.GetNumberOfPages();
-                            
-                            int pagesInserted = currentOutputPage - beforeInsert;
-                            int actualPagesAdded = totalPagesAfter - totalPagesBefore;
-                            Console.WriteLine($"[PDF-INSERT] *** EMBEDDED OBJECT COMPLETE *** {Path.GetFileName(obj.FilePath)} inserted: {pagesInserted} pages tracked, {actualPagesAdded} pages actually added, now occupying output pages {beforeInsert + 1} to {currentOutputPage} (total PDF pages: {totalPagesAfter})");
                         }
                     }
-                    
-                    // Log final page summary
                     Console.WriteLine($"[PDF-INSERT] *** FINAL PAGE SUMMARY ***");
                     Console.WriteLine($"[PDF-INSERT] Total pages in final PDF: {outputPdf.GetNumberOfPages()}, original main PDF: {mainPageCount}");
-                    Console.WriteLine($"[PDF-INSERT] *** CORRECT ORDER ACHIEVED *** The PDF now has: Main Page 1, [Embedded Objects for Page 1], Main Page 2, [Embedded Objects for Page 2], etc.");
                 }
-
                 Console.WriteLine($"[PDF-INSERT] Successfully created PDF with embedded files: {outputPdfPath}");
             }
             catch (Exception ex)

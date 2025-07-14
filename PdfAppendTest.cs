@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using iText.Kernel.Pdf;
+using MsgToPdfConverter.Utils;
 
 namespace MsgToPdfConverter
 {
@@ -19,6 +20,53 @@ namespace MsgToPdfConverter
                     {
                         srcPdf.CopyPagesTo(1, srcPdf.GetNumberOfPages(), pdfDoc);
                     }
+                }
+            }
+        }
+
+        // Appends embedded PDFs after their mapped main page
+        public static void AppendPdfsWithEmbedded(string mainPdf, List<InteropEmbeddedExtractor.ExtractedObjectInfo> embeddedObjects, string outputFile)
+        {
+            // Sort embedded objects by PageNumber, then DocumentOrderIndex
+            embeddedObjects.Sort((a, b) => a.PageNumber != b.PageNumber ? a.PageNumber.CompareTo(b.PageNumber) : a.DocumentOrderIndex.CompareTo(b.DocumentOrderIndex));
+            using (var pdfWriter = new PdfWriter(outputFile))
+            using (var pdfDoc = new PdfDocument(pdfWriter))
+            using (var srcPdf = new PdfDocument(new PdfReader(mainPdf)))
+            {
+                int mainPageCount = srcPdf.GetNumberOfPages();
+                int currentPage = 1;
+                int embedIdx = 0;
+                for (; currentPage <= mainPageCount; currentPage++)
+                {
+                    srcPdf.CopyPagesTo(currentPage, currentPage, pdfDoc);
+                    // Insert all embedded objects mapped to this page
+                    while (embedIdx < embeddedObjects.Count && embeddedObjects[embedIdx].PageNumber == currentPage)
+                    {
+                        var obj = embeddedObjects[embedIdx];
+                        if (File.Exists(obj.FilePath))
+                        {
+                            using (var embedPdf = new PdfDocument(new PdfReader(obj.FilePath)))
+                            {
+                                int embedPages = embedPdf.GetNumberOfPages();
+                                embedPdf.CopyPagesTo(1, embedPages, pdfDoc);
+                            }
+                        }
+                        embedIdx++;
+                    }
+                }
+                // If any embedded objects are mapped after the last page, append them
+                while (embedIdx < embeddedObjects.Count)
+                {
+                    var obj = embeddedObjects[embedIdx];
+                    if (File.Exists(obj.FilePath))
+                    {
+                        using (var embedPdf = new PdfDocument(new PdfReader(obj.FilePath)))
+                        {
+                            int embedPages = embedPdf.GetNumberOfPages();
+                            embedPdf.CopyPagesTo(1, embedPages, pdfDoc);
+                        }
+                    }
+                    embedIdx++;
                 }
             }
         }
