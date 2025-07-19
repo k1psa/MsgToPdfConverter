@@ -145,7 +145,7 @@ namespace MsgToPdfConverter
             };
             this.Startup += (s, evt) =>
             {
-                // On startup, try to drain any pending files
+                // On startup, try to drain any pending files, expanding folders to files
                 System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
                 {
                     var mw = System.Windows.Application.Current.MainWindow as MainWindow;
@@ -154,10 +154,23 @@ namespace MsgToPdfConverter
                         var vm = mw.DataContext as MainWindowViewModel;
                         if (vm != null)
                         {
+                            var fileListService = new MsgToPdfConverter.Services.FileListService();
+                            var updated = new System.Collections.Generic.List<string>(vm.SelectedFiles);
                             while (pendingFiles.TryDequeue(out var pf))
                             {
-                                if (!vm.SelectedFiles.Contains(pf))
-                                    vm.SelectedFiles.Add(pf);
+                                if (System.IO.Directory.Exists(pf))
+                                {
+                                    updated = fileListService.AddFilesFromDirectory(updated, pf);
+                                }
+                                else if (System.IO.File.Exists(pf))
+                                {
+                                    updated = fileListService.AddFiles(updated, new[] { pf });
+                                }
+                            }
+                            foreach (var f in updated)
+                            {
+                                if (!vm.SelectedFiles.Contains(f))
+                                    vm.SelectedFiles.Add(f);
                             }
                         }
                     }
