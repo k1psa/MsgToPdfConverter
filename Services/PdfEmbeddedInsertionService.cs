@@ -307,13 +307,6 @@ namespace MsgToPdfConverter.Services
                 else if (obj.FilePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {
                     // --- ZIP HANDLING ---
-                    string zipHash = ComputeFileHash(obj.FilePath);
-                    if (zipHash != null && processedArchiveHashes.Contains(zipHash))
-                    {
-                        Console.WriteLine($"[PDF-INSERT] Skipping duplicate ZIP archive by content hash: {Path.GetFileName(obj.FilePath)}");
-                        return currentOutputPage;
-                    }
-                    if (zipHash != null) processedArchiveHashes.Add(zipHash);
                     Console.WriteLine($"[PDF-INSERT] *** ZIP PROCESSING START *** Extracting and inserting ZIP: {Path.GetFileName(obj.FilePath)} after page {currentOutputPage}");
                     try
                     {
@@ -361,13 +354,6 @@ namespace MsgToPdfConverter.Services
                 else if (obj.FilePath.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
                 {
                     // --- 7Z HANDLING ---
-                    string sevenZHash = ComputeFileHash(obj.FilePath);
-                    if (sevenZHash != null && processedArchiveHashes.Contains(sevenZHash))
-                    {
-                        Console.WriteLine($"[PDF-INSERT] Skipping duplicate 7Z archive by content hash: {Path.GetFileName(obj.FilePath)}");
-                        return currentOutputPage;
-                    }
-                    if (sevenZHash != null) processedArchiveHashes.Add(sevenZHash);
                     Console.WriteLine($"[PDF-INSERT] *** 7Z PROCESSING START *** Extracting and inserting 7Z: {Path.GetFileName(obj.FilePath)} after page {currentOutputPage}");
                     try
                     {

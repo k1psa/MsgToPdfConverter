@@ -461,18 +461,43 @@ public class InteropEmbeddedExtractor
             // --- 5. Remove duplicates by FilePath (if any), but keep all unique extracted objects ---
 
             // Remove orphaned .xlsx if an in-flow .xlsx exists (even if file names differ)
-            var inFlowXlsx = results.FirstOrDefault(r => r.ParagraphIndex >= 0 && Path.GetExtension(r.FilePath).Equals(".xlsx", StringComparison.OrdinalIgnoreCase));
-            if (inFlowXlsx != null) {
+
+            // --- Improved deduplication: only remove true duplicates (same file path and same content hash) ---
+            // Compute hash for each file
+            foreach (var obj in results)
+            {
+                try
+                {
+                    if (!string.IsNullOrEmpty(obj.FilePath) && File.Exists(obj.FilePath))
+                    {
+                        using (var stream = File.OpenRead(obj.FilePath))
+                        {
+                            using (var sha = System.Security.Cryptography.SHA256.Create())
+                            {
+                                var hash = sha.ComputeHash(stream);
+                                obj.ExtractedFileName += "|HASH:" + BitConverter.ToString(hash).Replace("-", "");
+                            }
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            // Remove only true duplicates (same file path and same content hash)
+            results = results
+
+                .GroupBy(r => r.FilePath + "|" + (r.ExtractedFileName ?? ""), StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .OrderBy(r => r.DocumentOrderIndex)
+                .ToList();
+
+            // Remove orphaned .xlsx if any in-flow .xlsx exists (even if file names or hashes differ)
+            bool hasInFlowXlsx = results.Any(r => r.ParagraphIndex >= 0 && Path.GetExtension(r.FilePath).Equals(".xlsx", StringComparison.OrdinalIgnoreCase));
+            if (hasInFlowXlsx) {
                 results = results.Where(r =>
                     !(r.ParagraphIndex < 0 && Path.GetExtension(r.FilePath).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
                 ).ToList();
             }
-
-            results = results
-                .GroupBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
-                .Select(g => g.First())
-                .OrderBy(r => r.DocumentOrderIndex)
-                .ToList();
 
             return results;
         }
