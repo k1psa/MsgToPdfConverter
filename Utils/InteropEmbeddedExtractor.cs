@@ -9,20 +9,23 @@ using MsgReader;
 
 namespace MsgToPdfConverter.Utils
 {
-    public class InteropEmbeddedExtractor
+public class InteropEmbeddedExtractor
+{
+    public class ExtractedObjectInfo
     {
-        public class ExtractedObjectInfo
-        {
-            public string FilePath { get; set; }
-            public int PageNumber { get; set; } // 1-based page number
-            public string OleClass { get; set; }
-            public int DocumentOrderIndex { get; set; } // Order in document flow
-            public string ExtractedFileName { get; set; }
-            public string ProgId { get; set; } // For better matching
-            public int ParagraphIndex { get; set; } // For position-based matching
-            public int RunIndex { get; set; } // For position-based matching
-            public int CharPosition { get; set; } // Character position in document
-        }
+        public string FilePath { get; set; }
+        public int PageNumber { get; set; } // 1-based page number
+        public string OleClass { get; set; }
+        public int DocumentOrderIndex { get; set; } // Order in document flow
+        public string ExtractedFileName { get; set; }
+        public string ProgId { get; set; } // For better matching
+        public int ParagraphIndex { get; set; } // For position-based matching
+        public int RunIndex { get; set; } // For position-based matching
+        public int CharPosition { get; set; } // Character position in document
+    // ...existing code...
+}
+// ...existing code...
+
 
         /// <summary>
         /// Extracts embedded OLE objects from a .docx file using OpenXml, saving them to the specified output directory.
@@ -71,6 +74,43 @@ namespace MsgToPdfConverter.Utils
                             }
                             charPos++;
                             paraIdx++;
+                        }
+
+                        // --- Explicitly extract all .xlsx files from /word/embeddings ---
+                        int nextOrderIndex = results.Count > 0 ? results.Max(r => r.DocumentOrderIndex) + 1 : 0;
+                        foreach (var rel in mainPart.Parts)
+                        {
+                            var partUri = rel.OpenXmlPart.Uri.ToString();
+                            if (partUri.StartsWith("/word/embeddings/") && partUri.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+                            {
+                                string fileName = Path.GetFileName(partUri);
+                                string outPath = Path.Combine(outputDir, fileName);
+                                // Only extract if not already present
+                                if (!File.Exists(outPath))
+                                {
+                                    using (var fs = new FileStream(outPath, FileMode.Create, FileAccess.Write))
+                                    {
+                                        rel.OpenXmlPart.GetStream().CopyTo(fs);
+                                    }
+                                    Console.WriteLine($"[InteropExtractor] Extracted orphaned Excel: {outPath}");
+                                }
+                                // Only add to results if not already present
+                                if (!results.Any(r => Path.GetFileName(r.FilePath).Equals(fileName, StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    results.Add(new ExtractedObjectInfo {
+                                        FilePath = outPath,
+                                        PageNumber = -1,
+                                        OleClass = "Excel.Sheet",
+                                        DocumentOrderIndex = nextOrderIndex++,
+                                        ExtractedFileName = fileName,
+                                        ProgId = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        ParagraphIndex = -1,
+                                        RunIndex = -1,
+                                        CharPosition = -1
+                                    });
+                                    Console.WriteLine($"[InteropExtractor] Added orphaned Excel to results: {fileName}");
+                                }
+                            }
                         }
                     }
                 }
@@ -154,6 +194,54 @@ namespace MsgToPdfConverter.Utils
             catch (Exception ex)
             {
                 Console.WriteLine($"[InteropExtractor] OpenXml extraction error: {ex.Message}");
+            }
+
+
+            // --- 2b. Explicitly extract all .xlsx files from /word/embeddings ---
+            try
+            {
+                using (var wordDoc = WordprocessingDocument.Open(docxPath, false))
+                {
+                    int nextOrderIndex = results.Count > 0 ? results.Max(r => r.DocumentOrderIndex) + 1 : 0;
+                    foreach (var rel in wordDoc.MainDocumentPart.Parts)
+                    {
+                        var partUri = rel.OpenXmlPart.Uri.ToString();
+                        if (partUri.StartsWith("/word/embeddings/") && partUri.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
+                        {
+                            string fileName = Path.GetFileName(partUri);
+                            string outPath = Path.Combine(outputDir, fileName);
+                            // Only extract if not already present
+                            if (!File.Exists(outPath))
+                            {
+                                using (var fs = new FileStream(outPath, FileMode.Create, FileAccess.Write))
+                                {
+                                    rel.OpenXmlPart.GetStream().CopyTo(fs);
+                                }
+                                Console.WriteLine($"[InteropExtractor] Extracted orphaned Excel: {outPath}");
+                            }
+                            // Only add to results if not already present
+                            if (!results.Any(r => Path.GetFileName(r.FilePath).Equals(fileName, StringComparison.OrdinalIgnoreCase)))
+                            {
+                                results.Add(new ExtractedObjectInfo {
+                                    FilePath = outPath,
+                                    PageNumber = -1,
+                                    OleClass = "Excel.Sheet",
+                                    DocumentOrderIndex = nextOrderIndex++,
+                                    ExtractedFileName = fileName,
+                                    ProgId = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    ParagraphIndex = -1,
+                                    RunIndex = -1,
+                                    CharPosition = -1
+                                });
+                                Console.WriteLine($"[InteropExtractor] Added orphaned Excel to results: {fileName}");
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[InteropExtractor] Error extracting orphaned Excel: {ex.Message}");
             }
 
             // After results are populated
@@ -321,9 +409,10 @@ namespace MsgToPdfConverter.Utils
             }
 
             // --- 5. Return only one object per logical annex (no duplicates) ---
-            // (Assume one per DocumentOrderIndex, as OpenXml order is correct)
+
+            // --- 5. Remove duplicates by FilePath (if any), but keep all unique extracted objects ---
             results = results
-                .GroupBy(r => r.DocumentOrderIndex)
+                .GroupBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.First())
                 .OrderBy(r => r.DocumentOrderIndex)
                 .ToList();

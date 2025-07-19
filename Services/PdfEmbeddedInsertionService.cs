@@ -81,26 +81,13 @@ namespace MsgToPdfConverter.Services
                 return;
             }
 
-            Console.WriteLine($"[PDF-INSERT] Inserting {validObjects.Count} embedded files into {mainPdfPath}");
-
-            // --- Improved Mapping Logic ---
-            // 1. Try to map each object to a page using PageNumber, CharPos, OleClass, ProgId, file extension, etc.
-            // 2. If not mappable, assign to last page and log as unmapped
+            // --- Sequential Insertion Logic ---
             int mainPageCount = 0;
-            var mappedObjects = new List<(InteropEmbeddedExtractor.ExtractedObjectInfo obj, int anchorPage, string reason)>();
-            var unmappedObjects = new List<(InteropEmbeddedExtractor.ExtractedObjectInfo obj, string reason)>();
-
-            // Get main page count early for fallback
-            try
+            using (var mainPdf = new PdfDocument(new PdfReader(mainPdfPath)))
             {
-                using (var mainPdf = new PdfDocument(new PdfReader(mainPdfPath)))
-                {
-                    mainPageCount = mainPdf.GetNumberOfPages();
-                }
+                mainPageCount = mainPdf.GetNumberOfPages();
             }
-            catch { mainPageCount = 1; }
 
-            // Build anchor candidates from extractedObjects metadata
             var anchorCandidates = validObjects
                 .Where(o => o.PageNumber > 0 && o.PageNumber <= mainPageCount)
                 .Select(o => new {
@@ -112,6 +99,9 @@ namespace MsgToPdfConverter.Services
                     DocumentOrderIndex = o.DocumentOrderIndex
                 })
                 .ToList();
+
+            var mappedObjects = new List<(InteropEmbeddedExtractor.ExtractedObjectInfo obj, int anchorPage, string reason)>();
+            var unmappedObjects = new List<(InteropEmbeddedExtractor.ExtractedObjectInfo obj, string reason)>();
 
             foreach (var obj in validObjects)
             {
@@ -136,8 +126,10 @@ namespace MsgToPdfConverter.Services
                     }
                 }
                 // 3. Try matching ProgId/OleClass/file extension
-                else if (!string.IsNullOrWhiteSpace(obj.ProgId) || !string.IsNullOrWhiteSpace(obj.OleClass))
+                else if (!string.IsNullOrWhiteSpace(obj.ProgId) || !string.IsNullOrWhiteSpace(obj.OleClass) ||
+                         Path.GetExtension(obj.FilePath)?.ToLowerInvariant() == ".xls")
                 {
+                    // Special handling: always try to map .xls by extension if not already mapped
                     var match = anchorCandidates.FirstOrDefault(a =>
                         (!string.IsNullOrWhiteSpace(obj.ProgId) && a.ProgId == obj.ProgId) ||
                         (!string.IsNullOrWhiteSpace(obj.OleClass) && a.OleClass == obj.OleClass) ||
@@ -189,24 +181,8 @@ namespace MsgToPdfConverter.Services
             Console.WriteLine("|------|-------------|---------------|------------|---------|----------|--------|-----|------|");
             Console.WriteLine();
 
-            // Build insertion plan: interleave main pages and mapped objects, then append unmapped objects after last page
+            // Interleave main pages and mapped embedded objects, then append unmapped objects after last page
             var objectsByPage = mappedObjects.OrderBy(m => m.anchorPage).ThenBy(m => m.obj.DocumentOrderIndex).ToList();
-            var insertionSequence = new List<object>();
-            for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
-            {
-                insertionSequence.Add(new { Type = "MainPage", Page = mainPage });
-                var pageObjects = objectsByPage.Where(m => m.anchorPage == mainPage).OrderBy(m => m.obj.DocumentOrderIndex).ToList();
-                foreach (var m in pageObjects)
-                    insertionSequence.Add(new { Type = "EmbeddedObject", Object = m.obj });
-            }
-            // Append unmapped objects after last page
-            if (unmappedObjects.Count > 0)
-                Console.WriteLine($"[PDF-INSERT] Appending {unmappedObjects.Count} unmapped embedded objects after last page ({mainPageCount})");
-            foreach (var u in unmappedObjects)
-                insertionSequence.Add(new { Type = "EmbeddedObject", Object = u.obj });
-
-            Console.WriteLine($"[PDF-INSERT] *** SEQUENTIAL INSERTION *** Processing {insertionSequence.Count} items in document order");
-
             try
             {
                 using (var outputStream = new FileStream(outputPdfPath, FileMode.Create, FileAccess.Write))
@@ -215,20 +191,38 @@ namespace MsgToPdfConverter.Services
                 using (var mainPdf = new PdfDocument(new PdfReader(mainPdfPath)))
                 {
                     int currentOutputPage = 0;
-                    foreach (var item in insertionSequence)
+                    for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
                     {
-                        var itemType = item.GetType().GetProperty("Type").GetValue(item).ToString();
-                        if (itemType == "MainPage")
+                    Console.WriteLine($"[PDF-INSERT][DEBUG] Copying main page {mainPage} (output page {currentOutputPage + 1})");
+                    mainPdf.CopyPagesTo(mainPage, mainPage, outputPdf);
+                    currentOutputPage++;
+                    var pageObjects = objectsByPage.Where(m => m.anchorPage == mainPage).OrderBy(m => m.obj.DocumentOrderIndex).ToList();
+                    if (pageObjects.Count > 0)
+                    {
+                        foreach (var m in pageObjects)
                         {
-                            var mainPage = (int)item.GetType().GetProperty("Page").GetValue(item);
-                            mainPdf.CopyPagesTo(mainPage, mainPage, outputPdf);
-                            currentOutputPage++;
+                            // Prevent duplicate insertion at the beginning if the embedded file is already present in the main PDF at that position
+                            if (mainPage <= 2)
+                            {
+                                // Heuristic: skip if the embedded file is a .doc, .docx, .xls, or .xlsx and its anchor page is 1 or 2
+                                var ext = Path.GetExtension(m.obj.FilePath)?.ToLowerInvariant();
+                                if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
+                                {
+                                    Console.WriteLine($"[PDF-INSERT][SKIP] Skipping duplicate insertion of {Path.GetFileName(m.obj.FilePath)} after page {mainPage} (already present in main PDF)");
+                                    continue;
+                                }
+                            }
+                            Console.WriteLine($"[PDF-INSERT][DEBUG] Inserting embedded file after page {mainPage}: {Path.GetFileName(m.obj.FilePath)} (anchorPage={m.anchorPage}, ext={Path.GetExtension(m.obj.FilePath)?.ToLowerInvariant()})");
+                            currentOutputPage = InsertEmbeddedObject(m.obj, outputPdf, currentOutputPage, progressTick);
                         }
-                        else if (itemType == "EmbeddedObject")
-                        {
-                            var obj = (InteropEmbeddedExtractor.ExtractedObjectInfo)item.GetType().GetProperty("Object").GetValue(item);
-                            currentOutputPage = InsertEmbeddedObject_NoSeparator(obj, outputPdf, currentOutputPage, progressTick);
-                        }
+                    }
+                    }
+                    // Append unmapped objects after last page
+                    if (unmappedObjects.Count > 0)
+                        Console.WriteLine($"[PDF-INSERT] Appending {unmappedObjects.Count} unmapped embedded objects after last page ({mainPageCount})");
+                    foreach (var u in unmappedObjects)
+                    {
+                    currentOutputPage = InsertEmbeddedObject(u.obj, outputPdf, currentOutputPage, progressTick);
                     }
                     Console.WriteLine($"[PDF-INSERT] *** FINAL PAGE SUMMARY ***");
                     Console.WriteLine($"[PDF-INSERT] Total pages in final PDF: {outputPdf.GetNumberOfPages()}, original main PDF: {mainPageCount}");
@@ -274,9 +268,51 @@ namespace MsgToPdfConverter.Services
                 {
                     return InsertDocxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
                 }
+                else if (obj.FilePath.EndsWith(".doc", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Convert .doc to PDF using OfficeConversionService and insert
+                    string tempPdfPath = Path.Combine(Path.GetTempPath(), $"doc_temp_{Guid.NewGuid()}.pdf");
+                    try
+                    {
+                        bool converted = OfficeConversionService.TryConvertOfficeToPdf(obj.FilePath, tempPdfPath);
+                        if (converted && File.Exists(tempPdfPath))
+                        {
+                            return InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentOutputPage, "DOC", progressTick);
+                        }
+                        else
+                        {
+                            return InsertPlaceholderForFile(obj.FilePath, outputPdf, currentOutputPage, "DOC");
+                        }
+                    }
+                    finally
+                    {
+                        try { if (File.Exists(tempPdfPath)) File.Delete(tempPdfPath); } catch { }
+                    }
+                }
                 else if (obj.FilePath.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
                 {
                     return InsertXlsxFile_NoSeparator(obj.FilePath, outputPdf, currentOutputPage);
+                }
+                else if (obj.FilePath.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Convert .xls to PDF using OfficeConversionService and insert
+                    string tempPdfPath = Path.Combine(Path.GetTempPath(), $"xls_temp_{Guid.NewGuid()}.pdf");
+                    try
+                    {
+                        bool converted = OfficeConversionService.TryConvertOfficeToPdf(obj.FilePath, tempPdfPath);
+                        if (converted && File.Exists(tempPdfPath))
+                        {
+                            return InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentOutputPage, "XLS", progressTick);
+                        }
+                        else
+                        {
+                            return InsertPlaceholderForFile(obj.FilePath, outputPdf, currentOutputPage, "XLS");
+                        }
+                    }
+                    finally
+                    {
+                        try { if (File.Exists(tempPdfPath)) File.Delete(tempPdfPath); } catch { }
+                    }
                 }
                 else if (obj.FilePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {

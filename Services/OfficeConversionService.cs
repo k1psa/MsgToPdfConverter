@@ -28,35 +28,34 @@ namespace MsgToPdfConverter.Services
             {
                 try
                 {
+                    // Extract embedded OLE objects before PDF export (for both Word and Excel)
+                    var extractedObjects = new List<MsgToPdfConverter.Utils.InteropEmbeddedExtractor.ExtractedObjectInfo>();
+                    string tempDir = null;
+                    try
+                    {
+                        tempDir = Path.Combine(Path.GetTempPath(), "MsgToPdf_Embedded_" + Guid.NewGuid());
+                        Directory.CreateDirectory(tempDir);
+                        extractedObjects = MsgToPdfConverter.Utils.InteropEmbeddedExtractor.ExtractEmbeddedObjects(inputPath, tempDir);
+                        Console.WriteLine($"[InteropExtractor] Total extracted objects: {extractedObjects.Count}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"[InteropExtractor] Extraction failed: {ex.Message}");
+                    }
+                    progressTick?.Invoke(); // Tick: after embedded extraction
+
+                    string mainPdfPath = outputPdf;
+                    if (extractedObjects.Count > 0)
+                    {
+                        // If we have embedded objects, create the main PDF in a temp location first
+                        mainPdfPath = Path.Combine(Path.GetTempPath(), $"main_pdf_{Guid.NewGuid()}.pdf");
+                    }
+
                     if (ext == ".doc" || ext == ".docx")
                     {
-                        progressTick?.Invoke(); // Tick: starting extraction/conversion
-                        // Extract embedded OLE objects before PDF export
-                        var extractedObjects = new List<MsgToPdfConverter.Utils.InteropEmbeddedExtractor.ExtractedObjectInfo>();
-                        string tempDir = null;
-                        try
-                        {
-                            tempDir = Path.Combine(Path.GetTempPath(), "MsgToPdf_Embedded_" + Guid.NewGuid());
-                            Directory.CreateDirectory(tempDir);
-                            extractedObjects = MsgToPdfConverter.Utils.InteropEmbeddedExtractor.ExtractEmbeddedObjects(inputPath, tempDir);
-                            Console.WriteLine($"[InteropExtractor] Total extracted objects: {extractedObjects.Count}");
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[InteropExtractor] Extraction failed: {ex.Message}");
-                        }
-                        progressTick?.Invoke(); // Tick: after embedded extraction
-                        // Create main PDF from Word document
-                        string mainPdfPath = outputPdf;
-                        if (extractedObjects.Count > 0)
-                        {
-                            // If we have embedded objects, create the main PDF in a temp location first
-                            mainPdfPath = Path.Combine(Path.GetTempPath(), $"main_pdf_{Guid.NewGuid()}.pdf");
-                        }
                         var wordApp = new Microsoft.Office.Interop.Word.Application();
                         var doc = wordApp.Documents.Open(inputPath);
                         progressTick?.Invoke(); // Tick: after opening document
-  
                         doc.ExportAsFixedFormat(mainPdfPath, Microsoft.Office.Interop.Word.WdExportFormat.wdExportFormatPDF);
                         progressTick?.Invoke(); // Tick: after exporting to PDF
                         doc.Close();
@@ -65,44 +64,6 @@ namespace MsgToPdfConverter.Services
                         Marshal.ReleaseComObject(wordApp);
                         GC.Collect();
                         GC.WaitForPendingFinalizers();
-                        // Insert embedded files into the PDF if any were extracted
-                        if (extractedObjects.Count > 0)
-                        {
-                            try
-                            {
-                                Console.WriteLine($"[PDF-EMBED] Inserting {extractedObjects.Count} embedded files into PDF");
-                                PdfEmbeddedInsertionService.InsertEmbeddedFiles(mainPdfPath, extractedObjects, outputPdf, progressTick);
-                                progressTick?.Invoke(); // Tick: after embedding
-                                // Clean up temp main PDF
-                                if (File.Exists(mainPdfPath) && mainPdfPath != outputPdf)
-                                {
-                                    File.Delete(mainPdfPath);
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[PDF-EMBED] Failed to insert embedded files: {ex.Message}");
-                                // Fallback: copy the main PDF without embedded files
-                                if (mainPdfPath != outputPdf)
-                                {
-                                    File.Copy(mainPdfPath, outputPdf, true);
-                                    File.Delete(mainPdfPath);
-                                }
-                            }
-                        }
-                        // Clean up temp extraction directory
-                        if (!string.IsNullOrEmpty(tempDir) && Directory.Exists(tempDir))
-                        {
-                            try
-                            {
-                                Directory.Delete(tempDir, true);
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"[CLEANUP] Failed to delete temp directory {tempDir}: {ex.Message}");
-                            }
-                        }
-                        result = true;
                     }
                     else if (ext == ".xls" || ext == ".xlsx")
                     {
@@ -113,7 +74,7 @@ namespace MsgToPdfConverter.Services
                         {
                             workbooks = excelApp.Workbooks;
                             wb = workbooks.Open(inputPath);
-                            wb.ExportAsFixedFormat(Microsoft.Office.Interop.Excel.XlFixedFormatType.xlTypePDF, outputPdf);
+                            wb.ExportAsFixedFormat(Microsoft.Office.Interop.Excel.XlFixedFormatType.xlTypePDF, mainPdfPath);
                         }
                         finally
                         {
@@ -134,19 +95,57 @@ namespace MsgToPdfConverter.Services
                             GC.Collect();
                             GC.WaitForPendingFinalizers();
                         }
-                        result = true;
                     }
+
+                    // Insert embedded files into the PDF if any were extracted (for both Word and Excel)
+                    if (extractedObjects.Count > 0)
+                    {
+                        try
+                        {
+                            Console.WriteLine($"[PDF-EMBED] Inserting {extractedObjects.Count} embedded files into PDF");
+                            PdfEmbeddedInsertionService.InsertEmbeddedFiles(mainPdfPath, extractedObjects, outputPdf, progressTick);
+                            progressTick?.Invoke(); // Tick: after embedding
+                            // Clean up temp main PDF
+                            if (File.Exists(mainPdfPath) && mainPdfPath != outputPdf)
+                            {
+                                File.Delete(mainPdfPath);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[PDF-EMBED] Failed to insert embedded files: {ex.Message}");
+                            // Fallback: copy the main PDF without embedded files
+                            if (mainPdfPath != outputPdf)
+                            {
+                                File.Copy(mainPdfPath, outputPdf, true);
+                                File.Delete(mainPdfPath);
+                            }
+                        }
+                    }
+                    // Clean up temp extraction directory
+                    if (!string.IsNullOrEmpty(tempDir) && Directory.Exists(tempDir))
+                    {
+                        try
+                        {
+                            Directory.Delete(tempDir, true);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine($"[CLEANUP] Failed to delete temp directory {tempDir}: {ex.Message}");
+                        }
+                    }
+                    result = true;
                 }
                 catch (Exception ex)
                 {
                     threadEx = ex;
                 }
             });
-            
+
             thread.SetApartmentState(System.Threading.ApartmentState.STA);
             thread.Start();
             thread.Join();
-            
+
             // Give Office extra time to release the generated PDF file
             if (result)
             {

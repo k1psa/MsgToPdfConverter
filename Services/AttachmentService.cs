@@ -1714,8 +1714,7 @@ private int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tem
                                     if (_tryConvertOfficeToPdf != null && _tryConvertOfficeToPdf(outPath, pdfPath))
                                     {
                                         allTempFiles.Add(pdfPath);
-                                        if (allPdfFiles != null)
-                                            allPdfFiles.Add(pdfPath);
+                                        // Do NOT add to allPdfFiles! Embedded PDFs should only be inserted at mapped positions, not merged at start/end.
                                     }
                                     progressTick?.Invoke();
                                     count++;
