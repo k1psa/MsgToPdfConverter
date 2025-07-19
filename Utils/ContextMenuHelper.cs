@@ -8,6 +8,8 @@ namespace MsgToPdfConverter.Utils
     {
         private const string MenuKeyPath = @"Software\Classes\*\shell\AddToMsgToPDF";
         private const string CommandKeyPath = MenuKeyPath + "\\command";
+        private const string FolderMenuKeyPath = @"Software\Classes\Directory\shell\AddToMsgToPDF";
+        private const string FolderCommandKeyPath = FolderMenuKeyPath + "\\command";
         private const string MenuText = "Add to MsgToPDF list";
 
         public static void SetContextMenu(bool enable)
@@ -15,12 +17,11 @@ namespace MsgToPdfConverter.Utils
             string exePath = System.Reflection.Assembly.GetExecutingAssembly().Location;
             if (enable)
             {
+                // For files
                 using (var key = Registry.CurrentUser.CreateSubKey(MenuKeyPath))
                 {
                     key.SetValue(null, MenuText);
-                    // Set icon for menu item
                     key.SetValue("Icon", exePath);
-                    // Ensure 'Extended' value is NOT set so it appears in the main context menu
                     if (key.GetValue("Extended") != null)
                         key.DeleteValue("Extended");
                 }
@@ -28,10 +29,23 @@ namespace MsgToPdfConverter.Utils
                 {
                     key.SetValue(null, $"\"{exePath}\" \"%1\"");
                 }
+                // For folders
+                using (var key = Registry.CurrentUser.CreateSubKey(FolderMenuKeyPath))
+                {
+                    key.SetValue(null, MenuText);
+                    key.SetValue("Icon", exePath);
+                    if (key.GetValue("Extended") != null)
+                        key.DeleteValue("Extended");
+                }
+                using (var key = Registry.CurrentUser.CreateSubKey(FolderCommandKeyPath))
+                {
+                    key.SetValue(null, $"\"{exePath}\" \"%1\"");
+                }
             }
             else
             {
                 try { Registry.CurrentUser.DeleteSubKeyTree(MenuKeyPath, false); } catch { }
+                try { Registry.CurrentUser.DeleteSubKeyTree(FolderMenuKeyPath, false); } catch { }
             }
         }
 
