@@ -20,8 +20,131 @@ namespace MsgToPdfConverter
                 return;
             }
 
+            // Validation test mode: test page ordering logic
+            if (e.Args != null && e.Args.Length >= 1 && e.Args[0] == "--validate")
+            {
+                ValidationTest.TestPageOrderingLogic();
+                Environment.Exit(0);
+                return;
+            }
+            // Test mode: test embedded extraction
+            else if (e.Args != null && e.Args.Length >= 1 && e.Args[0] == "--test")
+            {
+                string testFile = e.Args.Length > 1 ? e.Args[1] : "a.docx";
+                TestExtraction.TestEmbeddedExtraction(testFile);
+                Environment.Exit(0);
+                return;
+            }
+
+            // Check .NET Framework before starting WPF
+            if (!Program.IsDotNetFrameworkInstalled())
+            {
+                System.Windows.MessageBox.Show(
+                    ".NET Framework 4.8 or higher is required to run this application.\n\n" +
+                    "Please install it from:\n" +
+                    "https://dotnet.microsoft.com/download/dotnet-framework",
+                    ".NET Framework Required",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Error);
+                Environment.Exit(1);
+                return;
+            }
+            // Check for Microsoft Office (Word and Excel) before starting WPF
+            if (!Program.IsOfficeInstalled())
+            {
+                System.Windows.MessageBox.Show(
+                    "Microsoft Office (Word and Excel) is required to convert Office documents.\n\n" +
+                    "Please install Microsoft Office and try again.",
+                    "Microsoft Office Not Found",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Error);
+                Environment.Exit(1);
+                return;
+            }
+
+            // Single-instance logic
+            var singleInstance = new Utils.SingleInstanceManager();
+            if (!singleInstance.IsFirstInstance)
+            {
+                // If not first instance and file argument, send to running instance
+                if (e.Args != null && e.Args.Length == 1 && File.Exists(e.Args[0]))
+                {
+                    try { singleInstance.SendFileToFirstInstance(e.Args[0]); } catch { }
+                }
+                Environment.Exit(0);
+                return;
+            }
+
+            // Diagnostic logging for single-instance issues
+            try
+            {
+                string logPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "MsgToPdfConverter_debuglog.txt");
+                System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] Entering normal WPF mode. PID: {System.Diagnostics.Process.GetCurrentProcess().Id}\n");
+            }
+            catch { }
+
+            var pendingFiles = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            singleInstance.FileReceived += (file) =>
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                {
+                    var mw = System.Windows.Application.Current.MainWindow as MainWindow;
+                    if (mw != null)
+                    {
+                        var vm = mw.DataContext as MainWindowViewModel;
+                        if (vm != null && !string.IsNullOrEmpty(file) && !vm.SelectedFiles.Contains(file))
+                        {
+                            // Show and activate window if minimized or hidden
+                            if (!mw.IsVisible)
+                            {
+                                mw.Show();
+                                mw.WindowState = System.Windows.WindowState.Normal;
+                            }
+                            else if (mw.WindowState == System.Windows.WindowState.Minimized)
+                            {
+                                mw.WindowState = System.Windows.WindowState.Normal;
+                                mw.Show();
+                            }
+                            mw.Activate();
+                            vm.SelectedFiles.Add(file);
+                        }
+                        // Drain any pending files
+                        while (pendingFiles.TryDequeue(out var pf))
+                        {
+                            if (!vm.SelectedFiles.Contains(pf))
+                                vm.SelectedFiles.Add(pf);
+                        }
+                    }
+                    else
+                    {
+                        // Buffer until main window is ready
+                        if (!string.IsNullOrEmpty(file))
+                            pendingFiles.Enqueue(file);
+                    }
+                });
+            };
+            this.Startup += (s, evt) =>
+            {
+                // On startup, try to drain any pending files
+                System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                {
+                    var mw = System.Windows.Application.Current.MainWindow as MainWindow;
+                    if (mw != null)
+                    {
+                        var vm = mw.DataContext as MainWindowViewModel;
+                        if (vm != null)
+                        {
+                            while (pendingFiles.TryDequeue(out var pf))
+                            {
+                                if (!vm.SelectedFiles.Contains(pf))
+                                    vm.SelectedFiles.Add(pf);
+                            }
+                        }
+                    }
+                });
+            };
+
             base.OnStartup(e);
-            // Additional startup logic can be added here
         }
 
         protected override void OnExit(ExitEventArgs e)

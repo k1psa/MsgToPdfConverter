@@ -25,6 +25,8 @@ namespace MsgToPdfConverter
                     CloseBehaviorComboBox.SelectedIndex = 0;
                     break;
             }
+            // Set context menu checkbox from settings
+            EnableContextMenuCheckBox.IsChecked = Properties.Settings.Default.EnableContextMenu;
         }
 
         private void OkButton_Click(object sender, RoutedEventArgs e)
@@ -36,7 +38,12 @@ namespace MsgToPdfConverter
             CloseButtonBehavior = selected == "Minimize to tray" ? "Minimize" : selected;
             Properties.Settings.Default.CloseButtonBehavior = CloseButtonBehavior;
 
+            // Save context menu setting
+            bool enableContextMenu = EnableContextMenuCheckBox.IsChecked == true;
+            Properties.Settings.Default.EnableContextMenu = enableContextMenu;
             Properties.Settings.Default.Save();
+            // Apply context menu
+            Utils.ContextMenuHelper.SetContextMenu(enableContextMenu);
             DialogResult = true;
             Close();
         }
