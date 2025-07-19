@@ -94,8 +94,12 @@ public class InteropEmbeddedExtractor
                                     }
                                     Console.WriteLine($"[InteropExtractor] Extracted orphaned Excel: {outPath}");
                                 }
-                                // Only add to results if not already present
-                                if (!results.Any(r => Path.GetFileName(r.FilePath).Equals(fileName, StringComparison.OrdinalIgnoreCase)))
+                                // Prevent duplicate: only add orphaned Excel if no in-flow .xlsx with same file name exists
+                                bool hasInFlow = results.Any(r =>
+                                    Path.GetFileName(r.FilePath).Equals(fileName, StringComparison.OrdinalIgnoreCase)
+                                    && r.ParagraphIndex >= 0
+                                    && Path.GetExtension(r.FilePath).Equals(".xlsx", StringComparison.OrdinalIgnoreCase));
+                                if (!hasInFlow && !results.Any(r => Path.GetFileName(r.FilePath).Equals(fileName, StringComparison.OrdinalIgnoreCase)))
                                 {
                                     results.Add(new ExtractedObjectInfo {
                                         FilePath = outPath,
@@ -136,14 +140,20 @@ public class InteropEmbeddedExtractor
             {
                 using (var wordDoc = WordprocessingDocument.Open(docxPath, false))
                 {
-                    var embeddedParts = wordDoc.MainDocumentPart.EmbeddedObjectParts.ToList();
-                    var relIdToPart = new Dictionary<string, EmbeddedObjectPart>();
+                    // Map relId to OpenXmlPart (can be EmbeddedObjectPart or EmbeddedPackagePart)
+                    var relIdToPart = new Dictionary<string, OpenXmlPart>();
                     foreach (var rel in wordDoc.MainDocumentPart.Parts)
                     {
                         if (rel.OpenXmlPart is EmbeddedObjectPart objPart)
                         {
                             relIdToPart[rel.RelationshipId] = objPart;
                             string progId = objPart.ContentType;
+                            relIdToProgId[rel.RelationshipId] = progId;
+                        }
+                        else if (rel.OpenXmlPart is EmbeddedPackagePart pkgPart)
+                        {
+                            relIdToPart[rel.RelationshipId] = pkgPart;
+                            string progId = pkgPart.ContentType;
                             relIdToProgId[rel.RelationshipId] = progId;
                         }
                     }
@@ -348,12 +358,15 @@ public class InteropEmbeddedExtractor
                     // Mapping debug
                     Console.WriteLine("[InteropExtractor] Mapping results:");
                     var usedInlineShapes = new HashSet<int>();
-                    for (int i = 0; i < results.Count; i++)
+
+                    // Split results into in-flow and orphaned
+                    var inFlowObjs = results.Where(obj => obj.ParagraphIndex >= 0).ToList();
+                    var orphanedObjs = results.Where(obj => obj.ParagraphIndex < 0).ToList();
+                    // 1. Map in-flow objects first
+                    foreach (var obj in inFlowObjs)
                     {
-                        var obj = results[i];
                         int matchedIdx = -1;
                         string ext = Path.GetExtension(obj.ExtractedFileName ?? "").ToLowerInvariant();
-                        // 1. Try to match by ProgId and extension
                         for (int j = 0; j < validInlineShapes.Count; j++)
                         {
                             if (usedInlineShapes.Contains(j)) continue;
@@ -367,7 +380,6 @@ public class InteropEmbeddedExtractor
                             // Excel
                             if ((ext == ".xls" || ext == ".xlsx") && meta.ProgId.StartsWith("Excel.Sheet")) { matchedIdx = j; break; }
                         }
-                        // 2. Fallback to order
                         if (matchedIdx == -1)
                         {
                             for (int j = 0; j < validInlineShapes.Count; j++)
@@ -388,7 +400,43 @@ public class InteropEmbeddedExtractor
                         }
                         else
                         {
-                            obj.PageNumber = i + 1;
+                            obj.PageNumber = 1;
+                            Console.WriteLine($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} could not be mapped to any InlineShape");
+                        }
+                    }
+                    // 2. Map orphaned objects to any remaining InlineShapes
+                    foreach (var obj in orphanedObjs)
+                    {
+                        int matchedIdx = -1;
+                        string ext = Path.GetExtension(obj.ExtractedFileName ?? "").ToLowerInvariant();
+                        for (int j = 0; j < validInlineShapes.Count; j++)
+                        {
+                            if (usedInlineShapes.Contains(j)) continue;
+                            var meta = validInlineShapes[j];
+                            // Excel (for orphaned)
+                            if ((ext == ".xls" || ext == ".xlsx") && meta.ProgId.StartsWith("Excel.Sheet")) { matchedIdx = j; break; }
+                        }
+                        if (matchedIdx == -1)
+                        {
+                            for (int j = 0; j < validInlineShapes.Count; j++)
+                            {
+                                if (!usedInlineShapes.Contains(j))
+                                {
+                                    matchedIdx = j;
+                                    break;
+                                }
+                            }
+                        }
+                        if (matchedIdx != -1)
+                        {
+                            var meta = validInlineShapes[matchedIdx];
+                            obj.PageNumber = meta.Page > 0 ? meta.Page : (meta.Index);
+                            usedInlineShapes.Add(matchedIdx);
+                            Console.WriteLine($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} mapped to InlineShape[{meta.Index}] Page={obj.PageNumber}");
+                        }
+                        else
+                        {
+                            obj.PageNumber = 1;
                             Console.WriteLine($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} could not be mapped to any InlineShape");
                         }
                     }
@@ -411,6 +459,15 @@ public class InteropEmbeddedExtractor
             // --- 5. Return only one object per logical annex (no duplicates) ---
 
             // --- 5. Remove duplicates by FilePath (if any), but keep all unique extracted objects ---
+
+            // Remove orphaned .xlsx if an in-flow .xlsx exists (even if file names differ)
+            var inFlowXlsx = results.FirstOrDefault(r => r.ParagraphIndex >= 0 && Path.GetExtension(r.FilePath).Equals(".xlsx", StringComparison.OrdinalIgnoreCase));
+            if (inFlowXlsx != null) {
+                results = results.Where(r =>
+                    !(r.ParagraphIndex < 0 && Path.GetExtension(r.FilePath).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+                ).ToList();
+            }
+
             results = results
                 .GroupBy(r => r.FilePath, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.First())

@@ -193,29 +193,19 @@ namespace MsgToPdfConverter.Services
                     int currentOutputPage = 0;
                     for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
                     {
-                    Console.WriteLine($"[PDF-INSERT][DEBUG] Copying main page {mainPage} (output page {currentOutputPage + 1})");
-                    mainPdf.CopyPagesTo(mainPage, mainPage, outputPdf);
-                    currentOutputPage++;
-                    var pageObjects = objectsByPage.Where(m => m.anchorPage == mainPage).OrderBy(m => m.obj.DocumentOrderIndex).ToList();
-                    if (pageObjects.Count > 0)
-                    {
-                        foreach (var m in pageObjects)
+                        Console.WriteLine($"[PDF-INSERT][DEBUG] Copying main page {mainPage} (output page {currentOutputPage + 1})");
+                        mainPdf.CopyPagesTo(mainPage, mainPage, outputPdf);
+                        currentOutputPage++;
+                        var pageObjects = objectsByPage.Where(m => m.anchorPage == mainPage).OrderBy(m => m.obj.DocumentOrderIndex).ToList();
+                        if (pageObjects.Count > 0)
                         {
-                            // Prevent duplicate insertion at the beginning if the embedded file is already present in the main PDF at that position
-                            if (mainPage <= 2)
+                            foreach (var m in pageObjects)
                             {
-                                // Heuristic: skip if the embedded file is a .doc, .docx, .xls, or .xlsx and its anchor page is 1 or 2
-                                var ext = Path.GetExtension(m.obj.FilePath)?.ToLowerInvariant();
-                                if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
-                                {
-                                    Console.WriteLine($"[PDF-INSERT][SKIP] Skipping duplicate insertion of {Path.GetFileName(m.obj.FilePath)} after page {mainPage} (already present in main PDF)");
-                                    continue;
-                                }
+                                // PATCH: Always insert .xlsx and .xls files as attachments, never skip as duplicate
+                                Console.WriteLine($"[PDF-INSERT][DEBUG] Inserting embedded file after page {mainPage}: {Path.GetFileName(m.obj.FilePath)} (anchorPage={m.anchorPage}, ext={Path.GetExtension(m.obj.FilePath)?.ToLowerInvariant()})");
+                                currentOutputPage = InsertEmbeddedObject(m.obj, outputPdf, currentOutputPage, progressTick);
                             }
-                            Console.WriteLine($"[PDF-INSERT][DEBUG] Inserting embedded file after page {mainPage}: {Path.GetFileName(m.obj.FilePath)} (anchorPage={m.anchorPage}, ext={Path.GetExtension(m.obj.FilePath)?.ToLowerInvariant()})");
-                            currentOutputPage = InsertEmbeddedObject(m.obj, outputPdf, currentOutputPage, progressTick);
                         }
-                    }
                     }
                     // Append unmapped objects after last page
                     if (unmappedObjects.Count > 0)
