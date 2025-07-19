@@ -66,10 +66,14 @@ namespace MsgToPdfConverter
             var singleInstance = new Utils.SingleInstanceManager();
             if (!singleInstance.IsFirstInstance)
             {
-                // If not first instance and file argument, send to running instance
-                if (e.Args != null && e.Args.Length == 1 && File.Exists(e.Args[0]))
+                // If not first instance and file/folder argument, send to running instance
+                if (e.Args != null && e.Args.Length == 1)
                 {
-                    try { singleInstance.SendFileToFirstInstance(e.Args[0]); } catch { }
+                    var arg = e.Args[0];
+                    if (!string.IsNullOrWhiteSpace(arg))
+                    {
+                        try { singleInstance.SendFileToFirstInstance(arg); } catch { }
+                    }
                 }
                 Environment.Exit(0);
                 return;
@@ -92,7 +96,7 @@ namespace MsgToPdfConverter
                     if (mw != null)
                     {
                         var vm = mw.DataContext as MainWindowViewModel;
-                        if (vm != null && !string.IsNullOrEmpty(file) && !vm.SelectedFiles.Contains(file))
+                        if (vm != null && !string.IsNullOrEmpty(file))
                         {
                             // Show and activate window if minimized or hidden
                             if (!mw.IsVisible)
@@ -106,7 +110,23 @@ namespace MsgToPdfConverter
                                 mw.Show();
                             }
                             mw.Activate();
-                            vm.SelectedFiles.Add(file);
+
+                            var fileListService = new MsgToPdfConverter.Services.FileListService();
+                            var updated = new System.Collections.Generic.List<string>(vm.SelectedFiles);
+                            if (System.IO.Directory.Exists(file))
+                            {
+                                // Add all supported files from the folder (recursively)
+                                updated = fileListService.AddFilesFromDirectory(updated, file);
+                            }
+                            else if (System.IO.File.Exists(file))
+                            {
+                                updated = fileListService.AddFiles(updated, new[] { file });
+                            }
+                            foreach (var f in updated)
+                            {
+                                if (!vm.SelectedFiles.Contains(f))
+                                    vm.SelectedFiles.Add(f);
+                            }
                         }
                         // Drain any pending files
                         while (pendingFiles.TryDequeue(out var pf))
