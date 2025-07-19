@@ -39,12 +39,14 @@ namespace MsgToPdfConverter.Services
                 if (Directory.Exists(tempDir))
                 {
                     Directory.Delete(tempDir, true);
-                    Console.WriteLine($"[CLEANUP] Deleted temp folder: {tempDir}");
+             
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[CLEANUP] Error deleting temp folder: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[CLEANUP] Error deleting temp folder: {ex.Message}");
+                #endif
             }
         }
         private readonly Action<string, string, string> _addHeaderPdf;
@@ -68,8 +70,12 @@ namespace MsgToPdfConverter.Services
             string imagePath = null;
             try
             {
-                Console.WriteLine($"[HIERARCHY] Creating hierarchy diagram for: {currentItem}");
-                Console.WriteLine($"[HIERARCHY] Parent chain: {string.Join(" -> ", parentChain ?? new List<string>())}");
+                #if DEBUG
+                DebugLogger.Log($"[HIERARCHY] Creating hierarchy diagram for: {currentItem}");
+                #endif
+                #if DEBUG
+                DebugLogger.Log($"[HIERARCHY] Parent chain: {string.Join(" -> ", parentChain ?? new List<string>())}");
+                #endif
 
                 // Build full hierarchy chain including current item
                 var fullChain = new List<string>();
@@ -84,7 +90,9 @@ namespace MsgToPdfConverter.Services
 
                 if (!string.IsNullOrEmpty(imagePath) && File.Exists(imagePath))
                 {
-                    Console.WriteLine($"[HIERARCHY] Successfully created hierarchy image: {imagePath}");
+                    #if DEBUG
+                    DebugLogger.Log($"[HIERARCHY] Successfully created hierarchy image: {imagePath}");
+                    #endif
                     // Create PDF with the hierarchy image
                     PdfService.AddImagePdf(headerPdfPath, imagePath, headerText);
 
@@ -95,14 +103,18 @@ namespace MsgToPdfConverter.Services
                     }
                     catch (Exception cleanupEx)
                     {
-                        Console.WriteLine($"[HIERARCHY] Warning: Could not delete temporary image: {cleanupEx.Message}");
+                        #if DEBUG
+                        DebugLogger.Log($"[HIERARCHY] Warning: Could not delete temporary image: {cleanupEx.Message}");
+                        #endif
                     }
                     return;
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[HIERARCHY] Failed to create hierarchy image, falling back to text: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[HIERARCHY] Failed to create hierarchy image, falling back to text: {ex.Message}");
+                #endif
             }
 
             // Clean up failed image file if it exists
@@ -136,7 +148,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[HIERARCHY] Error creating hierarchy text, using original: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[HIERARCHY] Error creating hierarchy text, using original: {ex.Message}");
+                #endif
                 return originalHeaderText;
             }
         }
@@ -145,28 +159,38 @@ namespace MsgToPdfConverter.Services
         {
             if (msg == null)
             {
-                Console.WriteLine($"[ERROR] Null Storage.Message passed to ProcessMsgAttachmentsRecursively.");
+                #if DEBUG
+                DebugLogger.Log($"[ERROR] Null Storage.Message passed to ProcessMsgAttachmentsRecursively.");
+                #endif
                 return;
             }
             if (allPdfFiles == null)
             {
-                Console.WriteLine($"[ERROR] allPdfFiles is null in ProcessMsgAttachmentsRecursively.");
+                #if DEBUG
+                DebugLogger.Log($"[ERROR] allPdfFiles is null in ProcessMsgAttachmentsRecursively.");
+                #endif
                 return;
             }
             if (allTempFiles == null)
             {
-                Console.WriteLine($"[ERROR] allTempFiles is null in ProcessMsgAttachmentsRecursively.");
+                #if DEBUG
+                DebugLogger.Log($"[ERROR] allTempFiles is null in ProcessMsgAttachmentsRecursively.");
+                #endif
                 return;
             }
             if (tempDir == null)
             {
-                Console.WriteLine($"[ERROR] tempDir is null in ProcessMsgAttachmentsRecursively.");
+                #if DEBUG
+                DebugLogger.Log($"[ERROR] tempDir is null in ProcessMsgAttachmentsRecursively.");
+                #endif
                 return;
             }
 
             if (depth > maxDepth)
             {
-                Console.WriteLine($"[MSG] Max recursion depth {maxDepth} reached, skipping further processing");
+                #if DEBUG
+                DebugLogger.Log($"[MSG] Max recursion depth {maxDepth} reached, skipping further processing");
+                #endif
                 return;
             }
             if (parentChain == null)
@@ -177,15 +201,21 @@ namespace MsgToPdfConverter.Services
             // Additional null checks for MSG properties
             if (msg.Subject == null)
             {
-                Console.WriteLine("[DEBUG] MSG subject is null.");
+                #if DEBUG
+                DebugLogger.Log("[DEBUG] MSG subject is null.");
+                #endif
             }
             if (msg.Attachments == null)
             {
-                Console.WriteLine("[DEBUG] MSG attachments collection is null.");
+                #if DEBUG
+                DebugLogger.Log("[DEBUG] MSG attachments collection is null.");
+                #endif
             }
             if (msg.BodyText == null && msg.BodyHtml == null)
             {
-                Console.WriteLine("[DEBUG] MSG body is null (both text and HTML).");
+                #if DEBUG
+                DebugLogger.Log("[DEBUG] MSG body is null (both text and HTML).");
+                #endif
             }
 
             if (depth > 0)
@@ -199,7 +229,9 @@ namespace MsgToPdfConverter.Services
                         var htmlResult = _emailService.BuildEmailHtmlWithInlineImages(msg, false);
                         if (string.IsNullOrEmpty(htmlResult.Html))
                         {
-                            Console.WriteLine("[DEBUG] htmlResult.Html is null or empty for nested MSG.");
+                            #if DEBUG
+                            DebugLogger.Log("[DEBUG] htmlResult.Html is null or empty for nested MSG.");
+                            #endif
                         }
                         string nestedHtmlPath = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), Guid.NewGuid() + "_nested.html");
                         File.WriteAllText(nestedHtmlPath, htmlResult.Html ?? string.Empty, System.Text.Encoding.UTF8);
@@ -223,7 +255,9 @@ namespace MsgToPdfConverter.Services
                         }
                         else
                         {
-                            Console.WriteLine($"[MSG] Failed to convert nested MSG to PDF");
+                            #if DEBUG
+                            DebugLogger.Log($"[MSG] Failed to convert nested MSG to PDF");
+                            #endif
                         }
                         // Progress tick for MSG body
                         progressTick?.Invoke();
@@ -231,18 +265,24 @@ namespace MsgToPdfConverter.Services
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[MSG] Error processing nested MSG body: {ex.Message}");
+                    #if DEBUG
+                    DebugLogger.Log($"[MSG] Error processing nested MSG body: {ex.Message}");
+                    #endif
                 }
             }
 
             // Now process attachments if they exist
             if (msg.Attachments == null || msg.Attachments.Count == 0)
             {
-                Console.WriteLine($"[MSG] Depth {depth} - No attachments to process");
+                #if DEBUG
+                DebugLogger.Log($"[MSG] Depth {depth} - No attachments to process");
+                #endif
                 return;
             }
 
-            Console.WriteLine($"[MSG] Processing attachments at depth {depth}, found {msg.Attachments.Count} attachments");
+            #if DEBUG
+            DebugLogger.Log($"[MSG] Processing attachments at depth {depth}, found {msg.Attachments.Count} attachments");
+            #endif
 
             var inlineContentIds = _emailService.GetInlineContentIds(msg.BodyHtml ?? "");
             var typedAttachments = new List<Storage.Attachment>();
@@ -254,19 +294,25 @@ namespace MsgToPdfConverter.Services
             {
                 if (att is Storage.Attachment a)
                 {
-                    Console.WriteLine($"[MSG] Depth {depth} - Examining attachment: {a.FileName} (IsInline: {a.IsInline}, ContentId: {a.ContentId})");
+                    #if DEBUG
+                    DebugLogger.Log($"[MSG] Depth {depth} - Examining attachment: {a.FileName} (IsInline: {a.IsInline}, ContentId: {a.ContentId})");
+                    #endif
 
                     // Skip attachments if they have a ContentId that's actually referenced in the email body as an inline image
                     if (!string.IsNullOrEmpty(a.ContentId) && inlineContentIds.Contains(a.ContentId.Trim('<', '>', '\"', '\'', ' ')))
                     {
-                        Console.WriteLine($"[MSG] Depth {depth} - Skipping inline attachment (referenced in email body): {a.FileName}");
+                        #if DEBUG
+                        DebugLogger.Log($"[MSG] Depth {depth} - Skipping inline attachment (referenced in email body): {a.FileName}");
+                        #endif
                         continue;
                     }
 
                     // Skip small images that are likely signature images or decorative elements
                     if (IsLikelySignatureImage(a))
                     {
-                        Console.WriteLine($"[MSG] Depth {depth} - Skipping likely signature/decorative image: {a.FileName}");
+                        #if DEBUG
+                        DebugLogger.Log($"[MSG] Depth {depth} - Skipping likely signature/decorative image: {a.FileName}");
+                        #endif
                         continue;
                     }
 
@@ -292,7 +338,13 @@ namespace MsgToPdfConverter.Services
                 }
                 else
                 {
-                    Console.WriteLine($"[MSG-DEDUP] Depth {depth} - SKIPPING true duplicate: {a.FileName}");
+
+#if DEBUG
+                    DebugLogger.Log($"[MSG-DEDUP] Depth {depth} - SKIPPING true duplicate: {a.FileName}");
+#endif
+#if DEBUG
+                    DebugLogger.Log($"[MSG-DEDUP] Depth {depth} - SKIPPING true duplicate: {a.FileName}");
+#endif
                 }
             }
 
@@ -301,7 +353,13 @@ namespace MsgToPdfConverter.Services
             {
                 if (att is Storage.Message nestedMsg)
                 {
-                    Console.WriteLine($"[MSG] Depth {depth} - Found nested MSG: {nestedMsg.Subject ?? "No Subject"}");
+
+#if DEBUG
+                    DebugLogger.Log($"[MSG] Depth {depth} - Found nested MSG: {nestedMsg.Subject ?? "No Subject"}");
+#endif
+#if DEBUG
+                    DebugLogger.Log($"[MSG] Depth {depth} - Found nested MSG: {nestedMsg.Subject ?? "No Subject"}");
+#endif
                     nestedMessages.Add(nestedMsg);
                 }
             }
@@ -342,22 +400,46 @@ namespace MsgToPdfConverter.Services
         {
             if (att == null)
             {
-                Console.WriteLine($"[ERROR] Null Storage.Attachment passed to ProcessSingleAttachment.");
+
+#if DEBUG
+                DebugLogger.Log($"[ERROR] Null Storage.Attachment passed to ProcessSingleAttachment.");
+#endif
+#if DEBUG
+                DebugLogger.Log($"[ERROR] Null Storage.Attachment passed to ProcessSingleAttachment.");
+#endif
                 return null;
             }
             if (attPath == null)
             {
-                Console.WriteLine($"[ERROR] attPath is null in ProcessSingleAttachment.");
+
+#if DEBUG
+                DebugLogger.Log($"[ERROR] attPath is null in ProcessSingleAttachment.");
+#endif
+#if DEBUG
+                DebugLogger.Log($"[ERROR] attPath is null in ProcessSingleAttachment.");
+#endif
                 return null;
             }
             if (tempDir == null)
             {
-                Console.WriteLine($"[ERROR] tempDir is null in ProcessSingleAttachment.");
+
+#if DEBUG
+                DebugLogger.Log($"[ERROR] tempDir is null in ProcessSingleAttachment.");
+#endif
+#if DEBUG
+                DebugLogger.Log($"[ERROR] tempDir is null in ProcessSingleAttachment.");
+#endif
                 return null;
             }
             if (allTempFiles == null)
             {
-                Console.WriteLine($"[ERROR] allTempFiles is null in ProcessSingleAttachment.");
+
+#if DEBUG
+                DebugLogger.Log($"[ERROR] allTempFiles is null in ProcessSingleAttachment.");
+#endif
+#if DEBUG
+                DebugLogger.Log($"[ERROR] allTempFiles is null in ProcessSingleAttachment.");
+#endif
                 return null;
             }
 
@@ -443,7 +525,13 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
+
+#if DEBUG
+                DebugLogger.Log($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
+#endif
+#if DEBUG
+                DebugLogger.Log($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
+#endif
                 finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
                 _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Processing error: {ex.Message})", null);
                 allTempFiles.Add(finalAttachmentPdf);
@@ -456,28 +544,58 @@ namespace MsgToPdfConverter.Services
         {
             if (attPath == null)
             {
-                Console.WriteLine($"[ERROR] attPath is null in ProcessZipAttachmentWithHierarchy.");
+
+#if DEBUG
+                DebugLogger.Log($"[ERROR] attPath is null in ProcessZipAttachmentWithHierarchy.");
+#endif
+#if DEBUG
+                DebugLogger.Log($"[ERROR] attPath is null in ProcessZipAttachmentWithHierarchy.");
+#endif
                 return null;
             }
             if (tempDir == null)
             {
-                Console.WriteLine($"[ERROR] tempDir is null in ProcessZipAttachmentWithHierarchy.");
+
+#if DEBUG
+                DebugLogger.Log($"[ERROR] tempDir is null in ProcessZipAttachmentWithHierarchy.");
+#endif
+#if DEBUG
+                DebugLogger.Log($"[ERROR] tempDir is null in ProcessZipAttachmentWithHierarchy.");
+#endif
                 return null;
             }
             if (allTempFiles == null)
             {
-                Console.WriteLine($"[ERROR] allTempFiles is null in ProcessZipAttachmentWithHierarchy.");
+
+#if DEBUG
+                DebugLogger.Log($"[ERROR] allTempFiles is null in ProcessZipAttachmentWithHierarchy.");
+#endif
+#if DEBUG
+                DebugLogger.Log($"[ERROR] allTempFiles is null in ProcessZipAttachmentWithHierarchy.");
+#endif
                 return null;
             }
             if (parentChain == null)
             {
-                Console.WriteLine($"[ERROR] parentChain is null in ProcessZipAttachmentWithHierarchy.");
+
+#if DEBUG
+                DebugLogger.Log($"[ERROR] parentChain is null in ProcessZipAttachmentWithHierarchy.");
+#endif
+#if DEBUG
+                DebugLogger.Log($"[ERROR] parentChain is null in ProcessZipAttachmentWithHierarchy.");
+#endif
                 return null;
             }
 
             try
             {
-                Console.WriteLine($"[ZIP] Processing ZIP file: {attPath}");
+
+#if DEBUG
+                DebugLogger.Log($"[ZIP] Processing ZIP file: {attPath}");
+#endif
+#if DEBUG
+                DebugLogger.Log($"[ZIP] Processing ZIP file: {attPath}");
+#endif
 
                 // Track files that could not be converted
                 var unconvertibleFiles = new List<string>();
@@ -519,7 +637,13 @@ namespace MsgToPdfConverter.Services
                         {
                             folderIndex++;
                             // This is a directory - skip it entirely (no header creation)
-                            Console.WriteLine($"[ZIP] Found directory: {entry.FullName} - skipping");
+
+#if DEBUG
+                            DebugLogger.Log($"[ZIP] Found directory: {entry.FullName} - skipping");
+#endif
+#if DEBUG
+                            DebugLogger.Log($"[ZIP] Found directory: {entry.FullName} - skipping");
+#endif
                             continue;
                         }
                         fileIndex++;
@@ -532,7 +656,13 @@ namespace MsgToPdfConverter.Services
                         if ((entryExt == ".jpg" || entryExt == ".jpeg" || entryExt == ".png" || entryExt == ".bmp" || entryExt == ".gif") &&
                             IsLikelySignatureImageByNameAndSize(currentFileName, entry.Length))
                         {
-                            Console.WriteLine($"[ZIP] Skipping likely signature image: {currentFileName}");
+
+#if DEBUG
+                            DebugLogger.Log($"[ZIP] Skipping likely signature image: {currentFileName}");
+#endif
+#if DEBUG
+                            DebugLogger.Log($"[ZIP] Skipping likely signature image: {currentFileName}");
+#endif
                             continue; // Skip this image file entirely - don't extract or process
                         }
 
@@ -605,7 +735,13 @@ namespace MsgToPdfConverter.Services
                                 {
                                     using (var nestedMsg = new Storage.Message(entryPath))
                                     {
-                                        Console.WriteLine($"[ZIP] Processing nested MSG with full recursion: {currentFileName}");
+
+#if DEBUG
+                                        DebugLogger.Log($"[ZIP] Processing nested MSG with full recursion: {currentFileName}");
+#endif
+#if DEBUG
+                                        DebugLogger.Log($"[ZIP] Processing nested MSG with full recursion: {currentFileName}");
+#endif
 
                                         // Create a temporary list to collect all PDFs from this nested MSG
                                         var nestedPdfFiles = new List<string>();
@@ -625,14 +761,26 @@ namespace MsgToPdfConverter.Services
                                             {
                                                 // Single PDF from nested MSG
                                                 entryPdf = nestedPdfFiles[0];
-                                                Console.WriteLine($"[ZIP] Nested MSG produced single PDF: {entryPdf}");
+
+#if DEBUG
+                                                DebugLogger.Log($"[ZIP] Nested MSG produced single PDF: {entryPdf}");
+#endif
+#if DEBUG
+                                                DebugLogger.Log($"[ZIP] Nested MSG produced single PDF: {entryPdf}");
+#endif
                                             }
                                             else
                                             {
                                                 // Multiple PDFs from nested MSG - merge them
                                                 entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_nested_merged.pdf");
                                                 _appendPdfs(nestedPdfFiles, entryPdf);
-                                                Console.WriteLine($"[ZIP] Nested MSG produced {nestedPdfFiles.Count} PDFs, merged into: {entryPdf}");
+
+#if DEBUG
+                                                DebugLogger.Log($"[ZIP] Nested MSG produced {nestedPdfFiles.Count} PDFs, merged into: {entryPdf}");
+#endif
+#if DEBUG
+                                                DebugLogger.Log($"[ZIP] Nested MSG produced {nestedPdfFiles.Count} PDFs, merged into: {entryPdf}");
+#endif
 
                                                 // Clean up individual PDFs after merging
                                                 foreach (var pdf in nestedPdfFiles)
@@ -659,7 +807,13 @@ namespace MsgToPdfConverter.Services
                                 }
                                 catch (Exception msgEx)
                                 {
-                                    Console.WriteLine($"[ZIP] Error processing nested MSG {currentFileName}: {msgEx.Message}");
+
+#if DEBUG
+                                    DebugLogger.Log($"[ZIP] Error processing nested MSG {currentFileName}: {msgEx.Message}");
+#endif
+#if DEBUG
+                                    DebugLogger.Log($"[ZIP] Error processing nested MSG {currentFileName}: {msgEx.Message}");
+#endif
                                     entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_msg_error.pdf");
                                     _addHeaderPdf(entryPdf, $"File: {currentFileName}\n(MSG processing error: {msgEx.Message})", null);
                                     allTempFiles.Add(entryPdf);
@@ -682,7 +836,13 @@ namespace MsgToPdfConverter.Services
                         }
                         catch (Exception entryEx)
                         {
-                            Console.WriteLine($"[ZIP] Error processing entry {entry.Name}: {entryEx.Message}");
+
+#if DEBUG
+                            DebugLogger.Log($"[ZIP] Error processing entry {entry.Name}: {entryEx.Message}");
+#endif
+#if DEBUG
+                            DebugLogger.Log($"[ZIP] Error processing entry {entry.Name}: {entryEx.Message}");
+#endif
                             entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_entry_error.pdf");
                             string errorFileName = Path.GetFileName(entry.FullName);
                             _addHeaderPdf(entryPdf, $"File: {errorFileName}\n(Processing error: {entryEx.Message})", null);
@@ -710,7 +870,13 @@ namespace MsgToPdfConverter.Services
                     {
                         string finalZipPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_final.pdf");
                         _appendPdfs(zipPdfFiles, finalZipPdf);
-                        Console.WriteLine($"[ZIP] Created final merged PDF with {zipPdfFiles.Count} files: {finalZipPdf}");
+
+#if DEBUG
+                        DebugLogger.Log($"[ZIP] Created final merged PDF with {zipPdfFiles.Count} files: {finalZipPdf}");
+#endif
+#if DEBUG
+                        DebugLogger.Log($"[ZIP] Created final merged PDF with {zipPdfFiles.Count} files: {finalZipPdf}");
+#endif
 
                         // Add individual PDFs to cleanup since they're now merged into finalZipPdf
                         foreach (var pdf in zipPdfFiles)
@@ -720,11 +886,16 @@ namespace MsgToPdfConverter.Services
                                 try
                                 {
                                     File.Delete(pdf);
-                                    Console.WriteLine($"[ZIP] Cleaned up individual PDF: {pdf}");
+
+#if DEBUG
+                                    DebugLogger.Log($"[ZIP] Cleaned up individual PDF: {pdf}");
+#endif
+#if DEBUG
+                                    DebugLogger.Log($"[ZIP] Cleaned up individual PDF: {pdf}");
+#endif
                                 }
-                                catch (Exception cleanupEx)
+                                catch
                                 {
-                                    Console.WriteLine($"[ZIP] Warning - could not delete individual PDF {pdf}: {cleanupEx.Message}");
                                     allTempFiles.Add(pdf); // Add to cleanup list if manual delete failed
                                 }
                             }
@@ -735,7 +906,7 @@ namespace MsgToPdfConverter.Services
                     }
                     else if (zipPdfFiles.Count == 1)
                     {
-                        Console.WriteLine($"[ZIP] Returning single PDF: {zipPdfFiles[0]}");
+
                         // Don't add to allTempFiles - it needs to be returned for the main output
                         return zipPdfFiles[0];
                     }
@@ -751,7 +922,7 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ZIP] Error processing ZIP file {attPath}: {ex.Message}");
+
                 string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_zip_error.pdf");
                 _addHeaderPdf(errorPdf, $"ZIP Archive: {currentItem}\n(Processing error: {ex.Message})", null);
                 allTempFiles.Add(errorPdf);
@@ -763,7 +934,7 @@ namespace MsgToPdfConverter.Services
         {
             try
             {
-                Console.WriteLine($"[7Z] Processing 7z file: {attPath}");
+
 
                 // Track files that could not be converted
                 var unconvertibleFiles = new List<string>();
@@ -805,7 +976,9 @@ namespace MsgToPdfConverter.Services
                         {
                             folderIndex++;
                             // This is a directory - skip it entirely (no header creation)
-                            Console.WriteLine($"[7Z] Found directory: {entry.Key} - skipping");
+#if DEBUG
+                            DebugLogger.Log($"[7Z] Found directory: {entry.Key} - skipping");
+#endif
                             continue;
                         }
                         fileIndex++;
@@ -817,7 +990,10 @@ namespace MsgToPdfConverter.Services
                         if ((entryExt == ".jpg" || entryExt == ".jpeg" || entryExt == ".png" || entryExt == ".bmp" || entryExt == ".gif") &&
                             IsLikelySignatureImageByNameAndSize(currentFileName, entry.Size))
                         {
-                            Console.WriteLine($"[7Z] Skipping likely signature image: {currentFileName}");
+
+#if DEBUG
+                            DebugLogger.Log($"[7Z] Skipping likely signature image: {currentFileName}");
+#endif
                             continue;
                         }
 
@@ -894,7 +1070,10 @@ namespace MsgToPdfConverter.Services
                                 {
                                     using (var nestedMsg = new Storage.Message(entryPath))
                                     {
-                                        Console.WriteLine($"[7Z] Processing nested MSG with full recursion: {currentFileName}");
+
+#if DEBUG
+                                        DebugLogger.Log($"[7Z] Processing nested MSG with full recursion: {currentFileName}");
+#endif
 
                                         // Create a temporary list to collect all PDFs from this nested MSG
                                         var nestedPdfFiles = new List<string>();
@@ -914,14 +1093,20 @@ namespace MsgToPdfConverter.Services
                                             {
                                                 // Single PDF from nested MSG
                                                 entryPdf = nestedPdfFiles[0];
-                                                Console.WriteLine($"[7Z] Nested MSG produced single PDF: {entryPdf}");
+
+#if DEBUG
+                                                DebugLogger.Log($"[7Z] Nested MSG produced single PDF: {entryPdf}");
+#endif
                                             }
                                             else
                                             {
                                                 // Multiple PDFs from nested MSG - merge them
                                                 entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_nested_merged.pdf");
                                                 _appendPdfs(nestedPdfFiles, entryPdf);
-                                                Console.WriteLine($"[7Z] Nested MSG produced {nestedPdfFiles.Count} PDFs, merged into: {entryPdf}");
+
+#if DEBUG
+                                                DebugLogger.Log($"[7Z] Nested MSG produced {nestedPdfFiles.Count} PDFs, merged into: {entryPdf}");
+#endif
 
                                                 // Clean up individual PDFs after merging
                                                 foreach (var pdf in nestedPdfFiles)
@@ -948,7 +1133,10 @@ namespace MsgToPdfConverter.Services
                                 }
                                 catch (Exception msgEx)
                                 {
-                                    Console.WriteLine($"[7Z] Error processing nested MSG {currentFileName}: {msgEx.Message}");
+
+#if DEBUG
+                                    DebugLogger.Log($"[7Z] Error processing nested MSG {currentFileName}: {msgEx.Message}");
+#endif
                                     entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_msg_error.pdf");
                                     _addHeaderPdf(entryPdf, $"File: {currentFileName}\n(MSG processing error: {msgEx.Message})", null);
                                     allTempFiles.Add(entryPdf);
@@ -971,7 +1159,10 @@ namespace MsgToPdfConverter.Services
                         }
                         catch (Exception entryEx)
                         {
-                            Console.WriteLine($"[7Z] Error processing entry {entry.Key}: {entryEx.Message}");
+
+#if DEBUG
+                            DebugLogger.Log($"[7Z] Error processing entry {entry.Key}: {entryEx.Message}");
+#endif
                             entryPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_entry_error.pdf");
                             string errorFileName = Path.GetFileName(entry.Key);
                             _addHeaderPdf(entryPdf, $"File: {errorFileName}\n(Processing error: {entryEx.Message})", null);
@@ -999,7 +1190,10 @@ namespace MsgToPdfConverter.Services
                     {
                         string final7zPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_final.pdf");
                         _appendPdfs(sevenZipPdfFiles, final7zPdf);
-                        Console.WriteLine($"[7Z] Created final merged PDF with {sevenZipPdfFiles.Count} files: {final7zPdf}");
+
+#if DEBUG
+                        DebugLogger.Log($"[7Z] Created final merged PDF with {sevenZipPdfFiles.Count} files: {final7zPdf}");
+#endif
 
                         // Add individual PDFs to cleanup since they're now merged into final7zPdf
                         foreach (var pdf in sevenZipPdfFiles)
@@ -1009,11 +1203,13 @@ namespace MsgToPdfConverter.Services
                                 try
                                 {
                                     File.Delete(pdf);
-                                    Console.WriteLine($"[7Z] Cleaned up individual PDF: {pdf}");
+
+#if DEBUG
+                                    DebugLogger.Log($"[7Z] Cleaned up individual PDF: {pdf}");
+#endif
                                 }
-                                catch (Exception cleanupEx)
+                                catch
                                 {
-                                    Console.WriteLine($"[7Z] Warning - could not delete individual PDF {pdf}: {cleanupEx.Message}");
                                     allTempFiles.Add(pdf); // Add to cleanup list if manual delete failed
                                 }
                             }
@@ -1024,7 +1220,7 @@ namespace MsgToPdfConverter.Services
                     }
                     else if (sevenZipPdfFiles.Count == 1)
                     {
-                        Console.WriteLine($"[7Z] Returning single PDF: {sevenZipPdfFiles[0]}");
+
                         // Don't add to allTempFiles - it needs to be returned for the main output
                         return sevenZipPdfFiles[0];
                     }
@@ -1040,7 +1236,7 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[7Z] Error processing 7z file {attPath}: {ex.Message}");
+
                 string errorPdf = Path.Combine(tempDir, Guid.NewGuid() + "_7z_error.pdf");
                 _addHeaderPdf(errorPdf, $"7z Archive: {currentItem}\n(Processing error: {ex.Message})", null);
                 allTempFiles.Add(errorPdf);
@@ -1053,7 +1249,7 @@ namespace MsgToPdfConverter.Services
         /// </summary>
         public string ProcessSingleAttachmentWithHierarchy(Storage.Attachment att, string attPath, string tempDir, string headerText, List<string> allTempFiles, List<string> allPdfFiles, List<string> parentChain, string currentItem, bool extractOriginalOnly = false, Action progressTick = null)
         {
-            Console.WriteLine($"[ATTACH-DEBUG] ENTER: attName={att?.FileName}, attPath={attPath}, tempDir={tempDir}, headerText={headerText}, parentChain=[{string.Join(" -> ", parentChain ?? new List<string>())}], currentItem={currentItem}, extractOriginalOnly={extractOriginalOnly}");
+
             
             // Handle both .msg attachments and standalone files
             string attName;
@@ -1232,13 +1428,13 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[ATTACH] Error processing attachment {attName}: {ex.Message}");
+
                 finalAttachmentPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
                 _addHeaderPdf(finalAttachmentPdf, $"File: {attName}\n(Processing error: {ex.Message})", null);
                 allTempFiles.Add(finalAttachmentPdf);
             }
 
-            Console.WriteLine($"[ATTACH-DEBUG] EXIT: attName={att?.FileName}, resultPdf={finalAttachmentPdf}");
+
             return finalAttachmentPdf;
         }
 
@@ -1253,7 +1449,7 @@ namespace MsgToPdfConverter.Services
         {
             try
             {
-                Console.WriteLine($"[MSG] Processing MSG file: {Path.GetFileName(msgFilePath)}");
+
 
                 using (var nestedMsg = new Storage.Message(msgFilePath))
                 {
@@ -1281,20 +1477,24 @@ namespace MsgToPdfConverter.Services
 
                     if (proc.ExitCode == 0 && File.Exists(nestedPdf))
                     {
-                        Console.WriteLine($"[MSG] Successfully converted MSG to PDF: {Path.GetFileName(msgFilePath)} -> {nestedPdf}");
+
                         // Return the PDF path - caller is responsible for managing this file
                         return nestedPdf;
                     }
                     else
                     {
-                        Console.WriteLine($"[MSG] Failed to convert MSG to PDF: {Path.GetFileName(msgFilePath)}");
+#if DEBUG
+                        DebugLogger.Log($"[MSG] Failed to convert MSG to PDF: {Path.GetFileName(msgFilePath)}");
+#endif
                         return null;
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[MSG] Error processing MSG file {Path.GetFileName(msgFilePath)}: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[MSG] Error processing MSG file {Path.GetFileName(msgFilePath)}: {ex.Message}");
+#endif
                 return null;
             }
         }
@@ -1304,28 +1504,42 @@ namespace MsgToPdfConverter.Services
         /// </summary>
         public static void DebugPrintTempAndProtectedFiles(IEnumerable<string> allTempFiles, IEnumerable<string> filesToProtect = null)
         {
-            Console.WriteLine("[DEBUG] --- Temp file cleanup about to run ---");
-            Console.WriteLine($"[DEBUG] allTempFiles ({(allTempFiles == null ? 0 : allTempFiles.Count())}):");
+#if DEBUG
+            DebugLogger.Log("[DEBUG] --- Temp file cleanup about to run ---");
+#endif
+#if DEBUG
+            DebugLogger.Log($"[DEBUG] allTempFiles ({(allTempFiles == null ? 0 : allTempFiles.Count())}):");
+#endif
             if (allTempFiles != null)
             {
                 foreach (var f in allTempFiles)
                 {
-                    Console.WriteLine($"[DEBUG]   TEMP: {f}");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG]   TEMP: {f}");
+#endif
                 }
             }
             if (filesToProtect != null)
             {
-                Console.WriteLine($"[DEBUG] filesToProtect ({filesToProtect.Count()}):");
+#if DEBUG
+                DebugLogger.Log($"[DEBUG] filesToProtect ({filesToProtect.Count()}):");
+#endif
                 foreach (var f in filesToProtect)
                 {
-                    Console.WriteLine($"[DEBUG]   PROTECT: {f}");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG]   PROTECT: {f}");
+#endif
                 }
             }
             else
             {
-                Console.WriteLine("[DEBUG] filesToProtect: (none provided)");
+#if DEBUG
+                DebugLogger.Log("[DEBUG] filesToProtect: (none provided)");
+#endif
             }
-            Console.WriteLine("[DEBUG] --- End of temp/protected file debug ---");
+#if DEBUG
+            DebugLogger.Log("[DEBUG] --- End of temp/protected file debug ---");
+#endif
         }
 
         /// <summary>
@@ -1359,14 +1573,18 @@ namespace MsgToPdfConverter.Services
                 // If it's a small image with signature patterns, likely a signature
                 if (isSmallImage && hasSignaturePattern)
                 {
-                    Console.WriteLine($"[FILTER] Detected signature image: {fileName} ({fileSizeKB}KB)");
+#if DEBUG
+                    DebugLogger.Log($"[FILTER] Detected signature image: {fileName} ({fileSizeKB}KB)");
+#endif
                     return true;
                 }
 
                 // If it's marked as inline AND small, likely decorative/signature
                 if (attachment.IsInline == true && isSmallImage)
                 {
-                    Console.WriteLine($"[FILTER] Detected small inline image: {fileName} ({fileSizeKB}KB)");
+#if DEBUG
+                    DebugLogger.Log($"[FILTER] Detected small inline image: {fileName} ({fileSizeKB}KB)");
+#endif
                     return true;
                 }
 
@@ -1374,7 +1592,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[FILTER] Error checking signature image {attachment.FileName}: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[FILTER] Error checking signature image {attachment.FileName}: {ex.Message}");
+#endif
                 return false; // If in doubt, don't filter out
             }
         }
@@ -1409,14 +1629,18 @@ namespace MsgToPdfConverter.Services
                 // If it's a small image with signature patterns, likely a signature
                 if (isSmallImage && hasSignaturePattern)
                 {
-                    Console.WriteLine($"[FILTER] Detected signature image: {fileName} ({fileSizeKB}KB)");
+#if DEBUG
+                    DebugLogger.Log($"[FILTER] Detected signature image: {fileName} ({fileSizeKB}KB)");
+#endif
                     return true;
                 }
 
                 // If it's very small (less than 10KB), likely decorative/signature
                 if (fileSizeKB < 10)
                 {
-                    Console.WriteLine($"[FILTER] Detected very small image: {fileName} ({fileSizeKB}KB)");
+#if DEBUG
+                    DebugLogger.Log($"[FILTER] Detected very small image: {fileName} ({fileSizeKB}KB)");
+#endif
                     return true;
                 }
 
@@ -1424,7 +1648,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[FILTER] Error checking signature image {fileName}: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[FILTER] Error checking signature image {fileName}: {ex.Message}");
+#endif
                 return false; // If in doubt, don't filter out
             }
         }
@@ -1653,11 +1879,15 @@ namespace MsgToPdfConverter.Services
                     {
                         int embeddedCount = CountEmbeddedObjects(filePath);
                         count += embeddedCount;
-                        Console.WriteLine($"[COUNT] File {filePath}: 1 main + {embeddedCount} embedded = {count} total");
+#if DEBUG
+                        DebugLogger.Log($"[COUNT] File {filePath}: 1 main + {embeddedCount} embedded = {count} total");
+#endif
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[COUNT] Error counting embedded objects in {filePath}: {ex.Message}");
+#if DEBUG
+                        DebugLogger.Log($"[COUNT] Error counting embedded objects in {filePath}: {ex.Message}");
+#endif
                     }
                 }
                 
@@ -1678,7 +1908,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[COUNT-EMBED] Error counting embedded objects: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[COUNT-EMBED] Error counting embedded objects: {ex.Message}");
+#endif
                 return 0;
             }
         }
@@ -1740,7 +1972,9 @@ private int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tem
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[OLE-EXTRACT] Error extracting embedded objects: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[OLE-EXTRACT] Error extracting embedded objects: {ex.Message}");
+#endif
             }
             return count;
         }

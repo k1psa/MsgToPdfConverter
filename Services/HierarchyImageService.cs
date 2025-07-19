@@ -186,9 +186,8 @@ namespace MsgToPdfConverter.Services
                     return imagePath;
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Console.WriteLine($"Error creating hierarchy image: {ex.Message}");
                 return null;
             }
         }

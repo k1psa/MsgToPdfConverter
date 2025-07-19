@@ -57,8 +57,7 @@ namespace MsgToPdfConverter.Services
                     currentIndex = processedChain.Count - 1;
                 }
 
-                Console.WriteLine($"[WORD-HIERARCHY] Creating SmartArt for chain: {string.Join(" -> ", processedChain)}");
-                Console.WriteLine($"[WORD-HIERARCHY] Highlighting item at index {currentIndex}: {processedChain[currentIndex]}");
+
 
                 // Create Word application
                 wordApp = new Application();
@@ -86,7 +85,7 @@ namespace MsgToPdfConverter.Services
                 
                 try
                 {
-                    Console.WriteLine("[WORD-HIERARCHY] Attempting to create SmartArt...");
+       
                     
                     // Try to add SmartArt using reflection to avoid compile-time dependencies
                     object smartArtShape = doc.Shapes.GetType().InvokeMember(
@@ -99,7 +98,7 @@ namespace MsgToPdfConverter.Services
 
                     if (smartArtShape != null)
                     {
-                        Console.WriteLine("[WORD-HIERARCHY] SmartArt shape created successfully");
+                  
                         
                         // Access SmartArt property using reflection
                         object smartArt = smartArtShape.GetType().InvokeMember(
@@ -112,7 +111,7 @@ namespace MsgToPdfConverter.Services
 
                         if (smartArt != null)
                         {
-                            Console.WriteLine("[WORD-HIERARCHY] SmartArt object accessed successfully");
+           
                             
                             // Get AllNodes collection
                             object allNodes = smartArt.GetType().InvokeMember(
@@ -220,7 +219,7 @@ namespace MsgToPdfConverter.Services
                                 // Style the node (basic approach, colors may not work perfectly)
                                 if (isCurrent)
                                 {
-                                    Console.WriteLine($"[WORD-HIERARCHY] Highlighting current item: {item}");
+
                                     // Make text bold for current item
                                     object font = textRange.GetType().InvokeMember(
                                         "Font",
@@ -240,7 +239,7 @@ namespace MsgToPdfConverter.Services
                                 }
                             }
                             
-                            Console.WriteLine("[WORD-HIERARCHY] SmartArt hierarchy created successfully");
+
                         }
                         else
                         {
@@ -252,10 +251,8 @@ namespace MsgToPdfConverter.Services
                         throw new Exception("Could not create SmartArt shape");
                     }
                 }
-                catch (Exception smartArtEx)
+                catch (Exception)
                 {
-                    Console.WriteLine($"[WORD-HIERARCHY] SmartArt creation failed, using table fallback: {smartArtEx.Message}");
-                    
                     // Fallback to table approach if SmartArt fails
                     CreateHierarchyTable(doc, processedChain, currentIndex);
                 }
@@ -276,12 +273,14 @@ namespace MsgToPdfConverter.Services
                     CreateBookmarks: WdExportCreateBookmarks.wdExportCreateNoBookmarks
                 );
 
-                Console.WriteLine($"[WORD-HIERARCHY] Successfully created PDF: {outputPdfPath}");
+
                 return outputPdfPath;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[WORD-HIERARCHY] Error creating SmartArt hierarchy: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[WORD-HIERARCHY] Error creating SmartArt hierarchy: {ex.Message}");
+#endif
                 return null;
             }
             finally
@@ -308,7 +307,9 @@ namespace MsgToPdfConverter.Services
                 }
                 catch (Exception cleanupEx)
                 {
-                    Console.WriteLine($"[WORD-HIERARCHY] Cleanup warning: {cleanupEx.Message}");
+#if DEBUG
+                    DebugLogger.Log($"[WORD-HIERARCHY] Cleanup warning: {cleanupEx.Message}");
+#endif
                 }
                 
                 // Force garbage collection to release COM objects

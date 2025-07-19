@@ -16,7 +16,7 @@ namespace MsgToPdfConverter.Services
                 string fontPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "fonts", "DejaVuSans.ttf");
                 if (!File.Exists(fontPath))
                 {
-                    Console.WriteLine($"[FONT] DejaVu Sans font not found at: {fontPath}");
+              
                     return @"
                         <style>
                         html, body, table, div, span, p, td, th, b, i, u, strong, em, h1, h2, h3, h4, h5, h6 {
@@ -29,7 +29,7 @@ namespace MsgToPdfConverter.Services
                 byte[] fontBytes = File.ReadAllBytes(fontPath);
                 string base64Font = Convert.ToBase64String(fontBytes);
 
-                Console.WriteLine($"[FONT] Embedded DejaVu Sans font as base64 data URI ({fontBytes.Length} bytes)");
+       
 
                 return $@"
                     <style>
@@ -44,9 +44,8 @@ namespace MsgToPdfConverter.Services
                     }}
                     </style>";
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Console.WriteLine($"[FONT] Error embedding DejaVu Sans font: {ex.Message}");
                 return @"
                     <style>
                     html, body, table, div, span, p, td, th, b, i, u, strong, em, h1, h2, h3, h4, h5, h6 {
@@ -186,9 +185,8 @@ namespace MsgToPdfConverter.Services
 
                 return string.Empty;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Console.WriteLine($"[ENCODING] Error getting body with proper encoding: {ex.Message}");
                 return msg.BodyHtml ?? msg.BodyText ?? string.Empty;
             }
         }
@@ -431,13 +429,14 @@ namespace MsgToPdfConverter.Services
             {
                 string debugHtmlPath = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), $"debug_email_{DateTime.Now:yyyyMMdd_HHmmss}.html");
                 File.WriteAllText(debugHtmlPath, html, System.Text.Encoding.UTF8);
-                Console.WriteLine($"[DEBUG-HTML] Saved generated HTML to: {debugHtmlPath}");
-                Console.WriteLine($"[DEBUG-HTML] Sample body content: {(body?.Length > 200 ? body.Substring(0, 200) + "..." : body)}");
+      
                 tempFiles.Add(debugHtmlPath);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DEBUG-HTML] Failed to save debug HTML: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[DEBUG-HTML] Failed to save debug HTML: {ex.Message}");
+                #endif
             }
 
             return (html, tempFiles);

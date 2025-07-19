@@ -16,7 +16,7 @@ namespace MsgToPdfConverter
                 MsgToPdfConverter.Utils.DocxEmbeddedExtractor.LogAllParts(docxPath);
                 Console.SetOut(origOut);
             }
-            Console.WriteLine($"[INFO] Parts log written to: {logPath}");
+     
         }
     }
 }

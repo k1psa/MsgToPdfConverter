@@ -17,7 +17,9 @@ namespace MsgToPdfConverter
 
         public TrayDropManager(NotifyIcon trayIcon, MainWindowViewModel viewModel)
         {
-            Console.WriteLine("[DEBUG] TrayDropManager constructor");
+            #if DEBUG
+            DebugLogger.Log("[DEBUG] TrayDropManager constructor");
+            #endif
             _trayIcon = trayIcon;
             _viewModel = viewModel;
             _dropWindow = new TrayDropWindow();
@@ -27,7 +29,7 @@ namespace MsgToPdfConverter
                 {
                     _dropWindowVisible = false;
                     _topmostTimer.Stop();
-                    Console.WriteLine("[DEBUG] Drop window closed by user (X button)");
+            
                 }
             };
             _topmostTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -42,7 +44,7 @@ namespace MsgToPdfConverter
 
         public void Enable()
         {
-            Console.WriteLine("[DEBUG] TrayDropManager.Enable() called");
+         
             _trayIcon.MouseClick += TrayIcon_MouseClick;
             if (_trayIcon.ContextMenuStrip != null)
             {
@@ -53,7 +55,7 @@ namespace MsgToPdfConverter
                         _dropWindow.Hide();
                         _dropWindowVisible = false;
                         _topmostTimer.Stop();
-                        Console.WriteLine("[DEBUG] Hiding drop window due to context menu");
+                 
                     }
                 };
             }
@@ -81,7 +83,7 @@ namespace MsgToPdfConverter
                 _dropWindow.Hide();
                 _dropWindowVisible = false;
                 _topmostTimer.Stop();
-                Console.WriteLine("[DEBUG] Hiding drop window");
+          
             }
         }
 
@@ -101,7 +103,7 @@ namespace MsgToPdfConverter
                 _dropWindow.Hide();
                 _dropWindowVisible = false;
                 _topmostTimer.Stop();
-                Console.WriteLine("[DEBUG] Hiding drop window (from main window)");
+        
             }
         }
 

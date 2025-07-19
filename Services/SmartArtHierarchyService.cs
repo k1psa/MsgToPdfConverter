@@ -196,11 +196,16 @@ namespace MsgToPdfConverter.Services
                         OptimizeFor: WdExportOptimizeFor.wdExportOptimizeForPrint,
                         Range: WdExportRange.wdExportAllDocument);
                     
-                    Console.WriteLine($"[SMARTART] Successfully exported hierarchy as PDF: {outputImagePath}");
+
+#if DEBUG
+                    DebugLogger.Log($"[SMARTART] Successfully exported hierarchy as PDF: {outputImagePath}");
+#endif
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[SMARTART] PDF export failed: {ex.Message}");
+#if DEBUG
+                    DebugLogger.Log($"[SMARTART] PDF export failed: {ex.Message}");
+#endif
                     // Fallback: save as Word document
                     try
                     {
@@ -217,11 +222,16 @@ namespace MsgToPdfConverter.Services
                         
                         // Clean up temp doc
                         try { File.Delete(tempDocPath); } catch { }
-                        Console.WriteLine($"[SMARTART] Successfully exported hierarchy via fallback method: {outputImagePath}");
+
+#if DEBUG
+                        DebugLogger.Log($"[SMARTART] Successfully exported hierarchy via fallback method: {outputImagePath}");
+#endif
                     }
                     catch (Exception fallbackEx)
                     {
-                        Console.WriteLine($"[SMARTART] Fallback PDF export also failed: {fallbackEx.Message}");
+#if DEBUG
+                        DebugLogger.Log($"[SMARTART] Fallback PDF export also failed: {fallbackEx.Message}");
+#endif
                         // Return false to use text fallback
                         imageDoc.Close(SaveChanges: false);
                         doc.Close(SaveChanges: false);
@@ -236,7 +246,10 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[SMARTART] Error creating hierarchy diagram: {ex.Message}");
+
+#if DEBUG
+                DebugLogger.Log($"[SMARTART] Error creating hierarchy diagram: {ex.Message}");
+#endif
                 return false;
             }
             finally
@@ -258,7 +271,10 @@ namespace MsgToPdfConverter.Services
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[SMARTART] Error during cleanup: {ex.Message}");
+
+#if DEBUG
+                    DebugLogger.Log($"[SMARTART] Error during cleanup: {ex.Message}");
+#endif
                 }
                 
                 // Force garbage collection
@@ -318,7 +334,10 @@ namespace MsgToPdfConverter.Services
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"[SMARTART] Error adding hierarchy diagram to PDF: {ex.Message}");
+
+#if DEBUG
+                                DebugLogger.Log($"[SMARTART] Error adding hierarchy diagram to PDF: {ex.Message}");
+#endif
                                 // Fall back to text hierarchy
                                 string treeHeader = TreeHeaderHelper.BuildTreeHeader(parentChain, currentItem);
                                 var treeParagraph = new iText.Layout.Element.Paragraph("Hierarchy:\n" + treeHeader)
@@ -349,7 +368,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[SMARTART] Error creating hierarchy header PDF: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[SMARTART] Error creating hierarchy header PDF: {ex.Message}");
+#endif
                 // Fall back to basic header
                 try
                 {
@@ -358,7 +379,12 @@ namespace MsgToPdfConverter.Services
                 }
                 catch (Exception fallbackEx)
                 {
-                    Console.WriteLine($"[SMARTART] Error creating fallback header: {fallbackEx.Message}");
+                    #if DEBUG
+                    DebugLogger.Log($"[SMARTART] Error creating fallback header: {fallbackEx.Message}");
+                    #endif
+#if DEBUG
+                    DebugLogger.Log($"[SMARTART] Error creating fallback header: {fallbackEx.Message}");
+#endif
                     return false;
                 }
             }

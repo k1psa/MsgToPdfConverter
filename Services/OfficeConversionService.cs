@@ -36,11 +36,15 @@ namespace MsgToPdfConverter.Services
                         tempDir = Path.Combine(Path.GetTempPath(), "MsgToPdf_Embedded_" + Guid.NewGuid());
                         Directory.CreateDirectory(tempDir);
                         extractedObjects = MsgToPdfConverter.Utils.InteropEmbeddedExtractor.ExtractEmbeddedObjects(inputPath, tempDir);
-                        Console.WriteLine($"[InteropExtractor] Total extracted objects: {extractedObjects.Count}");
+#if DEBUG
+                        DebugLogger.Log($"[InteropExtractor] Total extracted objects: {extractedObjects.Count}");
+#endif
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[InteropExtractor] Extraction failed: {ex.Message}");
+#if DEBUG
+                        DebugLogger.Log($"[InteropExtractor] Extraction failed: {ex.Message}");
+#endif
                     }
                     progressTick?.Invoke(); // Tick: after embedded extraction
 
@@ -102,7 +106,9 @@ namespace MsgToPdfConverter.Services
                     {
                         try
                         {
-                            Console.WriteLine($"[PDF-EMBED] Inserting {extractedObjects.Count} embedded files into PDF");
+#if DEBUG
+                            DebugLogger.Log($"[PDF-EMBED] Inserting {extractedObjects.Count} embedded files into PDF");
+#endif
                             PdfEmbeddedInsertionService.InsertEmbeddedFiles(mainPdfPath, extractedObjects, outputPdf, progressTick);
                             progressTick?.Invoke(); // Tick: after embedding
                             // Clean up temp main PDF
@@ -113,7 +119,9 @@ namespace MsgToPdfConverter.Services
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[PDF-EMBED] Failed to insert embedded files: {ex.Message}");
+#if DEBUG
+                            DebugLogger.Log($"[PDF-EMBED] Failed to insert embedded files: {ex.Message}");
+#endif
                             // Fallback: copy the main PDF without embedded files
                             if (mainPdfPath != outputPdf)
                             {
@@ -131,7 +139,9 @@ namespace MsgToPdfConverter.Services
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[CLEANUP] Failed to delete temp directory {tempDir}: {ex.Message}");
+#if DEBUG
+                            DebugLogger.Log($"[CLEANUP] Failed to delete temp directory {tempDir}: {ex.Message}");
+#endif
                         }
                     }
                     result = true;
@@ -149,7 +159,10 @@ namespace MsgToPdfConverter.Services
             // Give Office extra time to release the generated PDF file
             if (result)
             {
-                Console.WriteLine($"[Interop] Waiting for Office to release PDF file: {outputPdf}");
+
+#if DEBUG
+                DebugLogger.Log($"[Interop] Waiting for Office to release PDF file: {outputPdf}");
+#endif
                 int[] delays = { 100, 200, 300, 500, 500, 500, 1000, 1000, 1000, 1000 };
                 for (int i = 0; i < delays.Length; i++)
                 {
@@ -161,7 +174,10 @@ namespace MsgToPdfConverter.Services
                         using (var fs = new FileStream(outputPdf, FileMode.Open, FileAccess.Read, FileShare.Read))
                         {
                             // If we can open it, it's not locked
-                            Console.WriteLine($"[Interop] PDF file ready after {delays.Take(i + 1).Sum()}ms: {outputPdf}");
+
+#if DEBUG
+                            DebugLogger.Log($"[Interop] PDF file ready after {delays.Take(i + 1).Sum()}ms: {outputPdf}");
+#endif
                             break;
                         }
                     }
@@ -169,7 +185,10 @@ namespace MsgToPdfConverter.Services
                     {
                         if (i == delays.Length - 1) // Last attempt
                         {
-                            Console.WriteLine($"[Interop][WARNING] PDF file may still be locked after {delays.Sum()}ms: {outputPdf}");
+
+#if DEBUG
+                            DebugLogger.Log($"[Interop][WARNING] PDF file may still be locked after {delays.Sum()}ms: {outputPdf}");
+#endif
                         }
                     }
                 }
@@ -177,7 +196,10 @@ namespace MsgToPdfConverter.Services
 
             if (threadEx != null)
             {
-                Console.WriteLine($"[Interop] Office to PDF conversion failed: {threadEx.Message}");
+
+#if DEBUG
+                DebugLogger.Log($"[Interop] Office to PDF conversion failed: {threadEx.Message}");
+#endif
                 return false;
             }
             return result;

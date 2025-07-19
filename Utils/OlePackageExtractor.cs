@@ -49,12 +49,12 @@ namespace MsgToPdfConverter.Utils
                 }
                 else
                 {
-                    Console.WriteLine("[DEBUG] StreamNames property not found, trying GetStreamNames method");
+                    
                     // Fallback: try GetStreamNames method
                     var getStreamNamesMethod = rootType.GetMethod("GetStreamNames");
                     if (getStreamNamesMethod != null)
                     {
-                        Console.WriteLine("[DEBUG] Found GetStreamNames method");
+                      
                         var names = getStreamNamesMethod.Invoke(cf.RootStorage, null) as System.Collections.IEnumerable;
                         if (names != null)
                         {
@@ -83,11 +83,13 @@ namespace MsgToPdfConverter.Utils
                     try
                     {
                         var stream = cf.RootStorage.GetStream(streamName);
-                        Console.WriteLine($"[Stream] {streamName} (size: {stream.Size})");
+               
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[Stream] {streamName} (exception: {ex.Message})");
+                    #if DEBUG
+                        DebugLogger.Log($"[Stream] {streamName} (exception: {ex.Message})");
+                    #endif
                     }
                 }
                 // Enumerate all storages (for completeness, using reflection)
@@ -117,7 +119,9 @@ namespace MsgToPdfConverter.Utils
                 }
                 foreach (var storageName in storageNames)
                 {
-                    Console.WriteLine($"[Storage] {storageName}");
+#if DEBUG
+                DebugLogger.Log($"[Storage] {storageName}");
+#endif
                 }
                 // Try 'Package' first, then any other stream with significant data
                 CFStream foundStream = null;
@@ -148,18 +152,24 @@ namespace MsgToPdfConverter.Utils
                 }
                 if (foundStream == null)
                 {
-                    Console.WriteLine("[DEBUG] No plausible stream found in OLE object.");
+                #if DEBUG
+                DebugLogger.Log("[DEBUG] No plausible stream found in OLE object.");
+                #endif
                     return null;
                 }
                 var data = foundStream.GetData();
-                Console.WriteLine($"[DEBUG] '{foundStreamName}' stream size: {data.Length}");
-                Console.WriteLine($"[DEBUG] foundStreamName == 'Ole10Native': {foundStreamName == "Ole10Native"}");
-                Console.WriteLine($"[DEBUG] foundStreamName bytes: {string.Join(" ", System.Text.Encoding.UTF8.GetBytes(foundStreamName ?? "").Select(b => b.ToString("X2")))}");
+#if DEBUG
+                DebugLogger.Log($"[DEBUG] '{foundStreamName}' stream size: {data.Length}");
+                DebugLogger.Log($"[DEBUG] foundStreamName == 'Ole10Native': {foundStreamName == "Ole10Native"}");
+                DebugLogger.Log($"[DEBUG] foundStreamName bytes: {string.Join(" ", System.Text.Encoding.UTF8.GetBytes(foundStreamName ?? "").Select(b => b.ToString("X2")))}");
+#endif
                 
                 // Try to parse based on stream name
                 if (foundStreamName == "Ole10Native" || foundStreamName == "\u0001Ole10Native")
                 {
-                    Console.WriteLine("[DEBUG] Detected Ole10Native stream, using specialized parser");
+#if DEBUG
+                    DebugLogger.Log("[DEBUG] Detected Ole10Native stream, using specialized parser");
+#endif
                     // Ole10Native format: different from Package format
                     try
                     {
@@ -194,14 +204,18 @@ namespace MsgToPdfConverter.Utils
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[DEBUG] Ole10Native parsing failed: {ex.Message}");
+#if DEBUG
+                        DebugLogger.Log($"[DEBUG] Ole10Native parsing failed: {ex.Message}");
+#endif
                         string fallbackName = "Ole10Native_raw.bin";
                         return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data, OriginalStreamName = foundStreamName };
                     }
                 }
                 else
                 {
-                    Console.WriteLine($"[DEBUG] Stream '{foundStreamName}' is not Ole10Native, using standard OLE Package parser");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Stream '{foundStreamName}' is not Ole10Native, using standard OLE Package parser");
+#endif
                     // Try to parse as standard OLE Package
                     try
                     {
@@ -218,15 +232,22 @@ namespace MsgToPdfConverter.Utils
                             byte[] fileData = br.ReadBytes(dataLen);
                             string ext = Path.GetExtension(fileName).ToLowerInvariant();
                             string contentType = ext == ".pdf" ? "application/pdf" : "application/octet-stream";
-                            Console.WriteLine($"[DEBUG] OLE extracted file: {fileName}, size: {fileData.Length}, contentType: {contentType}");
+                           
+#if DEBUG
+                            DebugLogger.Log($"[DEBUG] OLE extracted file: {fileName}, size: {fileData.Length}, contentType: {contentType}");
+#endif
                             // Extra debug for Word/Excel files in standard OLE Package
                             if (ext == ".doc" || ext == ".docx")
                             {
-                                Console.WriteLine($"[DEBUG] Embedded Word file detected: {fileName}");
+#if DEBUG
+                                DebugLogger.Log($"[DEBUG] Embedded Word file detected: {fileName}");
+#endif
                             }
                             if (ext == ".xls" || ext == ".xlsx")
                             {
-                                Console.WriteLine($"[DEBUG] Embedded Excel file detected: {fileName}");
+#if DEBUG
+                                DebugLogger.Log($"[DEBUG] Embedded Excel file detected: {fileName}");
+#endif
                             }
                             // --- Filter out placeholder/fake files ---
                             var placeholderNames = new[] { "data.bin", "contents.bin", "objectpool.bin", "package.bin" };
@@ -240,17 +261,24 @@ namespace MsgToPdfConverter.Utils
                                 string embeddedOfficeName = TryExtractOfficeInternalName(cf);
                                 if (!string.IsNullOrEmpty(embeddedOfficeName))
                                 {
-                                    Console.WriteLine($"[DEBUG] Embedded Office file internal name: {embeddedOfficeName}");
+#if DEBUG
+                                    DebugLogger.Log($"[DEBUG] Embedded Office file internal name: {embeddedOfficeName}");
+#endif
                                     return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = foundStreamName, EmbeddedOfficeName = embeddedOfficeName };
                                 }
-                                Console.WriteLine($"[DEBUG] Skipping placeholder/fake file: {fileName} (stream: {foundStreamName})");
+
+#if DEBUG
+                                DebugLogger.Log($"[DEBUG] Skipping placeholder/fake file: {fileName} (stream: {foundStreamName})");
+#endif
                                 return null;
                             }
                             // Try to extract internal name for Office files even for non-placeholder
                             string officeName = TryExtractOfficeInternalName(cf);
                             if (!string.IsNullOrEmpty(officeName))
                             {
-                                Console.WriteLine($"[DEBUG] Embedded Office file internal name: {officeName}");
+#if DEBUG
+                                DebugLogger.Log($"[DEBUG] Embedded Office file internal name: {officeName}");
+#endif
                             }
                             // --- ZIP signature trimming for .zip files ---
                             if (ext == ".zip")
@@ -283,12 +311,17 @@ namespace MsgToPdfConverter.Utils
                     catch (Exception ex)
                     {
                         // Not a standard OLE Package, just dump the stream as a file
-                        Console.WriteLine($"[DEBUG] Stream '{foundStreamName}' is not a standard OLE Package: {ex.Message}");
+
+#if DEBUG
+                        DebugLogger.Log($"[DEBUG] Stream '{foundStreamName}' is not a standard OLE Package: {ex.Message}");
+#endif
                         // Try to extract internal name for Office files
                         string embeddedOfficeName = TryExtractOfficeInternalName(cf);
                         if (!string.IsNullOrEmpty(embeddedOfficeName))
                         {
-                            Console.WriteLine($"[DEBUG] Embedded Office file internal name: {embeddedOfficeName}");
+#if DEBUG
+                            DebugLogger.Log($"[DEBUG] Embedded Office file internal name: {embeddedOfficeName}");
+#endif
                         }
                         string fallbackName = foundStreamName + ".bin";
                         return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data, OriginalStreamName = foundStreamName, EmbeddedOfficeName = embeddedOfficeName };
@@ -303,17 +336,25 @@ namespace MsgToPdfConverter.Utils
         /// </summary>
         private static OlePackageInfo ParseOle10Native(byte[] data)
         {
-            Console.WriteLine($"[DEBUG] ParseOle10Native: data length = {data.Length}");
+#if DEBUG
+            DebugLogger.Log($"[DEBUG] ParseOle10Native: data length = {data.Length}");
+#endif
             var hexDump = string.Join(" ", data.Take(Math.Min(100, data.Length)).Select(b => b.ToString("X2")));
-            Console.WriteLine($"[DEBUG] First 100 bytes: {hexDump}");
+#if DEBUG
+            DebugLogger.Log($"[DEBUG] First 100 bytes: {hexDump}");
+#endif
             using (var br = new BinaryReader(new MemoryStream(data)))
             {
                 try
                 {
                     uint totalSize = br.ReadUInt32();
-                    Console.WriteLine($"[DEBUG] Ole10Native total size: {totalSize}");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Ole10Native total size: {totalSize}");
+#endif
                     uint typeField = br.ReadUInt32();
-                    Console.WriteLine($"[DEBUG] Ole10Native type field: {typeField}");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Ole10Native type field: {typeField}");
+#endif
                     long fileNameStart = br.BaseStream.Position;
                     string fileName = ReadNullTerminatedString(br);
                     long fileNameEnd = br.BaseStream.Position;
@@ -327,28 +368,42 @@ namespace MsgToPdfConverter.Utils
                     {
                         string prefix = filePath.Substring(0, filePath.Length - fileName.Length);
                         if (prefix.Length >= 2)
-                        {
-                            fileName = prefix.Substring(prefix.Length - 2) + fileName;
-                            Console.WriteLine($"[DEBUG] PATCHED Ole10Native filename: '{fileName}' (added first 2 chars from filepath)");
-                        }
+                            {
+                                fileName = prefix.Substring(prefix.Length - 2) + fileName;
+#if DEBUG
+                                DebugLogger.Log($"[DEBUG] PATCHED Ole10Native filename: '{fileName}' (added first 2 chars from filepath)");
+#endif
+                            }
                     }
-                    Console.WriteLine($"[DEBUG] Ole10Native filename: '{fileName}' (raw bytes: {BitConverter.ToString(fileNameBytes)})");
-                    Console.WriteLine($"[DEBUG] Ole10Native filepath: '{filePath}' (raw bytes: {BitConverter.ToString(filePathBytes)})");
+
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Ole10Native filename: '{fileName}' (raw bytes: {BitConverter.ToString(fileNameBytes)})");
+#endif
+
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Ole10Native filepath: '{filePath}' (raw bytes: {BitConverter.ToString(filePathBytes)})");
+#endif
                     long afterHeader = br.BaseStream.Position;
                     string ext = Path.GetExtension(fileName).ToLowerInvariant();
                     // Extra debug for Word/Excel files in Ole10Native
                     if (ext == ".doc" || ext == ".docx")
                     {
-                        Console.WriteLine($"[DEBUG] Embedded Word file detected (Ole10Native): {fileName}");
+#if DEBUG
+                        DebugLogger.Log($"[DEBUG] Embedded Word file detected (Ole10Native): {fileName}");
+#endif
                     }
                     if (ext == ".xls" || ext == ".xlsx")
                     {
-                        Console.WriteLine($"[DEBUG] Embedded Excel file detected (Ole10Native): {fileName}");
+#if DEBUG
+                        DebugLogger.Log($"[DEBUG] Embedded Excel file detected (Ole10Native): {fileName}");
+#endif
                     }
                     // Universal .7z handling: extract from 7z signature to end, then let TrimTo7zSignature handle truncation
                     if (ext == ".7z")
                     {
-                        Console.WriteLine("[DEBUG] Universal .7z handling: searching for 7z signature in full OLE10Native stream");
+#if DEBUG
+                        DebugLogger.Log("[DEBUG] Universal .7z handling: searching for 7z signature in full OLE10Native stream");
+#endif
                         byte[] sig = new byte[] { 0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C };
                         for (int i = 0; i <= data.Length - sig.Length; i++)
                         {
@@ -364,7 +419,10 @@ namespace MsgToPdfConverter.Utils
                             if (match)
                             {
                                 int available = data.Length - i;
-                                Console.WriteLine($"[DEBUG] .7z signature found at offset {i}, extracting {available} bytes");
+
+#if DEBUG
+                                DebugLogger.Log($"[DEBUG] .7z signature found at offset {i}, extracting {available} bytes");
+#endif
                                 var fileData = data.Skip(i).ToArray();
                                 fileData = TrimTo7zSignature(fileData); // Let TrimTo7zSignature handle header-based truncation
                                 Log7zDataPreview(fileData, 0, fileData.Length);
@@ -372,7 +430,10 @@ namespace MsgToPdfConverter.Utils
                                 return new OlePackageInfo { FileName = fileName, ContentType = contentType, Data = fileData, OriginalStreamName = "Ole10Native" };
                             }
                         }
-                        Console.WriteLine("[DEBUG] .7z signature not found in OLE10Native stream, fallback to normal logic");
+
+#if DEBUG
+                        DebugLogger.Log("[DEBUG] .7z signature not found in OLE10Native stream, fallback to normal logic");
+#endif
                         // fallback to normal logic below
                     }
                     // Try to find a plausible data size field
@@ -397,7 +458,10 @@ namespace MsgToPdfConverter.Utils
                                     dataSize = candidate;
                                     foundDataSize = true;
                                     afterHeader = checkPos;
-                                    Console.WriteLine($"[DEBUG] Found validated data size: {dataSize} at skip {skip}");
+
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Found validated data size: {dataSize} at skip {skip}");
+#endif
                                     break;
                                 }
                             }
@@ -406,7 +470,10 @@ namespace MsgToPdfConverter.Utils
                     // If not found or dataSize is suspiciously small, fallback for non-MSG files
                     if (!foundDataSize || (dataSize < 1024 && ext != ".msg" && ext != ".pdf"))
                     {
-                        Console.WriteLine("[DEBUG] Fallback: using all remaining bytes after header as file data");
+
+#if DEBUG
+                    DebugLogger.Log("[DEBUG] Fallback: using all remaining bytes after header as file data");
+#endif
                         br.BaseStream.Position = afterHeader;
                         dataSize = (uint)(br.BaseStream.Length - br.BaseStream.Position);
                     }
@@ -415,9 +482,15 @@ namespace MsgToPdfConverter.Utils
                         br.BaseStream.Position = afterHeader;
                     }
                     byte[] fileDataNormal = br.ReadBytes((int)dataSize);
-                    Console.WriteLine($"[DEBUG] Read {fileDataNormal.Length} bytes of file data");
+
+#if DEBUG
+                DebugLogger.Log($"[DEBUG] Read {fileDataNormal.Length} bytes of file data");
+#endif
                     bool isValidData = ValidateFileData(fileDataNormal, fileName);
-                    Console.WriteLine($"[DEBUG] Initial validation result: {isValidData}");
+
+#if DEBUG
+                DebugLogger.Log($"[DEBUG] Initial validation result: {isValidData}");
+#endif
                     if (string.IsNullOrEmpty(fileName))
                     {
                         fileName = "Ole10Native_file.bin";
@@ -433,12 +506,17 @@ namespace MsgToPdfConverter.Utils
                     string contentTypeNormal = ext == ".pdf" ? "application/pdf" :
                                         ext == ".msg" ? "application/vnd.ms-outlook" :
                                         "application/octet-stream";
-                    Console.WriteLine($"[DEBUG] Ole10Native extracted file: {fileName}, size: {fileDataNormal.Length}, contentType: {contentTypeNormal}, validated: {isValidData}");
+
+#if DEBUG
+                DebugLogger.Log($"[DEBUG] Ole10Native extracted file: {fileName}, size: {fileDataNormal.Length}, contentType: {contentTypeNormal}, validated: {isValidData}");
+#endif
                     return new OlePackageInfo { FileName = fileName, ContentType = contentTypeNormal, Data = fileDataNormal, OriginalStreamName = "Ole10Native" };
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[DEBUG] Ole10Native parsing failed: {ex.Message}");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Ole10Native parsing failed: {ex.Message}");
+#endif
                     string fallbackName = "Ole10Native_raw.bin";
                     return new OlePackageInfo { FileName = fallbackName, ContentType = "application/octet-stream", Data = data, OriginalStreamName = "Ole10Native" };
                 }
@@ -511,14 +589,18 @@ namespace MsgToPdfConverter.Utils
             try
             {
                 var stream = storage.GetStream("Package");
+                #if DEBUG
                 if (stream != null)
-                    Console.WriteLine($"{indent}[Stream] Package");
+                    DebugLogger.Log($"{indent}[Stream] Package");
                 else
-                    Console.WriteLine($"{indent}[Stream] Package not found");
+                    DebugLogger.Log($"{indent}[Stream] Package not found");
+                #endif
             }
             catch
             {
-                Console.WriteLine($"{indent}[Stream] Package not found (exception)");
+#if DEBUG
+                DebugLogger.Log($"{indent}[Stream] Package not found (exception)");
+#endif
             }
         }
 
@@ -682,11 +764,15 @@ namespace MsgToPdfConverter.Utils
                 if (data[i] == 0x50 && data[i + 1] == 0x4B && data[i + 2] == 0x03 && data[i + 3] == 0x04)
                 {
                     if (i == 0) return data;
-                    Console.WriteLine($"[DEBUG] Trimming {i} bytes before ZIP signature");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Trimming {i} bytes before ZIP signature");
+#endif
                     return data.Skip(i).ToArray();
                 }
             }
-            Console.WriteLine("[DEBUG] ZIP signature not found, returning original data");
+#if DEBUG
+            DebugLogger.Log("[DEBUG] ZIP signature not found, returning original data");
+#endif
             return data;
         }
 
@@ -710,11 +796,15 @@ namespace MsgToPdfConverter.Utils
                 if (match)
                 {
                     if (i == 0) return data;
-                    Console.WriteLine($"[DEBUG] Trimming {i} bytes before OLE signature");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Trimming {i} bytes before OLE signature");
+#endif
                     return data.Skip(i).ToArray();
                 }
             }
-            Console.WriteLine("[DEBUG] OLE signature not found, returning original data");
+#if DEBUG
+            DebugLogger.Log("[DEBUG] OLE signature not found, returning original data");
+#endif
             return data;
         }
 
@@ -743,20 +833,28 @@ namespace MsgToPdfConverter.Utils
             }
             if (offsets.Count == 0)
             {
-                Console.WriteLine("[DEBUG] 7Z signature not found, returning original data");
+#if DEBUG
+                DebugLogger.Log("[DEBUG] 7Z signature not found, returning original data");
+#endif
                 Log7zDataPreview(data, 0, data.Length);
                 return data;
             }
-            Console.WriteLine($"[DEBUG] Found {offsets.Count} 7Z signature(s) at offsets: {string.Join(", ", offsets)}");
+#if DEBUG
+            DebugLogger.Log($"[DEBUG] Found {offsets.Count} 7Z signature(s) at offsets: {string.Join(", ", offsets)}");
+#endif
             // Try each candidate, prefer the first valid one
             foreach (var offset in offsets)
             {
                 var trimmed = data.Skip(offset).ToArray();
-                Console.WriteLine(offset == 0 ? "[DEBUG] 7Z signature found at offset 0" : $"[DEBUG] Trimming {offset} bytes before 7Z signature (offset {offset})");
+#if DEBUG
+                DebugLogger.Log(offset == 0 ? "[DEBUG] 7Z signature found at offset 0" : $"[DEBUG] Trimming {offset} bytes before 7Z signature (offset {offset})");
+#endif
                 int archiveLength = Get7zArchiveLength(trimmed);
                 if (archiveLength > 0 && archiveLength <= trimmed.Length)
                 {
-                    Console.WriteLine($"[DEBUG] Truncating 7Z to {archiveLength} bytes (removing {trimmed.Length - archiveLength} trailing bytes)");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Truncating 7Z to {archiveLength} bytes (removing {trimmed.Length - archiveLength} trailing bytes)");
+#endif
                     var result = trimmed.Take(archiveLength).ToArray();
                     Log7zDataPreview(result, 0, result.Length);
                     return result;
@@ -770,13 +868,17 @@ namespace MsgToPdfConverter.Utils
             int knownGoodSize = 1001537; // 978 KB (1,001,537 bytes) as per user
             if (data.Length >= offsets[0] + knownGoodSize)
             {
-                Console.WriteLine($"[DEBUG] Forcibly truncating 7Z to known-good size {knownGoodSize} bytes");
+#if DEBUG
+                DebugLogger.Log($"[DEBUG] Forcibly truncating 7Z to known-good size {knownGoodSize} bytes");
+#endif
                 var forced = data.Skip(offsets[0]).Take(knownGoodSize).ToArray();
                 Log7zDataPreview(forced, 0, forced.Length);
                 return forced;
             }
             // If not enough data, fallback to first candidate trimmed
-            Console.WriteLine("[DEBUG] No valid 7Z archive length found, returning first candidate");
+#if DEBUG
+            DebugLogger.Log("[DEBUG] No valid 7Z archive length found, returning first candidate");
+#endif
             var fallback = data.Skip(offsets[0]).ToArray();
             Log7zDataPreview(fallback, 0, fallback.Length);
             return fallback;
@@ -799,7 +901,9 @@ namespace MsgToPdfConverter.Utils
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DEBUG] Failed to parse 7Z header for archive length: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[DEBUG] Failed to parse 7Z header for archive length: {ex.Message}");
+#endif
             }
             return 0;
         }
@@ -809,14 +913,18 @@ namespace MsgToPdfConverter.Utils
         {
             int previewLen = 32;
             if (data == null || data.Length == 0) {
-                Console.WriteLine("[DEBUG] 7Z data is empty");
+#if DEBUG
+                DebugLogger.Log("[DEBUG] 7Z data is empty");
+#endif
                 return;
             }
             string firstBytes = BitConverter.ToString(data.Skip(start).Take(Math.Min(previewLen, length)).ToArray());
             string lastBytes = BitConverter.ToString(data.Skip(Math.Max(0, start + length - previewLen)).Take(Math.Min(previewLen, length)).ToArray());
-            Console.WriteLine($"[DEBUG] 7Z first {previewLen} bytes: {firstBytes}");
-            Console.WriteLine($"[DEBUG] 7Z last {previewLen} bytes: {lastBytes}");
-            Console.WriteLine($"[DEBUG] 7Z total length: {length}");
+#if DEBUG
+            DebugLogger.Log($"[DEBUG] 7Z first {previewLen} bytes: {firstBytes}");
+            DebugLogger.Log($"[DEBUG] 7Z last {previewLen} bytes: {lastBytes}");
+            DebugLogger.Log($"[DEBUG] 7Z total length: {length}");
+#endif
         }
     }
 }

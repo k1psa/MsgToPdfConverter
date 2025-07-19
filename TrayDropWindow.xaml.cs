@@ -13,7 +13,7 @@ namespace MsgToPdfConverter
 
         public TrayDropWindow()
         {
-            Console.WriteLine("[DEBUG] TrayDropWindow constructor");
+          
             InitializeComponent();
             this.AllowDrop = true;
             this.DragEnter += TrayDropWindow_DragEnter;
@@ -24,7 +24,7 @@ namespace MsgToPdfConverter
 
         private void TrayDropWindow_DragEnter(object sender, DragEventArgs e)
         {
-            Console.WriteLine($"[DEBUG] TrayDropWindow_DragEnter: Data formats: {string.Join(", ", e.Data.GetFormats())}");
+           
             if (e.Data.GetDataPresent(DataFormats.FileDrop) ||
                 e.Data.GetDataPresent("FileGroupDescriptorW") ||
                 e.Data.GetDataPresent("FileGroupDescriptor"))
@@ -39,7 +39,7 @@ namespace MsgToPdfConverter
 
         private void TrayDropWindow_DragOver(object sender, DragEventArgs e)
         {
-            Console.WriteLine($"[DEBUG] TrayDropWindow_DragOver: Data formats: {string.Join(", ", e.Data.GetFormats())}");
+          
             if (e.Data.GetDataPresent(DataFormats.FileDrop) ||
                 e.Data.GetDataPresent("FileGroupDescriptorW") ||
                 e.Data.GetDataPresent("FileGroupDescriptor"))
@@ -55,7 +55,7 @@ namespace MsgToPdfConverter
 
         private void TrayDropWindow_Drop(object sender, DragEventArgs e)
         {
-            Console.WriteLine($"[DEBUG] TrayDropWindow_Drop: Data formats: {string.Join(", ", e.Data.GetFormats())}");
+           
             if (e.Data != null)
             {
                 DataDropped?.Invoke(e.Data);
@@ -84,7 +84,7 @@ namespace MsgToPdfConverter
 
         public new void Show()
         {
-            Console.WriteLine("[DEBUG] TrayDropWindow.Show() called");
+         
             base.Show();
         }
 

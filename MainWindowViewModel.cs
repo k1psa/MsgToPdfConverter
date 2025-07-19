@@ -66,7 +66,9 @@ namespace MsgToPdfConverter
                 FileCountText = $"Files selected: {_selectedFiles.Count}";
                 (ConvertCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
             };
-            Console.WriteLine("MainWindowViewModel initialized");
+            #if DEBUG
+                DebugLogger.Log("MainWindowViewModel initialized");
+            #endif
             _progressRingDelayTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _progressRingDelayTimer.Tick += (s, e) =>
             {
@@ -213,20 +215,24 @@ namespace MsgToPdfConverter
                     _lastConfirmedCombinedPdfPath = path;
                 }
             }
-            Console.WriteLine($"Starting conversion for {SelectedFiles.Count} files. Output folder: {SelectedOutputFolder}");
-            Console.WriteLine($"[DEBUG] Passing DeleteFilesAfterConversion: {DeleteFilesAfterConversion}");
+            #if DEBUG
+            DebugLogger.Log($"Starting conversion for {SelectedFiles.Count} files. Output folder: {SelectedOutputFolder}");
+            DebugLogger.Log($"[DEBUG] Passing DeleteFilesAfterConversion: {DeleteFilesAfterConversion}");
             if (SelectedFiles == null)
-                Console.WriteLine("[DEBUG] SelectedFiles is null!");
+                DebugLogger.Log("[DEBUG] SelectedFiles is null!");
             else
-                Console.WriteLine($"[DEBUG] SelectedFiles: [{string.Join(", ", SelectedFiles)}]");
+                DebugLogger.Log($"[DEBUG] SelectedFiles: [{string.Join(", ", SelectedFiles)}]");
+            #endif
             IsConverting = true;
             ProgressValue = 0;
             ProgressMax = SelectedFiles.Count;
             ProcessingStatus = "";
-            if (_emailService == null) Console.WriteLine("[DEBUG] _emailService is null!");
-            if (_attachmentService == null) Console.WriteLine("[DEBUG] _attachmentService is null!");
-            if (_outlookImportService == null) Console.WriteLine("[DEBUG] _outlookImportService is null!");
-            if (_fileListService == null) Console.WriteLine("[DEBUG] _fileListService is null!");
+            #if DEBUG
+            if (_emailService == null) DebugLogger.Log("[DEBUG] _emailService is null!");
+            if (_attachmentService == null) DebugLogger.Log("[DEBUG] _attachmentService is null!");
+            if (_outlookImportService == null) DebugLogger.Log("[DEBUG] _outlookImportService is null!");
+            if (_fileListService == null) DebugLogger.Log("[DEBUG] _fileListService is null!");
+            #endif
             var conversionService = new ConversionService();
             try
             {
@@ -235,7 +241,9 @@ namespace MsgToPdfConverter
                 {
                     if (conversionService == null)
                     {
-                        Console.WriteLine("[DEBUG] conversionService is null!");
+                        #if DEBUG
+                        DebugLogger.Log("[DEBUG] conversionService is null!");
+                        #endif
                         // Return default tuple
                         return (0, 0, 0, false);
                     }
@@ -253,7 +261,9 @@ namespace MsgToPdfConverter
                             ProcessingStatus = statusText;
                             ProgressValue = fileProcessed;
                             // Remove direct IsProcessingFile set here
-                            Console.WriteLine($"Progress: {fileProcessed}/{total} - {statusText}");
+                            #if DEBUG
+                            DebugLogger.Log($"Progress: {fileProcessed}/{total} - {statusText}");
+                            #endif
                         },
                         (current, max) =>
                         {
@@ -276,7 +286,9 @@ namespace MsgToPdfConverter
                                     _progressRingDelayTimer.Stop();
                                     IsProcessingFile = false;
                                 }
-                                Console.WriteLine($"[FILE-PROGRESS] {current}/{max} = {FileProgressRatio:F2} - IsProcessingFile: {IsProcessingFile}");
+                                #if DEBUG
+                                DebugLogger.Log($"[FILE-PROGRESS] {current}/{max} = {FileProgressRatio:F2} - IsProcessingFile: {IsProcessingFile}");
+                                #endif
                             });
                         },
                         () => CancellationRequested,
@@ -286,33 +298,41 @@ namespace MsgToPdfConverter
                     // Value tuple cannot be null, but check for default values
                     if (res.Item1 == 0 && res.Item2 == 0 && res.Item3 == 0 && !res.Item4)
                     {
-                        Console.WriteLine("[DEBUG] ConvertFilesWithAttachments returned default result! Possible error in conversion.");
+                        #if DEBUG
+                        DebugLogger.Log("[DEBUG] ConvertFilesWithAttachments returned default result! Possible error in conversion.");
+                        #endif
                     }
                     return res;
                 });
                 string statusMessage;
                 if (CombineAllPdfs && !string.IsNullOrEmpty(CombinedPdfOutputPath) && generatedPdfs.Count > 0)
                 {
-                    Console.WriteLine($"[DEBUG] Calling PdfAppendTest.AppendPdfs. generatedPdfs.Count={generatedPdfs.Count}, CombinedPdfOutputPath={CombinedPdfOutputPath}");
+                    #if DEBUG
+                    DebugLogger.Log($"[DEBUG] Calling PdfAppendTest.AppendPdfs. generatedPdfs.Count={generatedPdfs.Count}, CombinedPdfOutputPath={CombinedPdfOutputPath}");
+                    #endif
                     try
                     {
+                        #if DEBUG
                         if (generatedPdfs == null)
                         {
-                            Console.WriteLine("[DEBUG] generatedPdfs is null!");
+                            DebugLogger.Log("[DEBUG] generatedPdfs is null!");
                         }
                         else if (generatedPdfs.Count == 0)
                         {
-                            Console.WriteLine("[DEBUG] generatedPdfs is empty!");
+                            DebugLogger.Log("[DEBUG] generatedPdfs is empty!");
                         }
                         if (string.IsNullOrEmpty(CombinedPdfOutputPath))
                         {
-                            Console.WriteLine("[DEBUG] CombinedPdfOutputPath is null or empty!");
+                            DebugLogger.Log("[DEBUG] CombinedPdfOutputPath is null or empty!");
                         }
+                        #endif
                         PdfAppendTest.AppendPdfs(generatedPdfs, CombinedPdfOutputPath);
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[ERROR] Exception in PdfAppendTest.AppendPdfs: {ex.Message}");
+                        #if DEBUG
+                        DebugLogger.Log($"[ERROR] Exception in PdfAppendTest.AppendPdfs: {ex.Message}");
+                        #endif
                         throw;
                     }
                     // Always delete intermediate PDFs after combining
@@ -327,14 +347,20 @@ namespace MsgToPdfConverter
                     // Optionally delete original source files if requested
                     if (DeleteFilesAfterConversion)
                     {
-                        Console.WriteLine($"[DEBUG] Entering file deletion loop. DeleteFilesAfterConversion={DeleteFilesAfterConversion}, AppendAttachments={AppendAttachments}");
+                        #if DEBUG
+                        DebugLogger.Log($"[DEBUG] Entering file deletion loop. DeleteFilesAfterConversion={DeleteFilesAfterConversion}, AppendAttachments={AppendAttachments}");
+                        #endif
                         if (!DeleteFilesAfterConversion)
                         {
-                            Console.WriteLine("[DELETE] Skipping deletion because DeleteFilesAfterConversion is false.");
+                            #if DEBUG
+                            DebugLogger.Log("[DELETE] Skipping deletion because DeleteFilesAfterConversion is false.");
+                            #endif
                         }
                         else if (SelectedFiles == null)
                         {
-                            Console.WriteLine("[DELETE] SelectedFiles is null!");
+                            #if DEBUG
+                            DebugLogger.Log("[DELETE] SelectedFiles is null!");
+                            #endif
                         }
                         else
                         {
@@ -342,7 +368,9 @@ namespace MsgToPdfConverter
                             {
                                 if (src == null)
                                 {
-                                    Console.WriteLine("[DELETE] Skipped null file reference in SelectedFiles.");
+                                    #if DEBUG
+                                    DebugLogger.Log("[DELETE] Skipped null file reference in SelectedFiles.");
+                                    #endif
                                     continue;
                                 }
                                 if (!string.IsNullOrEmpty(src) && !string.Equals(src, CombinedPdfOutputPath, StringComparison.OrdinalIgnoreCase))
@@ -351,27 +379,37 @@ namespace MsgToPdfConverter
                                     {
                                         if (File.Exists(src))
                                         {
-                                            Console.WriteLine($"[DELETE] Deleting file: {src}");
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DELETE] Deleting file: {src}");
+                                            #endif
                                             FileService.MoveFileToRecycleBin(src);
                                         }
                                         else
                                         {
-                                            Console.WriteLine($"[DELETE] File not found or already deleted: {src}");
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DELETE] File not found or already deleted: {src}");
+                                            #endif
                                         }
                                     }
                                     catch (NullReferenceException nre)
                                     {
-                                        Console.WriteLine($"[DELETE] NullReferenceException deleting file '{src}': {nre.Message}");
-                                        if (src == null) Console.WriteLine("[DELETE] src is null");
+                                        #if DEBUG
+                                        DebugLogger.Log($"[DELETE] NullReferenceException deleting file '{src}': {nre.Message}");
+                                        if (src == null) DebugLogger.Log("[DELETE] src is null");
+                                        #endif
                                     }
                                     catch (Exception ex)
                                     {
-                                        Console.WriteLine($"[DELETE] Exception deleting file '{src}': {ex.Message}");
+                                        #if DEBUG
+                                        DebugLogger.Log($"[DELETE] Exception deleting file '{src}': {ex.Message}");
+                                        #endif
                                     }
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[DELETE] Skipped empty or output file reference: {src}");
+                                    #if DEBUG
+                                    DebugLogger.Log($"[DELETE] Skipped empty or output file reference: {src}");
+                                    #endif
                                 }
                             }
                         }
@@ -384,8 +422,10 @@ namespace MsgToPdfConverter
                         ? $"Processing cancelled. Processed {processed} files. Success: {success}, Failed: {fail}"
                         : $"Processing completed. Total files: {SelectedFiles.Count}, Success: {success}, Failed: {fail}";
                 }
-                Console.WriteLine(statusMessage);
-                Console.WriteLine("[DEBUG] About to show completion dialog.");
+                #if DEBUG
+                DebugLogger.Log(statusMessage);
+                DebugLogger.Log("[DEBUG] About to show completion dialog.");
+                #endif
                 // Ensure MessageBox is centered and on top, even if window is pinned
                 var mainWindow2 = Application.Current?.MainWindow;
                 bool wasTopmost2 = mainWindow2 != null && mainWindow2.Topmost;
@@ -394,7 +434,7 @@ namespace MsgToPdfConverter
                 {
                     if (mainWindow2.WindowState == WindowState.Minimized)
                     {
-                        Console.WriteLine("[DEBUG] Main window is minimized, restoring before dialog.");
+                       
                         mainWindow2.WindowState = WindowState.Normal;
                         mainWindow2.Show();
                         mainWindow2.Activate();
@@ -402,7 +442,9 @@ namespace MsgToPdfConverter
                     // If window is hidden (tray), show and activate
                     if (!mainWindow2.IsVisible)
                     {
-                        Console.WriteLine("[DEBUG] Main window is not visible (tray), showing before dialog.");
+                        #if DEBUG
+                        DebugLogger.Log("[DEBUG] Main window is not visible (tray), showing before dialog.");
+                        #endif
                         mainWindow2.Show();
                         mainWindow2.WindowState = WindowState.Normal;
                         mainWindow2.Activate();
@@ -412,17 +454,23 @@ namespace MsgToPdfConverter
                 // Use helper to center MessageBox within main window
                 MsgToPdfConverter.Utils.MessageBoxHelper.ShowCentered(mainWindow2, statusMessage, "Processing Results", MessageBoxButton.OK,
                     (fail > 0 && !CombineAllPdfs) ? MessageBoxImage.Warning : MessageBoxImage.Information);
-                Console.WriteLine("[DEBUG] Completion dialog closed.");
+                #if DEBUG
+                DebugLogger.Log("[DEBUG] Completion dialog closed.");
+                #endif
                 if (IsPinned && mainWindow2 != null) mainWindow2.Topmost = wasTopmost2;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"An error occurred: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"An error occurred: {ex.Message}");
+#endif
                 MessageBox.Show($"An error occurred: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
             }
             finally
             {
-                Console.WriteLine("Conversion finished.");
+#if DEBUG
+                DebugLogger.Log("Conversion finished.");
+#endif
                 IsConverting = false;
                 CancellationRequested = false;
                 ProcessingStatus = "";
@@ -463,7 +511,9 @@ namespace MsgToPdfConverter
             if (optionsWindow.ShowDialog() == true)
             {
                 DeleteFilesAfterConversion = optionsWindow.DeleteFilesAfterConversion;
-                Console.WriteLine($"[DEBUG] DeleteFilesAfterConversion set to: {DeleteFilesAfterConversion}");
+                #if DEBUG
+                DebugLogger.Log($"[DEBUG] DeleteFilesAfterConversion set to: {DeleteFilesAfterConversion}");
+                #endif
             }
         }
 
@@ -504,8 +554,10 @@ namespace MsgToPdfConverter
         // Drag-and-drop support for ListBox
         public void HandleDrop(IDataObject data)
         {
-            Console.WriteLine("[DEBUG] HandleDrop called!");
-            Console.WriteLine($"[DEBUG] Available data formats: {string.Join(", ", data.GetFormats())}");
+            #if DEBUG
+            DebugLogger.Log("[DEBUG] HandleDrop called!");
+            DebugLogger.Log($"[DEBUG] Available data formats: {string.Join(", ", data.GetFormats())}");
+            #endif
             
             // 1. Standard file/folder drop
             if (data.GetDataPresent(DataFormats.FileDrop))
@@ -532,12 +584,16 @@ namespace MsgToPdfConverter
             // 2. Outlook drag-and-drop: distinguish between attachment and email
             if (data.GetDataPresent("FileGroupDescriptorW") || data.GetDataPresent("FileGroupDescriptor"))
             {
-                Console.WriteLine("[DEBUG] Outlook drag-and-drop detected!");
+                #if DEBUG
+                DebugLogger.Log("[DEBUG] Outlook drag-and-drop detected!");
+                #endif
                 try
                 {
                     // Check if this is a child MSG attachment by looking at the data formats
                     string[] formats = data.GetFormats();
-                    Console.WriteLine($"[DEBUG] Data formats: {string.Join(", ", formats)}");
+                    #if DEBUG
+                    DebugLogger.Log($"[DEBUG] Data formats: {string.Join(", ", formats)}");
+                    #endif
                     
                     // Child MSG attachments have ZoneIdentifier but no RenPrivateMessages/RenPrivateLatestMessages
                     // Parent emails have RenPrivateMessages and RenPrivateLatestMessages
@@ -565,14 +621,18 @@ namespace MsgToPdfConverter
                         }
                     }
                     
-                    Console.WriteLine($"[DEBUG] Attachment name: {attachmentName}");
-                    Console.WriteLine($"[DEBUG] Is child MSG attachment: {isChildMsgAttachment}");
+                    #if DEBUG
+                    DebugLogger.Log($"[DEBUG] Attachment name: {attachmentName}");
+                    DebugLogger.Log($"[DEBUG] Is child MSG attachment: {isChildMsgAttachment}");
+                    #endif
                     
                     // If it's a child MSG attachment, treat it as an email extraction
                     if (isChildMsgAttachment && !string.IsNullOrEmpty(attachmentName) && 
                         attachmentName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
                     {
-                        Console.WriteLine($"[DEBUG] Detected child MSG attachment drop: {attachmentName} (treating as email)");
+                        #if DEBUG
+                        DebugLogger.Log($"[DEBUG] Detected child MSG attachment drop: {attachmentName} (treating as email)");
+                        #endif
                         string outputFolder = !string.IsNullOrEmpty(SelectedOutputFolder) ? SelectedOutputFolder : null;
                         var mainWindow = Application.Current.MainWindow;
                         if (string.IsNullOrEmpty(outputFolder))
@@ -586,7 +646,9 @@ namespace MsgToPdfConverter
                         
                         // Extract child MSG attachments and warn if ambiguous
                         var resultChildMsg = _outlookImportService.ExtractChildMsgFromDragDrop(data, outputFolder, FileService.SanitizeFileName, attachmentName);
-                        Console.WriteLine($"[DEBUG] Child MSG extraction result: Extracted={resultChildMsg.ExtractedFiles.Count}, Skipped={resultChildMsg.SkippedFiles.Count}");
+                        #if DEBUG
+                        DebugLogger.Log($"[DEBUG] Child MSG extraction result: Extracted={resultChildMsg.ExtractedFiles.Count}, Skipped={resultChildMsg.SkippedFiles.Count}");
+                        #endif
                         if (resultChildMsg.ExtractedFiles.Count > 1)
                         {
                             // Show warning to user about ambiguity
@@ -602,39 +664,53 @@ namespace MsgToPdfConverter
                         {
                             foreach (var extractedFile in resultChildMsg.ExtractedFiles)
                             {
-                                Console.WriteLine($"[DEBUG] Extracted file: {extractedFile}");
+                            #if DEBUG
+                            DebugLogger.Log($"[DEBUG] Extracted file: {extractedFile}");
+                            #endif
                                 if (!string.IsNullOrEmpty(extractedFile) && File.Exists(extractedFile))
                                 {
                                     if (!_selectedFiles.Contains(extractedFile))
                                     {
                                         _selectedFiles.Add(extractedFile);
-                                        Console.WriteLine($"[DEBUG] Added child MSG to list: {Path.GetFileName(extractedFile)}");
+                                        #if DEBUG
+                                        DebugLogger.Log($"[DEBUG] Added child MSG to list: {Path.GetFileName(extractedFile)}");
+                                        #endif
                                     }
                                     else
                                     {
-                                        Console.WriteLine($"[DEBUG] Child MSG already in list: {Path.GetFileName(extractedFile)}");
+                                        #if DEBUG
+                                        DebugLogger.Log($"[DEBUG] Child MSG already in list: {Path.GetFileName(extractedFile)}");
+                                        #endif
                                     }
                                 }
                                 else
                                 {
-                                    Console.WriteLine($"[DEBUG] Skipped non-existent or empty extracted file: {extractedFile}");
+                                    #if DEBUG
+                                    DebugLogger.Log($"[DEBUG] Skipped non-existent or empty extracted file: {extractedFile}");
+                                    #endif
                                 }
                             }
                         }
                         else
                         {
-                            Console.WriteLine("[DEBUG] No files were extracted from child MSG");
+                            #if DEBUG
+                            DebugLogger.Log("[DEBUG] No files were extracted from child MSG");
+                            #endif
                         }
                         if (resultChildMsg.SkippedFiles.Count > 0)
                         {
-                            Console.WriteLine($"[DEBUG] Skipped files: {string.Join(", ", resultChildMsg.SkippedFiles)}");
+                        #if DEBUG
+                        DebugLogger.Log($"[DEBUG] Skipped files: {string.Join(", ", resultChildMsg.SkippedFiles)}");
+                        #endif
                         }
                         return;
                     }
                     // Check if it's a non-MSG attachment
                     else if (!string.IsNullOrEmpty(attachmentName) && !attachmentName.EndsWith(".msg", StringComparison.OrdinalIgnoreCase))
                     {
-                        Console.WriteLine($"[DEBUG] Detected Outlook attachment drop: {attachmentName}");
+                        #if DEBUG
+                        DebugLogger.Log($"[DEBUG] Detected Outlook attachment drop: {attachmentName}");
+                        #endif
                         string outputFolder = !string.IsNullOrEmpty(SelectedOutputFolder) ? SelectedOutputFolder : null;
                         var mainWindow = Application.Current.MainWindow;
                         if (string.IsNullOrEmpty(outputFolder))
@@ -653,18 +729,28 @@ namespace MsgToPdfConverter
                             _selectedFiles.Add(file);
                         if (result.ExtractedFiles.Count > 0)
                         {
-                            Console.WriteLine($"[DEBUG] Successfully added {result.ExtractedFiles.Count} attachment(s) to the list:");
+                        #if DEBUG
+                        DebugLogger.Log($"[DEBUG] Successfully added {result.ExtractedFiles.Count} attachment(s) to the list:");
+                        #endif
                             foreach (var file in result.ExtractedFiles)
-                                Console.WriteLine($"[DEBUG] - {Path.GetFileName(file)}");
+                            {
+                                #if DEBUG
+                                DebugLogger.Log($"[DEBUG] - {Path.GetFileName(file)}");
+                                #endif
+                            }
                         }
                         if (result.SkippedFiles.Count > 0)
                         {
-                            Console.WriteLine($"[DEBUG] Skipped files: {string.Join(", ", result.SkippedFiles)}");
+                        #if DEBUG
+                        DebugLogger.Log($"[DEBUG] Skipped files: {string.Join(", ", result.SkippedFiles)}");
+                        #endif
                         }
                         return;
                     }
                     // Otherwise, treat as parent email
-                    Console.WriteLine("[DEBUG] Detected Outlook parent email drop (saving as .msg)");
+                    #if DEBUG
+                    DebugLogger.Log("[DEBUG] Detected Outlook parent email drop (saving as .msg)");
+                    #endif
                     string outputFolderEmail = !string.IsNullOrEmpty(SelectedOutputFolder) ? SelectedOutputFolder : null;
                     var mainWindowEmail = Application.Current.MainWindow;
                     if (string.IsNullOrEmpty(outputFolderEmail))
@@ -683,26 +769,21 @@ namespace MsgToPdfConverter
                     _selectedFiles.Clear();
                     foreach (var file in updatedEmail)
                         _selectedFiles.Add(file);
-                    if (resultEmail.ExtractedFiles.Count > 0)
-                    {
-                        Console.WriteLine($"[DEBUG] Successfully added {resultEmail.ExtractedFiles.Count} parent email(s) to the list:");
-                        foreach (var file in resultEmail.ExtractedFiles)
-                            Console.WriteLine($"[DEBUG] - {Path.GetFileName(file)}");
-                    }
-                    if (resultEmail.SkippedFiles.Count > 0)
-                    {
-                        Console.WriteLine($"[DEBUG] Skipped files: {string.Join(", ", resultEmail.SkippedFiles)}");
-                    }
+
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[DEBUG] Error processing Outlook drop: {ex.Message}");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Error processing Outlook drop: {ex.Message}");
+#endif
                 }
                 return;
             }
 
             // 3. If all else fails, inform the user
-            Console.WriteLine("[DEBUG] Could not extract email or attachment from Outlook drag-and-drop.");
+            #if DEBUG
+            DebugLogger.Log("[DEBUG] Could not extract email or attachment from Outlook drag-and-drop.");
+            #endif
         }
 
         public event PropertyChangedEventHandler PropertyChanged;

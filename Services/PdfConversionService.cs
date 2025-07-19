@@ -23,11 +23,15 @@ namespace MsgToPdfConverter.Services
                 {
                     try { proc.Kill(); } catch { }
                 }
-                Console.WriteLine($"Killed {procs.Length} lingering wkhtmltopdf processes.");
+#if DEBUG
+                DebugLogger.Log($"Killed {procs.Length} lingering wkhtmltopdf processes.");
+#endif
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error killing wkhtmltopdf processes: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"Error killing wkhtmltopdf processes: {ex.Message}");
+#endif
             }
         }
 
@@ -46,7 +50,9 @@ namespace MsgToPdfConverter.Services
                 string archPath = Path.Combine(appDir, architecture);
                 if (Directory.Exists(archPath))
                 {
-                    Console.WriteLine($"[DEBUG] Found architecture folder: {archPath}");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Found architecture folder: {archPath}");
+#endif
                     return; // DinkToPdf should find it automatically
                 }
 
@@ -54,22 +60,31 @@ namespace MsgToPdfConverter.Services
                 string librariesArchPath = Path.Combine(appDir, "libraries", architecture);
                 if (Directory.Exists(librariesArchPath))
                 {
-                    Console.WriteLine($"[DEBUG] Found architecture folder in libraries: {librariesArchPath}");
+#if DEBUG
+                    DebugLogger.Log($"[DEBUG] Found architecture folder in libraries: {librariesArchPath}");
+#endif
                     // Copy the architecture folder to the main directory temporarily
                     string tempArchPath = Path.Combine(appDir, architecture);
                     if (!Directory.Exists(tempArchPath))
                     {
-                        Console.WriteLine($"[DEBUG] Copying {librariesArchPath} to {tempArchPath}");
+#if DEBUG
+                        DebugLogger.Log($"[DEBUG] Copying {librariesArchPath} to {tempArchPath}");
+#endif
                         FileService.DirectoryCopy(librariesArchPath, tempArchPath, true);
                     }
                     return;
                 }
 
-                Console.WriteLine("[DEBUG] No wkhtmltopdf architecture folder found");
+
+#if DEBUG
+                DebugLogger.Log("[DEBUG] No wkhtmltopdf architecture folder found");
+#endif
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[DEBUG] Error configuring DinkToPdf path: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[DEBUG] Error configuring DinkToPdf path: {ex.Message}");
+#endif
             }
         }
 
@@ -79,23 +94,36 @@ namespace MsgToPdfConverter.Services
         public static void RunDinkToPdfConversion(HtmlToPdfDocument doc)
         {
             Exception threadEx = null;
-            Console.WriteLine("[DEBUG] About to create STA thread for DinkToPdf");
+#if DEBUG
+            DebugLogger.Log("[DEBUG] About to create STA thread for DinkToPdf");
+#endif
             var staThread = new System.Threading.Thread(() =>
             {
                 try
                 {
-                    Console.WriteLine("[DEBUG] Inside STA thread: Killing lingering wkhtmltopdf processes");
+#if DEBUG
+                    DebugLogger.Log("[DEBUG] Inside STA thread: Killing lingering wkhtmltopdf processes");
+#endif
                     KillWkhtmltopdfProcesses();
-                    Console.WriteLine("[DEBUG] Inside STA thread: Creating SynchronizedConverter");
+
+#if DEBUG
+                    DebugLogger.Log("[DEBUG] Inside STA thread: Creating SynchronizedConverter");
+#endif
 
                     // Configure DinkToPdf to use the correct path for wkhtmltopdf binaries
                     var pdfTools = new PdfTools();
                     ConfigureDinkToPdfPath(pdfTools);
 
                     var converter = new SynchronizedConverter(pdfTools);
-                    Console.WriteLine("[DEBUG] Inside STA thread: Starting converter.Convert");
+
+#if DEBUG
+                    DebugLogger.Log("[DEBUG] Inside STA thread: Starting converter.Convert");
+#endif
                     converter.Convert(doc);
-                    Console.WriteLine("[DEBUG] Inside STA thread: Finished converter.Convert");
+
+#if DEBUG
+                    DebugLogger.Log("[DEBUG] Inside STA thread: Finished converter.Convert");
+#endif
                     KillWkhtmltopdfProcesses();
                     GC.Collect();
                     GC.WaitForPendingFinalizers();
@@ -103,15 +131,26 @@ namespace MsgToPdfConverter.Services
                 catch (Exception ex)
                 {
                     threadEx = ex;
-                    Console.WriteLine($"[DINKTOPDF] Exception: {ex}");
+#if DEBUG
+                    DebugLogger.Log($"[DINKTOPDF] Exception: {ex}");
+#endif
                 }
             });
             staThread.SetApartmentState(System.Threading.ApartmentState.STA);
-            Console.WriteLine("[DEBUG] About to start STA thread");
+
+#if DEBUG
+            DebugLogger.Log("[DEBUG] About to start STA thread");
+#endif
             staThread.Start();
-            Console.WriteLine("[DEBUG] Waiting for STA thread to finish");
+
+#if DEBUG
+            DebugLogger.Log("[DEBUG] Waiting for STA thread to finish");
+#endif
             staThread.Join();
-            Console.WriteLine("[DEBUG] STA thread finished");
+
+#if DEBUG
+            DebugLogger.Log("[DEBUG] STA thread finished");
+#endif
             if (threadEx != null)
                 throw new Exception("DinkToPdf conversion failed", threadEx);
         }
@@ -132,7 +171,9 @@ namespace MsgToPdfConverter.Services
                 try
                 {
                     string attName = att.FileName ?? "unnamed_attachment";
-                    Console.WriteLine($"[ATTACH] Processing: {attName}");
+#if DEBUG
+                    DebugLogger.Log($"[ATTACH] Processing: {attName}");
+#endif
 
                     // Save attachment to temp file
                     string attPath = Path.Combine(tempDir, Guid.NewGuid() + "_" + Path.GetFileName(attName));
@@ -239,14 +280,18 @@ namespace MsgToPdfConverter.Services
                                     else
                                     {
                                         PdfService.AddPlaceholderPdf(zfPdf, $"Could not convert attachment: {safeEntryName}");
-                                        Console.WriteLine($"[ATTACH] ZIP Office failed to convert: {zf}");
+#if DEBUG
+                                        DebugLogger.Log($"[ATTACH] ZIP Office failed to convert: {zf}");
+#endif
                                     }
                                 }
                                 else
                                 {
                                     PdfService.AddPlaceholderPdf(zfPdf, $"Unsupported attachment: {safeEntryName}");
                                     zipPdfFiles.Add(zfPdf);
-                                    Console.WriteLine($"[ATTACH] ZIP unsupported: {zf}");
+#if DEBUG
+                                    DebugLogger.Log($"[ATTACH] ZIP unsupported: {zf}");
+#endif
                                 }
 
                                 File.Delete(zf);
@@ -271,7 +316,7 @@ namespace MsgToPdfConverter.Services
                             {
                                 PdfService.AddPlaceholderPdf(attPdf, $"Unsupported attachment: {attName}");
                                 tempPdfFiles.Add(attPdf);
-                                Console.WriteLine($"[ATTACH] ZIP unsupported: {attName}");
+
                             }
                         }
                     }
@@ -279,9 +324,14 @@ namespace MsgToPdfConverter.Services
                     {
                         PdfService.AddPlaceholderPdf(attPdf, $"Unsupported attachment: {attName}");
                         tempPdfFiles.Add(attPdf);
-                        Console.WriteLine($"[ATTACH] Unsupported type: {attName}");
+#if DEBUG
+                        DebugLogger.Log($"[ATTACH] Unsupported type: {attName}");
+#endif
                     }
-                    Console.WriteLine($"[ATTACH] Finished: {attName}");
+
+#if DEBUG
+                    DebugLogger.Log($"[ATTACH] Finished: {attName}");
+#endif
 
                     File.Delete(attPath);
                 }
@@ -290,7 +340,9 @@ namespace MsgToPdfConverter.Services
                     string attPdf = Path.Combine(tempDir, Guid.NewGuid() + "_error.pdf");
                     PdfService.AddPlaceholderPdf(attPdf, $"Error processing attachment: {ex.Message}");
                     tempPdfFiles.Add(attPdf);
-                    Console.WriteLine($"[ATTACH] Exception: {att.FileName ?? "unnamed"} - {ex}");
+#if DEBUG
+                    DebugLogger.Log($"[ATTACH] Exception: {att.FileName ?? "unnamed"} - {ex}");
+#endif
                 }
             }
 
@@ -323,7 +375,10 @@ namespace MsgToPdfConverter.Services
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine($"[CLEANUP] Failed to delete temp file {tempFile}: {ex.Message}");
+
+#if DEBUG
+                        DebugLogger.Log($"[CLEANUP] Failed to delete temp file {tempFile}: {ex.Message}");
+#endif
                     }
                 }
             }

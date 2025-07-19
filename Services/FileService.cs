@@ -21,24 +21,30 @@ namespace MsgToPdfConverter.Services
                         Thread.Sleep(100);
                         if (!File.Exists(filePath))
                         {
-                            Console.WriteLine($"[CLEANUP] Successfully deleted temp file: {filePath}");
+                            #if DEBUG
+                            DebugLogger.Log($"[CLEANUP] Successfully deleted temp file: {filePath}");
+                            #endif
                             return;
                         }
                     }
                     else
                     {
-                        Console.WriteLine($"[CLEANUP] File does not exist, skipping deletion: {filePath}");
+                        #if DEBUG
+                        DebugLogger.Log($"[CLEANUP] File does not exist, skipping deletion: {filePath}");
+                        #endif
                         return;
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[CLEANUP] Error deleting temp file (attempt {i + 1}/{maxRetries}): {filePath} - {ex.Message}");
+                    #if DEBUG
+                    DebugLogger.Log($"[CLEANUP] Error deleting temp file (attempt {i + 1}/{maxRetries}): {filePath} - {ex.Message}");
                     if (i == maxRetries - 1)
                     {
-                        Console.WriteLine($"[CLEANUP] Failed to delete temp file after {maxRetries} attempts: {filePath}");
+                        DebugLogger.Log($"[CLEANUP] Failed to delete temp file after {maxRetries} attempts: {filePath}");
                     }
-                    else
+                    #endif
+                    if (i != maxRetries - 1)
                     {
                         Thread.Sleep(delayMs);
                     }
@@ -85,20 +91,26 @@ namespace MsgToPdfConverter.Services
                 if (File.Exists(filePath))
                 {
                     Microsoft.VisualBasic.FileIO.FileSystem.DeleteFile(filePath, Microsoft.VisualBasic.FileIO.UIOption.OnlyErrorDialogs, Microsoft.VisualBasic.FileIO.RecycleOption.SendToRecycleBin);
-                    Console.WriteLine($"[RECYCLE] Moved to recycle bin: {filePath}");
+                    #if DEBUG
+                    DebugLogger.Log($"[RECYCLE] Moved to recycle bin: {filePath}");
+                    #endif
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[RECYCLE] Error moving file to recycle bin: {filePath} - {ex.Message}");
-                Console.WriteLine($"[RECYCLE] Falling back to regular delete");
+                #if DEBUG
+                DebugLogger.Log($"[RECYCLE] Error moving file to recycle bin: {filePath} - {ex.Message}");
+                DebugLogger.Log($"[RECYCLE] Falling back to regular delete");
+                #endif
                 try
                 {
                     File.Delete(filePath);
                 }
                 catch (Exception deleteEx)
                 {
-                    Console.WriteLine($"[RECYCLE] Error deleting file: {filePath} - {deleteEx.Message}");
+                    #if DEBUG
+                    DebugLogger.Log($"[RECYCLE] Error deleting file: {filePath} - {deleteEx.Message}");
+                    #endif
                 }
             }
         }

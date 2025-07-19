@@ -47,36 +47,57 @@ namespace MsgToPdfConverter.Services
         {
             if (!File.Exists(mainPdfPath))
             {
-                Console.WriteLine($"[PDF-INSERT] Main PDF not found: {mainPdfPath}");
+#if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Main PDF not found: {mainPdfPath}");
+#endif
                 return;
             }
 
-            Console.WriteLine($"[PDF-INSERT] Starting insertion process. Main PDF: {mainPdfPath}");
-            Console.WriteLine($"[PDF-INSERT] Output PDF: {outputPdfPath}");
-            Console.WriteLine($"[PDF-INSERT] Found {extractedObjects?.Count ?? 0} extracted objects");
+
+#if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] Starting insertion process. Main PDF: {mainPdfPath}");
+#endif
+
+#if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] Output PDF: {outputPdfPath}");
+#endif
+
+#if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] Found {extractedObjects?.Count ?? 0} extracted objects");
+#endif
 
             var validObjects = new List<InteropEmbeddedExtractor.ExtractedObjectInfo>();
             foreach (var obj in extractedObjects)
             {
                 if (!File.Exists(obj.FilePath))
                 {
-                    Console.WriteLine($"[PDF-INSERT] Warning: Extracted file not found: {obj.FilePath}");
+#if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] Warning: Extracted file not found: {obj.FilePath}");
+#endif
                     continue;
                 }
                 var fileInfo = new FileInfo(obj.FilePath);
                 if (fileInfo.Length == 0)
                 {
-                    Console.WriteLine($"[PDF-INSERT] Warning: Extracted file is empty: {obj.FilePath}");
+#if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] Warning: Extracted file is empty: {obj.FilePath}");
+#endif
                     continue;
                 }
                 validObjects.Add(obj);
             }
 
-            Console.WriteLine($"[PDF-INSERT] {validObjects.Count} valid objects to insert");
+
+#if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] {validObjects.Count} valid objects to insert");
+#endif
 
             if (validObjects.Count == 0)
             {
-                Console.WriteLine("[PDF-INSERT] No valid embedded files to insert, copying main PDF");
+
+#if DEBUG
+            DebugLogger.Log("[PDF-INSERT] No valid embedded files to insert, copying main PDF");
+#endif
                 File.Copy(mainPdfPath, outputPdfPath, true);
                 return;
             }
@@ -155,31 +176,71 @@ namespace MsgToPdfConverter.Services
             }
 
             // Log mapping summary
-            Console.WriteLine("[PDF-INSERT] --- MAPPING SUMMARY ---");
-            foreach (var m in mappedObjects)
-                Console.WriteLine($"[MAPPED] {Path.GetFileName(m.obj.FilePath)} -> after page {m.anchorPage} ({m.reason})");
-            foreach (var u in unmappedObjects)
-                Console.WriteLine($"[UNMAPPED] {Path.GetFileName(u.obj.FilePath)} -> after last page ({mainPageCount}) ({u.reason})");
 
-            Console.WriteLine($"[PDF-INSERT] TOTAL EMBEDDED ITEMS (valid): {validObjects.Count}");
-            Console.WriteLine($"[PDF-INSERT] TOTAL MAPPED: {mappedObjects.Count}, TOTAL UNMAPPED: {unmappedObjects.Count}");
+#if DEBUG
+        DebugLogger.Log("[PDF-INSERT] --- MAPPING SUMMARY ---");
+#endif
+            foreach (var m in mappedObjects)
+            {
+
+#if DEBUG
+                DebugLogger.Log($"[MAPPED] {Path.GetFileName(m.obj.FilePath)} -> after page {m.anchorPage} ({m.reason})");
+#endif
+            }
+            foreach (var u in unmappedObjects)
+            {
+
+#if DEBUG
+                DebugLogger.Log($"[UNMAPPED] {Path.GetFileName(u.obj.FilePath)} -> after last page ({mainPageCount}) ({u.reason})");
+#endif
+            }
+
+
+#if DEBUG
+        DebugLogger.Log($"[PDF-INSERT] TOTAL EMBEDDED ITEMS (valid): {validObjects.Count}");
+#endif
+
+#if DEBUG
+        DebugLogger.Log($"[PDF-INSERT] TOTAL MAPPED: {mappedObjects.Count}, TOTAL UNMAPPED: {unmappedObjects.Count}");
+#endif
 
             // --- Markdown Table of Mapping Results ---
-            Console.WriteLine("[PDF-INSERT] --- EMBEDDED OBJECT MAPPING TABLE ---");
-            Console.WriteLine("| File | Anchor Page | Mapping Reason | PageNumber | CharPos | OleClass | ProgId | Ext | Size |");
-            Console.WriteLine("|------|-------------|---------------|------------|---------|----------|--------|-----|------|");
+
+#if DEBUG
+        DebugLogger.Log("[PDF-INSERT] --- EMBEDDED OBJECT MAPPING TABLE ---");
+#endif
+
+#if DEBUG
+        DebugLogger.Log("| File | Anchor Page | Mapping Reason | PageNumber | CharPos | OleClass | ProgId | Ext | Size |");
+#endif
+
+#if DEBUG
+        DebugLogger.Log("|------|-------------|---------------|------------|---------|----------|--------|-----|------|");
+#endif
             foreach (var m in mappedObjects)
             {
                 var obj = m.obj;
-                Console.WriteLine($"| {Path.GetFileName(obj.FilePath)} | {m.anchorPage} | {m.reason} | {obj.PageNumber} | {obj.CharPosition} | {obj.OleClass} | {obj.ProgId} | {Path.GetExtension(obj.FilePath)?.ToLowerInvariant()} | {GetFileSizeString(obj.FilePath)} |");
+
+#if DEBUG
+                DebugLogger.Log($"| {Path.GetFileName(obj.FilePath)} | {m.anchorPage} | {m.reason} | {obj.PageNumber} | {obj.CharPosition} | {obj.OleClass} | {obj.ProgId} | {Path.GetExtension(obj.FilePath)?.ToLowerInvariant()} | {GetFileSizeString(obj.FilePath)} |");
+#endif
             }
             foreach (var u in unmappedObjects)
             {
                 var obj = u.obj;
-                Console.WriteLine($"| {Path.GetFileName(obj.FilePath)} | {mainPageCount} | {u.reason} | {obj.PageNumber} | {obj.CharPosition} | {obj.OleClass} | {obj.ProgId} | {Path.GetExtension(obj.FilePath)?.ToLowerInvariant()} | {GetFileSizeString(obj.FilePath)} |");
+
+#if DEBUG
+                DebugLogger.Log($"| {Path.GetFileName(obj.FilePath)} | {mainPageCount} | {u.reason} | {obj.PageNumber} | {obj.CharPosition} | {obj.OleClass} | {obj.ProgId} | {Path.GetExtension(obj.FilePath)?.ToLowerInvariant()} | {GetFileSizeString(obj.FilePath)} |");
+#endif
+#if DEBUG
+        DebugLogger.Log("|------|-------------|---------------|------------|---------|----------|--------|-----|------|");
+#endif
             }
-            Console.WriteLine("|------|-------------|---------------|------------|---------|----------|--------|-----|------|");
-            Console.WriteLine();
+
+
+#if DEBUG
+        DebugLogger.Log("");
+#endif
 
             // Interleave main pages and mapped embedded objects, then append unmapped objects after last page
             var objectsByPage = mappedObjects.OrderBy(m => m.anchorPage).ThenBy(m => m.obj.DocumentOrderIndex).ToList();
@@ -193,7 +254,10 @@ namespace MsgToPdfConverter.Services
                     int currentOutputPage = 0;
                     for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
                     {
-                        Console.WriteLine($"[PDF-INSERT][DEBUG] Copying main page {mainPage} (output page {currentOutputPage + 1})");
+
+#if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT][DEBUG] Copying main page {mainPage} (output page {currentOutputPage + 1})");
+#endif
                         mainPdf.CopyPagesTo(mainPage, mainPage, outputPdf);
                         currentOutputPage++;
                         var pageObjects = objectsByPage.Where(m => m.anchorPage == mainPage).OrderBy(m => m.obj.DocumentOrderIndex).ToList();
@@ -202,34 +266,40 @@ namespace MsgToPdfConverter.Services
                             foreach (var m in pageObjects)
                             {
                                 // PATCH: Always insert .xlsx and .xls files as attachments, never skip as duplicate
-                                Console.WriteLine($"[PDF-INSERT][DEBUG] Inserting embedded file after page {mainPage}: {Path.GetFileName(m.obj.FilePath)} (anchorPage={m.anchorPage}, ext={Path.GetExtension(m.obj.FilePath)?.ToLowerInvariant()})");
+
                                 currentOutputPage = InsertEmbeddedObject(m.obj, outputPdf, currentOutputPage, progressTick);
                             }
                         }
                     }
                     // Append unmapped objects after last page
                     if (unmappedObjects.Count > 0)
-                        Console.WriteLine($"[PDF-INSERT] Appending {unmappedObjects.Count} unmapped embedded objects after last page ({mainPageCount})");
+
                     foreach (var u in unmappedObjects)
                     {
                     currentOutputPage = InsertEmbeddedObject(u.obj, outputPdf, currentOutputPage, progressTick);
                     }
-                    Console.WriteLine($"[PDF-INSERT] *** FINAL PAGE SUMMARY ***");
-                    Console.WriteLine($"[PDF-INSERT] Total pages in final PDF: {outputPdf.GetNumberOfPages()}, original main PDF: {mainPageCount}");
+
+
                 }
-                Console.WriteLine($"[PDF-INSERT] Successfully created PDF with embedded files: {outputPdfPath}");
+
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error creating PDF with embedded files: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Error creating PDF with embedded files: {ex.Message}");
+                #endif
                 try
                 {
                     File.Copy(mainPdfPath, outputPdfPath, true);
-                    Console.WriteLine("[PDF-INSERT] Fallback: copied main PDF without embedded files");
+                    #if DEBUG
+                    DebugLogger.Log("[PDF-INSERT] Fallback: copied main PDF without embedded files");
+                    #endif
                 }
                 catch (Exception copyEx)
                 {
-                    Console.WriteLine($"[PDF-INSERT] Fallback copy failed: {copyEx.Message}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] Fallback copy failed: {copyEx.Message}");
+                    #endif
                 }
             }
         }
@@ -243,7 +313,9 @@ namespace MsgToPdfConverter.Services
                 // Enhanced debug logging for file type detection
                 string extMain = Path.GetExtension(obj.FilePath)?.ToLowerInvariant();
                 bool isPdf = IsPdfFile(obj.FilePath);
-                Console.WriteLine($"[PDF-INSERT][DEBUG] InsertEmbeddedObject_NoSeparator: {obj.FilePath} (ext: {extMain}) IsPdfFile={isPdf}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT][DEBUG] InsertEmbeddedObject_NoSeparator: {obj.FilePath} (ext: {extMain}) IsPdfFile={isPdf}");
+                #endif
 
                 // Treat any file that is a PDF by header as a PDF, regardless of extension
                 if (isPdf)
@@ -307,7 +379,9 @@ namespace MsgToPdfConverter.Services
                 else if (obj.FilePath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
                 {
                     // --- ZIP HANDLING ---
-                    Console.WriteLine($"[PDF-INSERT] *** ZIP PROCESSING START *** Extracting and inserting ZIP: {Path.GetFileName(obj.FilePath)} after page {currentOutputPage}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** ZIP PROCESSING START *** Extracting and inserting ZIP: {Path.GetFileName(obj.FilePath)} after page {currentOutputPage}");
+                    #endif
                     try
                     {
                         var zipEntries = ZipHelper.ExtractZipEntries(obj.FilePath);
@@ -318,7 +392,9 @@ namespace MsgToPdfConverter.Services
                             File.WriteAllBytes(tempFile, entry.Data);
                             string entryExt = Path.GetExtension(entry.FileName).ToLowerInvariant(); // FIX: avoid shadowing
                             bool entryIsPdf = IsPdfFile(tempFile);
-                            Console.WriteLine($"[PDF-INSERT][DEBUG] ZIP entry: {entry.FileName} (ext: {entryExt}) IsPdfFile={entryIsPdf}");
+                            #if DEBUG
+                            DebugLogger.Log($"[PDF-INSERT][DEBUG] ZIP entry: {entry.FileName} (ext: {entryExt}) IsPdfFile={entryIsPdf}");
+                            #endif
                             if (entryIsPdf)
                             {
                                 currentOutputPage = InsertPdfFile_NoSeparator(tempFile, outputPdf, currentOutputPage, "ZIP-PDF", progressTick);
@@ -337,16 +413,22 @@ namespace MsgToPdfConverter.Services
                             }
                             else
                             {
-                                Console.WriteLine($"[PDF-INSERT][DEBUG] ZIP entry: {entry.FileName} not recognized as supported type, inserting placeholder.");
+                                #if DEBUG
+                                DebugLogger.Log($"[PDF-INSERT][DEBUG] ZIP entry: {entry.FileName} not recognized as supported type, inserting placeholder.");
+                                #endif
                                 currentOutputPage = InsertPlaceholderForFile(tempFile, outputPdf, currentOutputPage, $"ZIP Entry ({entryExt})");
                             }
                             try { File.Delete(tempFile); } catch { }
                         }
-                        Console.WriteLine($"[PDF-INSERT] *** ZIP PROCESSING COMPLETE *** {zipEntries.Count} entries processed from {Path.GetFileName(obj.FilePath)}");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** ZIP PROCESSING COMPLETE *** {zipEntries.Count} entries processed from {Path.GetFileName(obj.FilePath)}");
+                        #endif
                     }
                     catch (Exception zipEx)
                     {
-                        Console.WriteLine($"[PDF-INSERT] Error processing ZIP {obj.FilePath}: {zipEx.Message}");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] Error processing ZIP {obj.FilePath}: {zipEx.Message}");
+                        #endif
                         currentOutputPage = InsertErrorPlaceholder(obj.FilePath, outputPdf, currentOutputPage, zipEx.Message);
                     }
                     return currentOutputPage;
@@ -354,7 +436,9 @@ namespace MsgToPdfConverter.Services
                 else if (obj.FilePath.EndsWith(".7z", StringComparison.OrdinalIgnoreCase))
                 {
                     // --- 7Z HANDLING ---
-                    Console.WriteLine($"[PDF-INSERT] *** 7Z PROCESSING START *** Extracting and inserting 7Z: {Path.GetFileName(obj.FilePath)} after page {currentOutputPage}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** 7Z PROCESSING START *** Extracting and inserting 7Z: {Path.GetFileName(obj.FilePath)} after page {currentOutputPage}");
+                    #endif
                     try
                     {
                         string tempDir = Path.GetTempPath();
@@ -368,18 +452,24 @@ namespace MsgToPdfConverter.Services
                         if (!string.IsNullOrEmpty(resultPdf) && File.Exists(resultPdf))
                         {
                             bool resultIsPdf = IsPdfFile(resultPdf);
-                            Console.WriteLine($"[PDF-INSERT][DEBUG] 7Z result: {resultPdf} IsPdfFile={resultIsPdf}");
+                            #if DEBUG
+                            DebugLogger.Log($"[PDF-INSERT][DEBUG] 7Z result: {resultPdf} IsPdfFile={resultIsPdf}");
+                            #endif
                             if (resultIsPdf)
                                 currentOutputPage = InsertPdfFile_NoSeparator(resultPdf, outputPdf, currentOutputPage, "7Z-PDF", progressTick);
                             else
                             {
-                                Console.WriteLine($"[PDF-INSERT][DEBUG] 7Z result not recognized as PDF, inserting placeholder.");
+                                #if DEBUG
+                                DebugLogger.Log($"[PDF-INSERT][DEBUG] 7Z result not recognized as PDF, inserting placeholder.");
+                                #endif
                                 currentOutputPage = InsertPlaceholderForFile(resultPdf, outputPdf, currentOutputPage, "7Z");
                             }
                         }
                         else
                         {
-                            Console.WriteLine($"[PDF-INSERT] 7Z processing failed or returned no PDF, adding placeholder for {obj.FilePath}");
+                            #if DEBUG
+                            DebugLogger.Log($"[PDF-INSERT] 7Z processing failed or returned no PDF, adding placeholder for {obj.FilePath}");
+                            #endif
                             currentOutputPage = InsertPlaceholderForFile(obj.FilePath, outputPdf, currentOutputPage, "7Z");
                         }
                         // Cleanup temp files
@@ -387,21 +477,27 @@ namespace MsgToPdfConverter.Services
                     }
                     catch (Exception sevenZEx)
                     {
-                        Console.WriteLine($"[PDF-INSERT] Error processing 7Z {obj.FilePath}: {sevenZEx.Message}");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] Error processing 7Z {obj.FilePath}: {sevenZEx.Message}");
+                        #endif
                         currentOutputPage = InsertErrorPlaceholder(obj.FilePath, outputPdf, currentOutputPage, sevenZEx.Message);
                     }
                     return currentOutputPage;
                 }
                 else
                 {
-                    Console.WriteLine($"[PDF-INSERT][DEBUG] File {obj.FilePath} not recognized as supported type, inserting placeholder.");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT][DEBUG] File {obj.FilePath} not recognized as supported type, inserting placeholder.");
+                    #endif
                     // Only for unsupported types, add a placeholder
                     return InsertPlaceholderForFile(obj.FilePath, outputPdf, currentOutputPage, obj.OleClass);
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error inserting {obj.FilePath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Error inserting {obj.FilePath}: {ex.Message}");
+                #endif
                 return InsertErrorPlaceholder(obj.FilePath, outputPdf, currentOutputPage, ex.Message);
             }
         }
@@ -420,7 +516,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Failed to compute hash for {filePath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Failed to compute hash for {filePath}: {ex.Message}");
+                #endif
                 return null;
             }
         }
@@ -439,24 +537,30 @@ namespace MsgToPdfConverter.Services
                     int idx = content.IndexOf("%PDF-");
                     if (idx >= 0)
                     {
-                        if (idx > 0)
-                        {
-                            Console.WriteLine($"[PDF-INSERT][IsPdfFile] Found '%PDF-' at offset {idx} in {filePath}, treating as PDF (nonzero offset)");
-                        }
+                    if (idx > 0)
+                    {
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT][IsPdfFile] Found '%PDF-' at offset {idx} in {filePath}, treating as PDF (nonzero offset)");
+                        #endif
+                    }
                         return true;
                     }
                     else
                     {
                         // Log first 32 bytes for debugging
                         string hex = BitConverter.ToString(buffer, 0, Math.Min(32, read)).Replace("-", " ");
-                        Console.WriteLine($"[PDF-INSERT][IsPdfFile] No '%PDF-' found in first 1KB of {filePath}. First 32 bytes: {hex}");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT][IsPdfFile] No '%PDF-' found in first 1KB of {filePath}. First 32 bytes: {hex}");
+                        #endif
                         return false;
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT][IsPdfFile] Exception for {filePath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT][IsPdfFile] Exception for {filePath}: {ex.Message}");
+                #endif
                 return false;
             }
         }
@@ -464,18 +568,24 @@ namespace MsgToPdfConverter.Services
         // Insert PDF file without separator
         private static int InsertPdfFile_NoSeparator(string pdfPath, PdfDocument outputPdf, int currentPage, string oleClass, Action progressTick = null)
         {
-            Console.WriteLine($"[PDF-INSERT] *** PDF INSERTION START *** Inserting PDF: {Path.GetFileName(pdfPath)} after page {currentPage} (current total pages: {outputPdf.GetNumberOfPages()})");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] *** PDF INSERTION START *** Inserting PDF: {Path.GetFileName(pdfPath)} after page {currentPage} (current total pages: {outputPdf.GetNumberOfPages()})");
+            #endif
             try
             {
                 if (!File.Exists(pdfPath))
                 {
-                    Console.WriteLine($"[PDF-INSERT] PDF file not found: {pdfPath}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] PDF file not found: {pdfPath}");
+                    #endif
                     return InsertErrorPlaceholder(pdfPath, outputPdf, currentPage, "File not found");
                 }
                 var fileInfo = new FileInfo(pdfPath);
                 if (fileInfo.Length == 0)
                 {
-                    Console.WriteLine($"[PDF-INSERT] PDF file is empty: {pdfPath}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] PDF file is empty: {pdfPath}");
+                    #endif
                     return InsertErrorPlaceholder(pdfPath, outputPdf, currentPage, "Empty file");
                 }
                 PdfReader reader = null;
@@ -486,7 +596,9 @@ namespace MsgToPdfConverter.Services
                     embeddedPdf = new PdfDocument(reader);
                     int embeddedPageCount = embeddedPdf.GetNumberOfPages();
                     
-                    Console.WriteLine($"[PDF-INSERT] *** PDF CONTENT *** {Path.GetFileName(pdfPath)} has {embeddedPageCount} pages to insert");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** PDF CONTENT *** {Path.GetFileName(pdfPath)} has {embeddedPageCount} pages to insert");
+                    #endif
                     
                     // Copy pages one by one to append them after currentPage
                     for (int pageNum = 1; pageNum <= embeddedPageCount; pageNum++)
@@ -497,14 +609,18 @@ namespace MsgToPdfConverter.Services
                         currentPage++;
                         
                         int totalPagesAfter = outputPdf.GetNumberOfPages();
-                        Console.WriteLine($"[PDF-INSERT] *** PDF PAGE COPY *** Copied page {pageNum}/{embeddedPageCount} from {Path.GetFileName(pdfPath)}, output PDF went from {totalPagesBefore} to {totalPagesAfter} pages, tracking currentPage={currentPage}");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** PDF PAGE COPY *** Copied page {pageNum}/{embeddedPageCount} from {Path.GetFileName(pdfPath)}, output PDF went from {totalPagesBefore} to {totalPagesAfter} pages, tracking currentPage={currentPage}");
+                        #endif
                     }
                     
                     // Call progress tick once per embedded file (not per page) 
                     progressTick?.Invoke();
                     s_currentProgressCallback?.Invoke();
                     
-                    Console.WriteLine($"[PDF-INSERT] *** PDF INSERTION COMPLETE *** Successfully inserted {embeddedPageCount} pages from {Path.GetFileName(pdfPath)}, final total pages: {outputPdf.GetNumberOfPages()}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** PDF INSERTION COMPLETE *** Successfully inserted {embeddedPageCount} pages from {Path.GetFileName(pdfPath)}, final total pages: {outputPdf.GetNumberOfPages()}");
+                    #endif
                 }
                 finally
                 {
@@ -513,7 +629,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error reading PDF {pdfPath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Error reading PDF {pdfPath}: {ex.Message}");
+                #endif
                 currentPage = InsertErrorPlaceholder(pdfPath, outputPdf, currentPage, ex.Message);
             }
             return currentPage;
@@ -522,7 +640,9 @@ namespace MsgToPdfConverter.Services
         // Insert MSG file without separator
         private static int InsertMsgFile_NoSeparator(string msgPath, PdfDocument outputPdf, int currentPage, Action progressTick = null)
         {
-            Console.WriteLine($"[PDF-INSERT] Converting and inserting MSG: {Path.GetFileName(msgPath)} after page {currentPage}");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] Converting and inserting MSG: {Path.GetFileName(msgPath)} after page {currentPage}");
+            #endif
             try
             {
                 string tempPdfPath = Path.Combine(Path.GetTempPath(), $"msg_temp_{Guid.NewGuid()}.pdf");
@@ -538,7 +658,9 @@ namespace MsgToPdfConverter.Services
                         {
                             if (File.Exists(attachmentPath))
                             {
-                                Console.WriteLine($"[PDF-INSERT] Inserting MSG attachment: {Path.GetFileName(attachmentPath)}");
+                                #if DEBUG
+                                DebugLogger.Log($"[PDF-INSERT] Inserting MSG attachment: {Path.GetFileName(attachmentPath)}");
+                                #endif
                                 currentPage = InsertAttachmentFile(attachmentPath, outputPdf, currentPage, progressTick);
                             }
                         }
@@ -555,7 +677,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error processing MSG {msgPath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Error processing MSG {msgPath}: {ex.Message}");
+                #endif
                 currentPage = InsertErrorPlaceholder(msgPath, outputPdf, currentPage, ex.Message);
             }
             return currentPage;
@@ -564,7 +688,9 @@ namespace MsgToPdfConverter.Services
         // Insert DOCX file without separator
         private static int InsertDocxFile_NoSeparator(string docxPath, PdfDocument outputPdf, int currentPage, Action progressTick = null)
         {
-            Console.WriteLine($"[PDF-INSERT] Converting and inserting DOCX: {Path.GetFileName(docxPath)} after page {currentPage}");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] Converting and inserting DOCX: {Path.GetFileName(docxPath)} after page {currentPage}");
+            #endif
             try
             {
                 string tempPdfPath = Path.Combine(Path.GetTempPath(), $"docx_temp_{Guid.NewGuid()}.pdf");
@@ -587,7 +713,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error processing DOCX {docxPath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Error processing DOCX {docxPath}: {ex.Message}");
+                #endif
                 currentPage = InsertErrorPlaceholder(docxPath, outputPdf, currentPage, ex.Message);
             }
             return currentPage;
@@ -596,29 +724,43 @@ namespace MsgToPdfConverter.Services
         // Insert XLSX file without separator
         private static int InsertXlsxFile_NoSeparator(string xlsxPath, PdfDocument outputPdf, int currentPage, Action progressTick = null)
         {
-            Console.WriteLine($"[PDF-INSERT] *** XLSX PROCESSING START *** Converting and inserting XLSX: {Path.GetFileName(xlsxPath)} after page {currentPage}");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] *** XLSX PROCESSING START *** Converting and inserting XLSX: {Path.GetFileName(xlsxPath)} after page {currentPage}");
+            #endif
             try
             {
                 string tempPdfPath = Path.Combine(Path.GetTempPath(), $"xlsx_temp_{Guid.NewGuid()}.pdf");
-                Console.WriteLine($"[PDF-INSERT] *** XLSX CONVERSION *** Temporary PDF path: {tempPdfPath}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] *** XLSX CONVERSION *** Temporary PDF path: {tempPdfPath}");
+                #endif
                 
                 try
                 {
-                    Console.WriteLine($"[PDF-INSERT] *** XLSX CONVERSION *** Starting Excel to PDF conversion for {Path.GetFileName(xlsxPath)}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** XLSX CONVERSION *** Starting Excel to PDF conversion for {Path.GetFileName(xlsxPath)}");
+                    #endif
                     bool converted = TryConvertXlsxToPdf(xlsxPath, tempPdfPath);
-                    Console.WriteLine($"[PDF-INSERT] *** XLSX CONVERSION RESULT *** Conversion successful: {converted}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** XLSX CONVERSION RESULT *** Conversion successful: {converted}");
+                    #endif
                     
                     if (converted && File.Exists(tempPdfPath))
                     {
                         var fileInfo = new FileInfo(tempPdfPath);
-                        Console.WriteLine($"[PDF-INSERT] *** XLSX PDF CREATED *** Temp PDF exists, size: {fileInfo.Length} bytes");
-                        Console.WriteLine($"[PDF-INSERT] *** XLSX PDF INSERTION *** Now treating converted XLSX as regular PDF");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** XLSX PDF CREATED *** Temp PDF exists, size: {fileInfo.Length} bytes");
+                        DebugLogger.Log($"[PDF-INSERT] *** XLSX PDF INSERTION *** Now treating converted XLSX as regular PDF");
+                        #endif
                         currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "XLSX", progressTick);
-                        Console.WriteLine($"[PDF-INSERT] *** XLSX PDF INSERTED *** Successfully inserted converted XLSX as PDF");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** XLSX PDF INSERTED *** Successfully inserted converted XLSX as PDF");
+                        #endif
                     }
                     else
                     {
-                        Console.WriteLine($"[PDF-INSERT] *** XLSX CONVERSION FAILED *** Conversion failed or file doesn't exist, inserting placeholder");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** XLSX CONVERSION FAILED *** Conversion failed or file doesn't exist, inserting placeholder");
+                        #endif
                         currentPage = InsertPlaceholderForFile(xlsxPath, outputPdf, currentPage, "XLSX");
                     }
                 }
@@ -629,21 +771,29 @@ namespace MsgToPdfConverter.Services
                         try 
                         { 
                             File.Delete(tempPdfPath); 
-                            Console.WriteLine($"[PDF-INSERT] *** XLSX CLEANUP *** Deleted temporary PDF: {Path.GetFileName(tempPdfPath)}");
+                            #if DEBUG
+                            DebugLogger.Log($"[PDF-INSERT] *** XLSX CLEANUP *** Deleted temporary PDF: {Path.GetFileName(tempPdfPath)}");
+                            #endif
                         } 
                         catch (Exception cleanupEx)
                         {
-                            Console.WriteLine($"[PDF-INSERT] *** XLSX CLEANUP ERROR *** Failed to delete temp file: {cleanupEx.Message}");
+                            #if DEBUG
+                            DebugLogger.Log($"[PDF-INSERT] *** XLSX CLEANUP ERROR *** Failed to delete temp file: {cleanupEx.Message}");
+                            #endif
                         }
                     }
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] *** XLSX ERROR *** Error processing XLSX {xlsxPath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] *** XLSX ERROR *** Error processing XLSX {xlsxPath}: {ex.Message}");
+                #endif
                 currentPage = InsertErrorPlaceholder(xlsxPath, outputPdf, currentPage, ex.Message);
             }
-            Console.WriteLine($"[PDF-INSERT] *** XLSX PROCESSING COMPLETE *** Final currentPage: {currentPage}");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] *** XLSX PROCESSING COMPLETE *** Final currentPage: {currentPage}");
+            #endif
             return currentPage;
         }
 
@@ -654,7 +804,9 @@ namespace MsgToPdfConverter.Services
         {
             try
             {
-                Console.WriteLine($"[PDF-INSERT] Converting MSG to PDF (HTML pipeline): {msgPath} -> {outputPdfPath}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Converting MSG to PDF (HTML pipeline): {msgPath} -> {outputPdfPath}");
+                #endif
                 using (var msg = new MsgReader.Outlook.Storage.Message(msgPath))
                 {
                     // Build HTML with inline images using the main service
@@ -682,7 +834,9 @@ namespace MsgToPdfConverter.Services
                     File.Delete(tempHtmlPath);
                     if (proc.ExitCode == 0 && File.Exists(outputPdfPath))
                     {
-                        Console.WriteLine($"[PDF-INSERT] Successfully converted MSG to PDF: {outputPdfPath}");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] Successfully converted MSG to PDF: {outputPdfPath}");
+                        #endif
                         return true;
                     }
                     else
@@ -690,7 +844,9 @@ namespace MsgToPdfConverter.Services
                         // Dump HTML to debug file for inspection
                         var debugHtmlPath = Path.Combine(Path.Combine(Path.GetTempPath(), "MsgToPdfConverter"), $"debug_email_{DateTime.Now:yyyyMMdd_HHmmss}_fail.html");
                         File.WriteAllText(debugHtmlPath, html, System.Text.Encoding.UTF8);
-                        Console.WriteLine($"[PDF-INSERT] HtmlToPdfWorker failed.\nSTDOUT: {stdOut}\nSTDERR: {stdErr}\nHTML dumped to: {debugHtmlPath}");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] HtmlToPdfWorker failed.\nSTDOUT: {stdOut}\nSTDERR: {stdErr}\nHTML dumped to: {debugHtmlPath}");
+                        #endif
                         // Optionally: track for cleanup if you have a temp file list in this context
                         return false;
                     }
@@ -698,7 +854,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Failed to convert MSG to PDF: {ex.Message}\n{ex}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Failed to convert MSG to PDF: {ex.Message}\n{ex}");
+                #endif
                 return false;
             }
         }
@@ -711,7 +869,9 @@ namespace MsgToPdfConverter.Services
             var attachmentFiles = new List<string>();
             try
             {
-                Console.WriteLine($"[PDF-INSERT] Converting MSG to PDF with attachments: {msgPath} -> {outputPdfPath}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Converting MSG to PDF with attachments: {msgPath} -> {outputPdfPath}");
+                #endif
                 using (var msg = new MsgReader.Outlook.Storage.Message(msgPath))
                 {
                     // Extract attachments to temp files
@@ -742,11 +902,15 @@ namespace MsgToPdfConverter.Services
                                 {
                                     File.WriteAllBytes(tempAttachmentPath, fileAttachment.Data);
                                     attachmentFiles.Add(tempAttachmentPath);
-                                    Console.WriteLine($"[PDF-INSERT] Extracted MSG attachment: {fileAttachment.FileName} -> {tempAttachmentPath}");
+                                    #if DEBUG
+                                    DebugLogger.Log($"[PDF-INSERT] Extracted MSG attachment: {fileAttachment.FileName} -> {tempAttachmentPath}");
+                                    #endif
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[PDF-INSERT] Failed to extract attachment {fileAttachment.FileName}: {ex.Message}");
+                                    #if DEBUG
+                                    DebugLogger.Log($"[PDF-INSERT] Failed to extract attachment {fileAttachment.FileName}: {ex.Message}");
+                                    #endif
                                 }
                             }
                             else if (attachment is MsgReader.Outlook.Storage.Message nestedMsg)
@@ -758,11 +922,15 @@ namespace MsgToPdfConverter.Services
                                 {
                                     nestedMsg.Save(tempMsgPath);
                                     attachmentFiles.Add(tempMsgPath);
-                                    Console.WriteLine($"[PDF-INSERT] Extracted nested MSG: {nestedMsg.Subject} -> {tempMsgPath}");
+                                    #if DEBUG
+                                    DebugLogger.Log($"[PDF-INSERT] Extracted nested MSG: {nestedMsg.Subject} -> {tempMsgPath}");
+                                    #endif
                                 }
                                 catch (Exception ex)
                                 {
-                                    Console.WriteLine($"[PDF-INSERT] Failed to extract nested MSG {nestedMsg.Subject}: {ex.Message}");
+                                    #if DEBUG
+                                    DebugLogger.Log($"[PDF-INSERT] Failed to extract nested MSG {nestedMsg.Subject}: {ex.Message}");
+                                    #endif
                                 }
                             }
                         }
@@ -775,7 +943,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Failed to convert MSG with attachments: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Failed to convert MSG with attachments: {ex.Message}");
+                #endif
                 
                 // Clean up any extracted attachment files on error
                 foreach (var file in attachmentFiles)
@@ -850,7 +1020,7 @@ namespace MsgToPdfConverter.Services
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[PDF-INSERT] Error converting image to PDF: {attachmentPath}: {ex.Message}");
+
                             return InsertErrorPlaceholder(attachmentPath, outputPdf, currentPage, ex.Message);
                         }
                         finally
@@ -864,7 +1034,7 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error inserting attachment {attachmentPath}: {ex.Message}");
+
                 return InsertErrorPlaceholder(attachmentPath, outputPdf, currentPage, ex.Message);
             }
             finally
@@ -885,7 +1055,7 @@ namespace MsgToPdfConverter.Services
             AddSeparatorPage(outputPdf, $"Embedded File: {fileName}", fileInfo, fileType);
             currentPage++;
 
-            Console.WriteLine($"[PDF-INSERT] Added placeholder for {fileName} ({fileType})");
+
             return currentPage;
         }
 
@@ -900,7 +1070,7 @@ namespace MsgToPdfConverter.Services
             AddSeparatorPage(outputPdf, $"Error: {fileName}", errorInfo, "ERROR");
             currentPage++;
 
-            Console.WriteLine($"[PDF-INSERT] Added error placeholder for {fileName}");
+
             return currentPage;
         }
 
@@ -1039,7 +1209,7 @@ namespace MsgToPdfConverter.Services
         {
             try
             {
-                Console.WriteLine($"[PDF-INSERT] Converting DOCX to PDF (Interop): {docxPath} -> {outputPdfPath}");
+
                 
                 Microsoft.Office.Interop.Word.Application wordApp = null;
                 Microsoft.Office.Interop.Word.Document doc = null;
@@ -1088,7 +1258,7 @@ namespace MsgToPdfConverter.Services
                     
                     // Ensure document is active
                     doc.Activate();
-                    Console.WriteLine($"[PDF-INSERT] Document opened and activated, attempting export...");
+
                     
                     // Export to PDF with minimal settings
                     doc.ExportAsFixedFormat(outputPdfPath, 
@@ -1096,19 +1266,19 @@ namespace MsgToPdfConverter.Services
                         OpenAfterExport: false,
                         OptimizeFor: Microsoft.Office.Interop.Word.WdExportOptimizeFor.wdExportOptimizeForPrint);
                     
-                    Console.WriteLine($"[PDF-INSERT] ExportAsFixedFormat completed, checking file...");
+
                     
                     // Allow a moment for file to be written
                     System.Threading.Thread.Sleep(500);
                     
                     if (File.Exists(outputPdfPath) && new FileInfo(outputPdfPath).Length > 0)
                     {
-                        Console.WriteLine($"[PDF-INSERT] Successfully converted DOCX to PDF: {outputPdfPath}");
+
                         return true;
                     }
                     else
                     {
-                        Console.WriteLine($"[PDF-INSERT] DOCX conversion failed: output file not created or empty");
+
                         return false;
                     }
                 }
@@ -1124,7 +1294,9 @@ namespace MsgToPdfConverter.Services
                         } 
                         catch (Exception cleanupEx) 
                         { 
-                            Console.WriteLine($"[PDF-INSERT] Warning: Document cleanup failed: {cleanupEx.Message}");
+                            #if DEBUG
+                            DebugLogger.Log($"[PDF-INSERT] Warning: Document cleanup failed: {cleanupEx.Message}");
+                            #endif
                         } 
                     }
                     if (wordApp != null) 
@@ -1136,7 +1308,9 @@ namespace MsgToPdfConverter.Services
                         } 
                         catch (Exception cleanupEx) 
                         { 
-                            Console.WriteLine($"[PDF-INSERT] Warning: Application cleanup failed: {cleanupEx.Message}");
+                            #if DEBUG
+                            DebugLogger.Log($"[PDF-INSERT] Warning: Application cleanup failed: {cleanupEx.Message}");
+                            #endif
                         } 
                     }
                     
@@ -1148,8 +1322,10 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Failed to convert DOCX to PDF: {ex.Message}");
-                Console.WriteLine($"[PDF-INSERT] Exception details: {ex}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Failed to convert DOCX to PDF: {ex.Message}");
+                DebugLogger.Log($"[PDF-INSERT] Exception details: {ex}");
+                #endif
                 return false;
             }
         }
@@ -1162,37 +1338,53 @@ namespace MsgToPdfConverter.Services
             bool result = false;
             Exception threadEx = null;
 
-            Console.WriteLine($"[PDF-INSERT] *** EXCEL CONVERSION START *** Converting {Path.GetFileName(xlsxPath)} to PDF");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] *** EXCEL CONVERSION START *** Converting {Path.GetFileName(xlsxPath)} to PDF");
+            #endif
 
             // Run Excel conversion in STA thread like OfficeConversionService to avoid popup issues
             var thread = new System.Threading.Thread(() =>
             {
                 try
                 {
-                    Console.WriteLine($"[PDF-INSERT] *** EXCEL INTEROP *** Creating Excel application in STA thread");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** EXCEL INTEROP *** Creating Excel application in STA thread");
+                    #endif
                     
                     var excelApp = new Microsoft.Office.Interop.Excel.Application();
                     excelApp.Visible = false;
                     excelApp.DisplayAlerts = false;
-                    Console.WriteLine($"[PDF-INSERT] *** EXCEL INTEROP *** Excel application created successfully");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** EXCEL INTEROP *** Excel application created successfully");
+                    #endif
                     
                     Microsoft.Office.Interop.Excel.Workbooks workbooks = null;
                     Microsoft.Office.Interop.Excel.Workbook wb = null;
                     try
                     {
                         workbooks = excelApp.Workbooks;
-                        Console.WriteLine($"[PDF-INSERT] *** EXCEL INTEROP *** Opening workbook: {Path.GetFileName(xlsxPath)}");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** EXCEL INTEROP *** Opening workbook: {Path.GetFileName(xlsxPath)}");
+                        #endif
                         wb = workbooks.Open(xlsxPath);
-                        Console.WriteLine($"[PDF-INSERT] *** EXCEL INTEROP *** Workbook opened successfully");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** EXCEL INTEROP *** Workbook opened successfully");
+                        #endif
                         
-                        Console.WriteLine($"[PDF-INSERT] *** EXCEL EXPORT *** Exporting to PDF: {outputPdfPath}");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** EXCEL EXPORT *** Exporting to PDF: {outputPdfPath}");
+                        #endif
                         wb.ExportAsFixedFormat(Microsoft.Office.Interop.Excel.XlFixedFormatType.xlTypePDF, outputPdfPath);
-                        Console.WriteLine($"[PDF-INSERT] *** EXCEL EXPORT *** Export completed successfully");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** EXCEL EXPORT *** Export completed successfully");
+                        #endif
                         result = true;
                     }
                     finally
                     {
-                        Console.WriteLine($"[PDF-INSERT] *** EXCEL CLEANUP *** Cleaning up Excel COM objects");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** EXCEL CLEANUP *** Cleaning up Excel COM objects");
+                        #endif
                         if (wb != null)
                         {
                             wb.Close(false);
@@ -1209,13 +1401,17 @@ namespace MsgToPdfConverter.Services
                         }
                         GC.Collect();
                         GC.WaitForPendingFinalizers();
-                        Console.WriteLine($"[PDF-INSERT] *** EXCEL CLEANUP *** Cleanup completed");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] *** EXCEL CLEANUP *** Cleanup completed");
+                        #endif
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[PDF-INSERT] *** EXCEL ERROR *** Exception in Excel conversion thread: {ex.Message}");
-                    Console.WriteLine($"[PDF-INSERT] *** EXCEL ERROR *** Stack trace: {ex.StackTrace}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** EXCEL ERROR *** Exception in Excel conversion thread: {ex.Message}");
+                    DebugLogger.Log($"[PDF-INSERT] *** EXCEL ERROR *** Stack trace: {ex.StackTrace}");
+                    #endif
                     threadEx = ex;
                 }
             });
@@ -1224,29 +1420,41 @@ namespace MsgToPdfConverter.Services
             thread.Start();
             thread.Join();
             
-            Console.WriteLine($"[PDF-INSERT] *** EXCEL THREAD COMPLETE *** Thread finished, checking results");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] *** EXCEL THREAD COMPLETE *** Thread finished, checking results");
+            #endif
             
             if (threadEx != null)
             {
-                Console.WriteLine($"[PDF-INSERT] *** EXCEL CONVERSION FAILED *** Thread exception: {threadEx.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] *** EXCEL CONVERSION FAILED *** Thread exception: {threadEx.Message}");
+                #endif
                 return false;
             }
             
-            Console.WriteLine($"[PDF-INSERT] *** EXCEL RESULT CHECK *** result={result}, file exists={File.Exists(outputPdfPath)}");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] *** EXCEL RESULT CHECK *** result={result}, file exists={File.Exists(outputPdfPath)}");
+            #endif
             if (File.Exists(outputPdfPath))
             {
                 var fileInfo = new FileInfo(outputPdfPath);
-                Console.WriteLine($"[PDF-INSERT] *** EXCEL RESULT CHECK *** Output file size: {fileInfo.Length} bytes");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] *** EXCEL RESULT CHECK *** Output file size: {fileInfo.Length} bytes");
+                #endif
             }
             
             if (result && File.Exists(outputPdfPath) && new FileInfo(outputPdfPath).Length > 0)
             {
-                Console.WriteLine($"[PDF-INSERT] *** EXCEL SUCCESS *** Successfully converted XLSX to PDF: {outputPdfPath}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] *** EXCEL SUCCESS *** Successfully converted XLSX to PDF: {outputPdfPath}");
+                #endif
                 return true;
             }
             else
             {
-                Console.WriteLine($"[PDF-INSERT] *** EXCEL FAILURE *** XLSX conversion failed: output file not created or empty");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] *** EXCEL FAILURE *** XLSX conversion failed: output file not created or empty");
+                #endif
                 return false;
             }
         }
@@ -1280,7 +1488,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error inserting {obj.FilePath} at position {afterPageNumber}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Error inserting {obj.FilePath} at position {afterPageNumber}: {ex.Message}");
+                #endif
                 InsertErrorPlaceholderAtPosition(obj.FilePath, outputPdf, afterPageNumber, ex.Message);
             }
         }
@@ -1288,19 +1498,25 @@ namespace MsgToPdfConverter.Services
         // Insert PDF file at specific position
         private static void InsertPdfFileAtPosition(string pdfPath, PdfDocument outputPdf, int afterPageNumber, string oleClass)
         {
-            Console.WriteLine($"[PDF-INSERT] *** PDF POSITION INSERTION *** Inserting PDF: {Path.GetFileName(pdfPath)} after page {afterPageNumber}");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] *** PDF POSITION INSERTION *** Inserting PDF: {Path.GetFileName(pdfPath)} after page {afterPageNumber}");
+            #endif
             try
             {
                 if (!File.Exists(pdfPath))
                 {
-                    Console.WriteLine($"[PDF-INSERT] PDF file not found: {pdfPath}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] PDF file not found: {pdfPath}");
+                    #endif
                     InsertErrorPlaceholderAtPosition(pdfPath, outputPdf, afterPageNumber, "File not found");
                     return;
                 }
                 var fileInfo = new FileInfo(pdfPath);
                 if (fileInfo.Length == 0)
                 {
-                    Console.WriteLine($"[PDF-INSERT] PDF file is empty: {pdfPath}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] PDF file is empty: {pdfPath}");
+                    #endif
                     InsertErrorPlaceholderAtPosition(pdfPath, outputPdf, afterPageNumber, "Empty file");
                     return;
                 }
@@ -1313,7 +1529,9 @@ namespace MsgToPdfConverter.Services
                     embeddedPdf = new PdfDocument(reader);
                     int embeddedPageCount = embeddedPdf.GetNumberOfPages();
                     
-                    Console.WriteLine($"[PDF-INSERT] *** PDF CONTENT *** {Path.GetFileName(pdfPath)} has {embeddedPageCount} pages to insert after page {afterPageNumber}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** PDF CONTENT *** {Path.GetFileName(pdfPath)} has {embeddedPageCount} pages to insert after page {afterPageNumber}");
+                    #endif
                     
                     // Since CopyPagesTo doesn't support insertion at specific position, 
                     // we need to copy to a temporary PDF and then insert the pages manually
@@ -1341,12 +1559,16 @@ namespace MsgToPdfConverter.Services
                                 outputPdf.MovePage(outputPdf.GetNumberOfPages(), afterPageNumber + pageNum);
                                 
                                 int totalPagesAfter = outputPdf.GetNumberOfPages();
-                                Console.WriteLine($"[PDF-INSERT] *** PDF PAGE POSITION INSERT *** Inserted page {pageNum}/{embeddedPageCount} from {Path.GetFileName(pdfPath)} at position {afterPageNumber + pageNum}, PDF went from {totalPagesBefore} to {totalPagesAfter} pages");
+                                #if DEBUG
+                                DebugLogger.Log($"[PDF-INSERT] *** PDF PAGE POSITION INSERT *** Inserted page {pageNum}/{embeddedPageCount} from {Path.GetFileName(pdfPath)} at position {afterPageNumber + pageNum}, PDF went from {totalPagesBefore} to {totalPagesAfter} pages");
+                                #endif
                             }
                         }
                     }
                     
-                    Console.WriteLine($"[PDF-INSERT] *** PDF POSITION INSERTION COMPLETE *** Successfully inserted {embeddedPageCount} pages from {Path.GetFileName(pdfPath)} after page {afterPageNumber}");
+                    #if DEBUG
+                    DebugLogger.Log($"[PDF-INSERT] *** PDF POSITION INSERTION COMPLETE *** Successfully inserted {embeddedPageCount} pages from {Path.GetFileName(pdfPath)} after page {afterPageNumber}");
+                    #endif
                 }
                 finally
                 {
@@ -1355,7 +1577,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error reading PDF {pdfPath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Error reading PDF {pdfPath}: {ex.Message}");
+                #endif
                 InsertErrorPlaceholderAtPosition(pdfPath, outputPdf, afterPageNumber, ex.Message);
             }
         }
@@ -1363,7 +1587,9 @@ namespace MsgToPdfConverter.Services
         // Insert DOCX file at specific position
         private static void InsertDocxFileAtPosition(string docxPath, PdfDocument outputPdf, int afterPageNumber)
         {
-            Console.WriteLine($"[PDF-INSERT] Converting and inserting DOCX at position: {Path.GetFileName(docxPath)} after page {afterPageNumber}");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] Converting and inserting DOCX at position: {Path.GetFileName(docxPath)} after page {afterPageNumber}");
+            #endif
             try
             {
                 string tempPdfPath = Path.Combine(Path.GetTempPath(), $"docx_temp_{Guid.NewGuid()}.pdf");
@@ -1380,7 +1606,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error converting DOCX {docxPath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Error converting DOCX {docxPath}: {ex.Message}");
+                #endif
                 InsertErrorPlaceholderAtPosition(docxPath, outputPdf, afterPageNumber, ex.Message);
             }
         }
@@ -1388,7 +1616,9 @@ namespace MsgToPdfConverter.Services
         // Insert XLSX file at specific position
         private static void InsertXlsxFileAtPosition(string xlsxPath, PdfDocument outputPdf, int afterPageNumber)
         {
-            Console.WriteLine($"[PDF-INSERT] Converting and inserting XLSX at position: {Path.GetFileName(xlsxPath)} after page {afterPageNumber}");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] Converting and inserting XLSX at position: {Path.GetFileName(xlsxPath)} after page {afterPageNumber}");
+            #endif
             try
             {
                 string tempPdfPath = Path.Combine(Path.GetTempPath(), $"xlsx_temp_{Guid.NewGuid()}.pdf");
@@ -1405,7 +1635,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error converting XLSX {xlsxPath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Error converting XLSX {xlsxPath}: {ex.Message}");
+                #endif
                 InsertErrorPlaceholderAtPosition(xlsxPath, outputPdf, afterPageNumber, ex.Message);
             }
         }
@@ -1413,7 +1645,9 @@ namespace MsgToPdfConverter.Services
         // Insert MSG file at specific position
         private static void InsertMsgFileAtPosition(string msgPath, PdfDocument outputPdf, int afterPageNumber)
         {
-            Console.WriteLine($"[PDF-INSERT] Converting and inserting MSG at position: {Path.GetFileName(msgPath)} after page {afterPageNumber}");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] Converting and inserting MSG at position: {Path.GetFileName(msgPath)} after page {afterPageNumber}");
+            #endif
             try
             {
                 string tempPdfPath = Path.Combine(Path.GetTempPath(), $"msg_temp_{Guid.NewGuid()}.pdf");
@@ -1434,7 +1668,9 @@ namespace MsgToPdfConverter.Services
                     
                     foreach (string attachmentPath in attachmentPaths)
                     {
-                        Console.WriteLine($"[PDF-INSERT] Inserting MSG attachment at position: {Path.GetFileName(attachmentPath)}");
+                        #if DEBUG
+                        DebugLogger.Log($"[PDF-INSERT] Inserting MSG attachment at position: {Path.GetFileName(attachmentPath)}");
+                        #endif
                         InsertPdfFileAtPosition(attachmentPath, outputPdf, currentPosition, "Attachment");
                         
                         // Update position for next attachment
@@ -1458,7 +1694,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Error converting MSG {msgPath}: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Error converting MSG {msgPath}: {ex.Message}");
+                #endif
                 InsertErrorPlaceholderAtPosition(msgPath, outputPdf, afterPageNumber, ex.Message);
             }
         }
@@ -1466,7 +1704,9 @@ namespace MsgToPdfConverter.Services
         // Insert placeholder at specific position
         private static void InsertPlaceholderAtPosition(string filePath, PdfDocument outputPdf, int afterPageNumber, string oleClass)
         {
-            Console.WriteLine($"[PDF-INSERT] Inserting placeholder at position for unsupported file: {Path.GetFileName(filePath)} after page {afterPageNumber}");
+            #if DEBUG
+            DebugLogger.Log($"[PDF-INSERT] Inserting placeholder at position for unsupported file: {Path.GetFileName(filePath)} after page {afterPageNumber}");
+            #endif
             InsertErrorPlaceholderAtPosition(filePath, outputPdf, afterPageNumber, $"Unsupported file type: {Path.GetExtension(filePath)}");
         }
 
@@ -1530,11 +1770,15 @@ namespace MsgToPdfConverter.Services
                     canvas.EndText();
                 }
                       
-                Console.WriteLine($"[PDF-INSERT] Inserted error placeholder for {fileName} at position {afterPageNumber + 1}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Inserted error placeholder for {fileName} at position {afterPageNumber + 1}");
+                #endif
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[PDF-INSERT] Failed to insert error placeholder: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[PDF-INSERT] Failed to insert error placeholder: {ex.Message}");
+                #endif
             }
         }
     }

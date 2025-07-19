@@ -18,7 +18,7 @@ namespace MsgToPdfConverter
         /// </summary>
         public static void TestPageOrderingLogic()
         {
-            Console.WriteLine("=== VALIDATION TEST: Page Ordering Logic ===");
+        
             
             // Simulate a scenario with:
             // - Main PDF with 3 pages
@@ -83,12 +83,12 @@ namespace MsgToPdfConverter
             // Test edge cases
             TestEdgeCases();
             
-            Console.WriteLine("=== VALIDATION TEST COMPLETE ===");
+        
         }
         
         private static void TestOrderingLogic(List<InteropEmbeddedExtractor.ExtractedObjectInfo> objects, int mainPageCount)
         {
-            Console.WriteLine($"\n--- Testing ordering with {objects.Count} objects across {mainPageCount} main pages ---");
+         
             
             // Sort objects as the actual code does
             var objectsByPage = objects.OrderBy(obj => obj.PageNumber).ThenBy(obj => obj.DocumentOrderIndex).ToList();
@@ -98,7 +98,7 @@ namespace MsgToPdfConverter
                                            .OrderBy(g => g.Key)
                                            .ToList();
             
-            Console.WriteLine("Expected page sequence:");
+        
             
             int expectedOutputPage = 0;
             int groupIndex = 0;
@@ -107,7 +107,7 @@ namespace MsgToPdfConverter
             {
                 // Main page always comes first
                 expectedOutputPage++;
-                Console.WriteLine($"  Output Page {expectedOutputPage}: Main Page {mainPage}");
+         
                 
                 // Check if this page has embedded objects
                 bool hasEmbeddedObjects = groupIndex < objectGroups.Count && objectGroups[groupIndex].Key == mainPage;
@@ -115,19 +115,21 @@ namespace MsgToPdfConverter
                 if (hasEmbeddedObjects)
                 {
                     var pageObjects = objectGroups[groupIndex].OrderBy(obj => obj.DocumentOrderIndex).ToList();
-                    Console.WriteLine($"    Found {pageObjects.Count} embedded objects for main page {mainPage}:");
+            
                     
                     foreach (var obj in pageObjects)
                     {
                         expectedOutputPage++;
-                        Console.WriteLine($"  Output Page {expectedOutputPage}: {Path.GetFileName(obj.FilePath)} (order: {obj.DocumentOrderIndex})");
+                        #if DEBUG
+                        DebugLogger.Log($"  Output Page {expectedOutputPage}: {Path.GetFileName(obj.FilePath)} (order: {obj.DocumentOrderIndex})");
+                        #endif
                     }
                     
                     groupIndex++;
                 }
             }
             
-            Console.WriteLine($"Total expected output pages: {expectedOutputPage}");
+    
             
             // Validate that no embedded object comes before its main page
             bool isValid = true;
@@ -139,7 +141,7 @@ namespace MsgToPdfConverter
                 {
                     if (obj.PageNumber < mainPagePos)
                     {
-                        Console.WriteLine($"ERROR: Object {Path.GetFileName(obj.FilePath)} would be inserted before its main page!");
+                 
                         isValid = false;
                     }
                 }
@@ -147,24 +149,34 @@ namespace MsgToPdfConverter
             
             if (isValid)
             {
-                Console.WriteLine("✓ Page ordering validation PASSED - No embedded object will be inserted before its main page");
+                #if DEBUG
+                DebugLogger.Log("✓ Page ordering validation PASSED - No embedded object will be inserted before its main page");
+                #endif
             }
             else
             {
-                Console.WriteLine("✗ Page ordering validation FAILED!");
+                #if DEBUG
+                DebugLogger.Log("✗ Page ordering validation FAILED!");
+                #endif
             }
         }
         
         private static void TestEdgeCases()
         {
-            Console.WriteLine("\n--- Testing edge cases ---");
+            #if DEBUG
+            DebugLogger.Log("\n--- Testing edge cases ---");
+            #endif
             
             // Test case 1: Empty objects list
-            Console.WriteLine("Test 1: Empty objects list");
+            #if DEBUG
+            DebugLogger.Log("Test 1: Empty objects list");
+            #endif
             TestOrderingLogic(new List<InteropEmbeddedExtractor.ExtractedObjectInfo>(), 2);
             
             // Test case 2: Objects only on last page
-            Console.WriteLine("\nTest 2: Objects only on last page");
+            #if DEBUG
+            DebugLogger.Log("\nTest 2: Objects only on last page");
+            #endif
             var lastPageObjects = new List<InteropEmbeddedExtractor.ExtractedObjectInfo>
             {
                 new InteropEmbeddedExtractor.ExtractedObjectInfo
@@ -178,7 +190,9 @@ namespace MsgToPdfConverter
             TestOrderingLogic(lastPageObjects, 5);
             
             // Test case 3: Objects with page number -1 (should go to end)
-            Console.WriteLine("\nTest 3: Objects with page number -1");
+            #if DEBUG
+            DebugLogger.Log("\nTest 3: Objects with page number -1");
+            #endif
             var invalidPageObjects = new List<InteropEmbeddedExtractor.ExtractedObjectInfo>
             {
                 new InteropEmbeddedExtractor.ExtractedObjectInfo
@@ -196,13 +210,17 @@ namespace MsgToPdfConverter
                 if (obj.PageNumber == -1)
                 {
                     obj.PageNumber = 3; // Assuming 3-page main document
-                    Console.WriteLine($"Adjusted object {Path.GetFileName(obj.FilePath)} from page -1 to page {obj.PageNumber}");
+                    #if DEBUG
+                    DebugLogger.Log($"Adjusted object {Path.GetFileName(obj.FilePath)} from page -1 to page {obj.PageNumber}");
+                    #endif
                 }
             }
             TestOrderingLogic(invalidPageObjects, 3);
             
             // Test case 4: Multiple objects with same order index (rare but possible)
-            Console.WriteLine("\nTest 4: Multiple objects with same order index");
+            #if DEBUG
+            DebugLogger.Log("\nTest 4: Multiple objects with same order index");
+            #endif
             var sameOrderObjects = new List<InteropEmbeddedExtractor.ExtractedObjectInfo>
             {
                 new InteropEmbeddedExtractor.ExtractedObjectInfo

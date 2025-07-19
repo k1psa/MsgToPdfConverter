@@ -25,10 +25,9 @@ namespace MsgToPdfConverter
                 converter.Convert(doc);
                 return 0;
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine($"[WORKER ERROR] {ex}");
-                return 1;
+                return -1;
             }
         }
     }

@@ -79,8 +79,8 @@ namespace MsgToPdfConverter.Services
                     bool conversionSucceeded = false;
                     try
                     {
-                        Console.WriteLine($"[DEBUG] Starting conversion for file index {i}: {filePath}");
-                        Console.WriteLine($"[DEBUG] appendAttachments={appendAttachments}, selectedOutputFolder={selectedOutputFolder}, extractOriginalOnly={extractOriginalOnly}, combineAllPdfs={combineAllPdfs}");
+
+
                         if (string.IsNullOrWhiteSpace(filePath))
                         {
                             showMessageBox($"[ERROR] Skipping null or empty file path at index {i}.");
@@ -121,7 +121,7 @@ namespace MsgToPdfConverter.Services
                                         fail++;
                                         continue;
                                     }
-            Console.WriteLine($"[DEBUG] msg loaded: {{Subject={msg?.Subject}, Sender={msg?.Sender}, SentOn={msg?.SentOn}, Attachments={(msg?.Attachments == null ? "null" : msg.Attachments.Count.ToString())}}}");
+
             if (msg == null)
             {
                 showMessageBox($"[ERROR] Failed to load MSG file: {filePath}");
@@ -130,7 +130,7 @@ namespace MsgToPdfConverter.Services
             }
             if (appendAttachments && (msg.Attachments == null || msg.Attachments.Count == 0))
             {
-                Console.WriteLine($"[DEBUG] No attachments to process for file: {filePath}. Will convert main message body only.");
+
                 // Always convert the main message body to PDF
                 string datePart_noatt = msg.SentOn.HasValue ? msg.SentOn.Value.ToString("yyyy-MM-dd_HHmmss") : DateTime.Now.ToString("yyyy-MM-dd_HHmmss");
                 string msgBaseName_noatt = System.IO.Path.GetFileNameWithoutExtension(filePath);
@@ -203,23 +203,29 @@ namespace MsgToPdfConverter.Services
                         if (System.IO.File.Exists(outputPdf_noatt))
                             System.IO.File.Delete(outputPdf_noatt);
                         System.IO.File.Copy(pdfFilePath_noatt, outputPdf_noatt, true);
-                        Console.WriteLine($"[DEBUG] Copied {pdfFilePath_noatt} to {outputPdf_noatt}");
+
                         // Delete temp PDF after copying
                         try {
                             if (System.IO.File.Exists(pdfFilePath_noatt))
                                 System.IO.File.Delete(pdfFilePath_noatt);
-                            Console.WriteLine($"[DEBUG] Deleted temp PDF: {pdfFilePath_noatt}");
+                            #if DEBUG
+                            DebugLogger.Log($"[DEBUG] Deleted temp PDF: {pdfFilePath_noatt}");
+                            #endif
                         } catch { }
                     }
                     catch (Exception moveEx)
                     {
-                        Console.WriteLine($"[ERROR] Failed to copy file: {moveEx.Message}");
+                        #if DEBUG
+                        DebugLogger.Log($"[ERROR] Failed to copy file: {moveEx.Message}");
+                        #endif
                         outputPdf_noatt = pdfFilePath_noatt;
                     }
                 }
                 else if (System.IO.File.Exists(outputPdf_noatt))
                 {
-                    Console.WriteLine($"[DEBUG] Output PDF already exists at {outputPdf_noatt}");
+                    #if DEBUG
+                    DebugLogger.Log($"[DEBUG] Output PDF already exists at {outputPdf_noatt}");
+                    #endif
                 }
                 else if (System.IO.File.Exists(pdfFilePath_noatt))
                 {
@@ -245,13 +251,19 @@ namespace MsgToPdfConverter.Services
             int totalCount = 0;
             try
             {
-                Console.WriteLine($"[DEBUG] Calling attachmentService.CountAllProcessableItems(msg)");
+                #if DEBUG
+                DebugLogger.Log($"[DEBUG] Calling attachmentService.CountAllProcessableItems(msg)");
+                #endif
                 totalCount = attachmentService.CountAllProcessableItems(msg);
-                Console.WriteLine($"[DEBUG] attachmentService.CountAllProcessableItems(msg) returned: {totalCount}");
+                #if DEBUG
+                DebugLogger.Log($"[DEBUG] attachmentService.CountAllProcessableItems(msg) returned: {totalCount}");
+                #endif
             }
             catch (Exception attCountEx)
             {
-                Console.WriteLine($"[ERROR] Exception in attachmentService.CountAllProcessableItems: {attCountEx.Message}");
+                #if DEBUG
+                DebugLogger.Log($"[ERROR] Exception in attachmentService.CountAllProcessableItems: {attCountEx.Message}");
+                #endif
                 showMessageBox($"[ERROR] Could not count processable items: {attCountEx.Message}");
                 totalCount = 1;
             }
@@ -374,11 +386,15 @@ namespace MsgToPdfConverter.Services
                                     foreach (var group in duplicateGroups)
                                     {
                                         var groupList = group.ToList();
-                                        Console.WriteLine($"[DEDUP] Found {groupList.Count} files with base name '{group.Key}':");
+                                        #if DEBUG
+                                        DebugLogger.Log($"[DEDUP] Found {groupList.Count} files with base name '{group.Key}':");
+                                        #endif
                                         
                                         foreach (var att in groupList)
                                         {
-                                            Console.WriteLine($"[DEDUP]   {att.FileName}");
+                                        #if DEBUG
+                                        DebugLogger.Log($"[DEDUP]   {att.FileName}");
+                                        #endif
                                         }
 
                                         var officeFiles = groupList.Where(a => {
@@ -396,18 +412,24 @@ namespace MsgToPdfConverter.Services
                                         {
                                             // Keep the first Office file, skip all PDF files
                                             var keepOfficeFile = officeFiles.First();
-                                            Console.WriteLine($"[DEDUP] Keeping Office file: {keepOfficeFile.FileName}");
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DEDUP] Keeping Office file: {keepOfficeFile.FileName}");
+                                            #endif
                                             
                                             foreach (var pdfFile in pdfFiles)
                                             {
-                                                Console.WriteLine($"[DEDUP] Skipping PDF duplicate: {pdfFile.FileName}");
+                                                #if DEBUG
+                                                DebugLogger.Log($"[DEDUP] Skipping PDF duplicate: {pdfFile.FileName}");
+                                                #endif
                                                 attachmentsToSkip.Add(pdfFile.FileName ?? "");
                                             }
                                             
                                             // If there are multiple Office files, keep only the first one
                                             for (int j = 1; j < officeFiles.Count; j++)
                                             {
-                                                Console.WriteLine($"[DEDUP] Skipping duplicate Office file: {officeFiles[j].FileName}");
+                                                #if DEBUG
+                                                DebugLogger.Log($"[DEDUP] Skipping duplicate Office file: {officeFiles[j].FileName}");
+                                                #endif
                                                 attachmentsToSkip.Add(officeFiles[j].FileName ?? "");
                                             }
                                         }
@@ -415,11 +437,15 @@ namespace MsgToPdfConverter.Services
                                         {
                                             // Multiple Office files with same base name - keep first one
                                             var keepOfficeFile = officeFiles.First();
-                                            Console.WriteLine($"[DEDUP] Keeping first Office file: {keepOfficeFile.FileName}");
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DEDUP] Keeping first Office file: {keepOfficeFile.FileName}");
+                                            #endif
                                             
                                             for (int j = 1; j < officeFiles.Count; j++)
                                             {
-                                                Console.WriteLine($"[DEDUP] Skipping duplicate Office file: {officeFiles[j].FileName}");
+                                                #if DEBUG
+                                                DebugLogger.Log($"[DEDUP] Skipping duplicate Office file: {officeFiles[j].FileName}");
+                                                #endif
                                                 attachmentsToSkip.Add(officeFiles[j].FileName ?? "");
                                             }
                                         }
@@ -427,11 +453,15 @@ namespace MsgToPdfConverter.Services
                                         {
                                             // Multiple PDF files with same base name - keep first one
                                             var keepPdfFile = pdfFiles.First();
-                                            Console.WriteLine($"[DEDUP] Keeping first PDF file: {keepPdfFile.FileName}");
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DEDUP] Keeping first PDF file: {keepPdfFile.FileName}");
+                                            #endif
                                             
                                             for (int j = 1; j < pdfFiles.Count; j++)
                                             {
-                                                Console.WriteLine($"[DEDUP] Skipping duplicate PDF file: {pdfFiles[j].FileName}");
+                                                #if DEBUG
+                                                DebugLogger.Log($"[DEDUP] Skipping duplicate PDF file: {pdfFiles[j].FileName}");
+                                                #endif
                                                 attachmentsToSkip.Add(pdfFiles[j].FileName ?? "");
                                             }
                                         }
@@ -442,11 +472,15 @@ namespace MsgToPdfConverter.Services
                                     {
                                         if (attachmentsToSkip.Contains(a.FileName ?? ""))
                                         {
-                                            Console.WriteLine($"[DEDUP] SKIPPING (as planned): {a.FileName}");
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DEDUP] SKIPPING (as planned): {a.FileName}");
+                                            #endif
                                             continue;
                                         }
 
-                                        Console.WriteLine($"[DEDUP] Including attachment for processing: {a.FileName}");
+                                        #if DEBUG
+                                        DebugLogger.Log($"[DEDUP] Including attachment for processing: {a.FileName}");
+                                        #endif
                                         typedAttachments.Add(a);
                                     }
                                 }
@@ -522,7 +556,7 @@ namespace MsgToPdfConverter.Services
                                         filesToProtect.Add(Path.GetFullPath(genPdf).TrimEnd(Path.DirectorySeparatorChar).ToLowerInvariant());
                                     }
                                 }
-                                Console.WriteLine("[DEBUG] Protected files:");
+
                                 foreach (var prot in filesToProtect) Console.WriteLine($"  {prot}");
                                 // DEBUG: Print temp and protected files before cleanup
                                 AttachmentService.DebugPrintTempAndProtectedFiles(allTempFiles, filesToProtect);
@@ -560,23 +594,25 @@ namespace MsgToPdfConverter.Services
                                         if (System.IO.File.Exists(outputPdfFinal))
                                             System.IO.File.Delete(outputPdfFinal);
                                         System.IO.File.Copy(pdfFilePath, outputPdfFinal, true);
-                                        Console.WriteLine($"[DEBUG] Copied {pdfFilePath} to {outputPdfFinal}");
+
                                         // Delete temp PDF after copying
                                         try {
                                             if (System.IO.File.Exists(pdfFilePath))
                                                 System.IO.File.Delete(pdfFilePath);
-                                            Console.WriteLine($"[DEBUG] Deleted temp PDF: {pdfFilePath}");
+
                                         } catch { }
                                     }
-                                    catch (Exception moveEx)
+                                    catch (Exception)
                                     {
-                                        Console.WriteLine($"[ERROR] Failed to copy file: {moveEx.Message}");
+
                                         outputPdfFinal = pdfFilePath;
                                     }
                                 }
                                 else if (System.IO.File.Exists(outputPdfFinal))
                                 {
-                                    Console.WriteLine($"[DEBUG] Output PDF already exists at {outputPdfFinal}");
+                                    #if DEBUG
+                                    DebugLogger.Log($"[DEBUG] Output PDF already exists at {outputPdfFinal}");
+                                    #endif
                                 }
                                 else if (System.IO.File.Exists(pdfFilePath))
                                 {
@@ -602,15 +638,27 @@ namespace MsgToPdfConverter.Services
                                 GC.WaitForPendingFinalizers();
                                 if (deleteFilesAfterConversion && conversionSucceeded && !combineAllPdfs) // <--- updated condition
                                 {
-                                    Console.WriteLine($"[DELETE] Should delete: {filePath}, deleteFilesAfterConversion={deleteFilesAfterConversion}, combineAllPdfs={combineAllPdfs}, appendAttachments={appendAttachments}");
+                                    #if DEBUG
+                                    DebugLogger.Log($"[DELETE] Should delete: {filePath}, deleteFilesAfterConversion={deleteFilesAfterConversion}, combineAllPdfs={combineAllPdfs}, appendAttachments={appendAttachments}");
+                                    #endif
                                     if (System.IO.File.Exists(filePath))
                                     {
-                                        Console.WriteLine($"[DELETE] Attempting to delete: {filePath}");
-                                        try { FileService.MoveFileToRecycleBin(filePath); } catch (Exception ex) { Console.WriteLine($"[DELETE] Failed: {ex.Message}"); }
+                                        #if DEBUG
+                                        DebugLogger.Log($"[DELETE] Attempting to delete: {filePath}");
+                                        #endif
+                                        try { FileService.MoveFileToRecycleBin(filePath); }
+                                        catch (Exception ex)
+                                        {
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DELETE] Failed: {ex.Message}");
+                                            #endif
+                                        }
                                     }
                                     else
                                     {
-                                        Console.WriteLine($"[DELETE] File not found: {filePath}");
+                                        #if DEBUG
+                                        DebugLogger.Log($"[DELETE] File not found: {filePath}");
+                                        #endif
                                     }
                                 }
                             }
@@ -663,7 +711,9 @@ namespace MsgToPdfConverter.Services
                         catch (Exception ex)
                         {
                             showMessageBox($"Error processing {System.IO.Path.GetFileName(filePath)}: {ex.Message}");
-                            Console.WriteLine($"[ERROR] ProcessSingleAttachmentWithHierarchy failed: {ex}");
+                                #if DEBUG
+                                DebugLogger.Log($"[ERROR] ProcessSingleAttachmentWithHierarchy failed: {ex}");
+                                #endif
                             processedPdf = null;
                         }
                         // Robust existence check with retries for all generated PDFs
@@ -685,21 +735,27 @@ namespace MsgToPdfConverter.Services
                             {
                                 using (var pdfDoc = PdfSharp.Pdf.IO.PdfReader.Open(pdfPath, PdfSharp.Pdf.IO.PdfDocumentOpenMode.Import))
                                 {
-                                    Console.WriteLine($"[DEBUG] PDF: {pdfPath}, PageCount: {pdfDoc.PageCount}");
+                                    #if DEBUG
+                                    DebugLogger.Log($"[DEBUG] PDF: {pdfPath}, PageCount: {pdfDoc.PageCount}");
+                                    #endif
                                     if (pdfDoc.PageCount > 0)
                                     {
                                         validPdfFiles.Add(pdfPath);
                                     }
                                     else
                                     {
-                                        Console.WriteLine($"[ERROR] PDF has zero pages: {pdfPath}");
+                                        #if DEBUG
+                                        DebugLogger.Log($"[ERROR] PDF has zero pages: {pdfPath}");
+                                        #endif
                                         showMessageBox($"Error: PDF generated from '{System.IO.Path.GetFileName(filePath)}' has no pages and will be skipped.");
                                     }
                                 }
                             }
                             catch (Exception pdfEx)
                             {
-                                Console.WriteLine($"[ERROR] Failed to open PDF for page count check: {pdfEx.Message}");
+                                #if DEBUG
+                                DebugLogger.Log($"[ERROR] Failed to open PDF for page count check: {pdfEx.Message}");
+                                #endif
                                 showMessageBox($"Error: PDF generated from '{System.IO.Path.GetFileName(filePath)}' could not be opened and will be skipped.");
                             }
                         }
@@ -717,9 +773,13 @@ namespace MsgToPdfConverter.Services
                         }
                         else
                         {
-                            Console.WriteLine($"[ERROR] No valid PDFs to merge for {System.IO.Path.GetFileName(filePath)}");
+                            #if DEBUG
+                            DebugLogger.Log($"[ERROR] No valid PDFs to merge for {System.IO.Path.GetFileName(filePath)}");
+                            #endif
                         }
-                        Console.WriteLine($"[DEBUG] finalPdf: {finalPdf}, outputPdf: {outputPdf}");
+                        #if DEBUG
+                        DebugLogger.Log($"[DEBUG] finalPdf: {finalPdf}, outputPdf: {outputPdf}");
+                        #endif
                         // Always move/copy the final PDF to the output folder if it exists
                         if (!string.IsNullOrEmpty(finalPdf) && System.IO.File.Exists(finalPdf))
                         {
@@ -728,24 +788,32 @@ namespace MsgToPdfConverter.Services
                                 if (System.IO.File.Exists(outputPdf))
                                     System.IO.File.Delete(outputPdf);
                                 System.IO.File.Copy(finalPdf, outputPdf, true);
-                                Console.WriteLine($"[DEBUG] Copied {finalPdf} to {outputPdf}");
+                                #if DEBUG
+                                DebugLogger.Log($"[DEBUG] Copied {finalPdf} to {outputPdf}");
+                                #endif
                             }
                             catch (Exception moveEx)
                             {
-                                Console.WriteLine($"[ERROR] Failed to copy file: {moveEx.Message}");
+                            #if DEBUG
+                            DebugLogger.Log($"[ERROR] Failed to copy file: {moveEx.Message}");
+                            #endif
                                 outputPdf = finalPdf;
                             }
                         }
                         else if (System.IO.File.Exists(outputPdf))
                         {
-                            Console.WriteLine($"[DEBUG] Output PDF already exists at {outputPdf}");
+                        #if DEBUG
+                        DebugLogger.Log($"[DEBUG] Output PDF already exists at {outputPdf}");
+                        #endif
                         }
                         else if (!string.IsNullOrEmpty(finalPdf) && System.IO.File.Exists(finalPdf))
                         {
                             // If outputPdf does not exist but finalPdf does, treat as output
                             outputPdf = finalPdf;
                         }
-                        Console.WriteLine($"[DEBUG] Checking existence of output PDF: {outputPdf}");
+                        #if DEBUG
+                        DebugLogger.Log($"[DEBUG] Checking existence of output PDF: {outputPdf}");
+                        #endif
                         if (System.IO.File.Exists(outputPdf))
                         {
                             generatedPdfs?.Add(outputPdf);
@@ -756,7 +824,9 @@ namespace MsgToPdfConverter.Services
                         }
                         else
                         {
-                            Console.WriteLine($"[ERROR] No PDF generated for {System.IO.Path.GetFileName(filePath)}");
+                        #if DEBUG
+                        DebugLogger.Log($"[ERROR] No PDF generated for {System.IO.Path.GetFileName(filePath)}");
+                        #endif
                             fail++;
                         }
                         // Cleanup temp files, but never delete the output PDF
@@ -782,16 +852,26 @@ namespace MsgToPdfConverter.Services
                                                         StringComparison.OrdinalIgnoreCase);
                         if (isPdf && sameFolder)
                         {
-                            Console.WriteLine($"[DELETE] Skipping deletion of source PDF in output folder: {filePath}");
+                    #if DEBUG
+                    DebugLogger.Log($"[DELETE] Skipping deletion of source PDF in output folder: {filePath}");
+                    #endif
                         }
                         else if (System.IO.File.Exists(filePath))
                         {
-                            Console.WriteLine($"[DELETE] Attempting to delete: {filePath}");
-                            try { FileService.MoveFileToRecycleBin(filePath); } catch (Exception ex) { Console.WriteLine($"[DELETE] Failed: {ex.Message}"); }
+                    #if DEBUG
+                    DebugLogger.Log($"[DELETE] Attempting to delete: {filePath}");
+                    #endif
+                    try { FileService.MoveFileToRecycleBin(filePath); } catch (Exception ex) { 
+                        #if DEBUG
+                        DebugLogger.Log($"[DELETE] Failed: {ex.Message}");
+                        #endif
+                    }
                         }
                         else
                         {
-                            Console.WriteLine($"[DELETE] File not found: {filePath}");
+                    #if DEBUG
+                    DebugLogger.Log($"[DELETE] File not found: {filePath}");
+                    #endif
                         }
                     }
                 }
@@ -817,7 +897,9 @@ namespace MsgToPdfConverter.Services
                 }
                 catch { }
             }
-            Console.WriteLine("[DEBUG] ConversionService.ConvertFilesWithAttachments: Finished and returning.");
+            #if DEBUG
+            DebugLogger.Log("[DEBUG] ConversionService.ConvertFilesWithAttachments: Finished and returning.");
+            #endif
             // Removed GC.Collect and GC.WaitForPendingFinalizers here to prevent freeze
             return (success, fail, processed, isCancellationRequested());
         }
@@ -882,7 +964,9 @@ namespace MsgToPdfConverter.Services
                     {
                         if (!System.IO.File.Exists(tempFile))
                         {
-                            Console.WriteLine($"Warning: Referenced attachment or image missing: {tempFile}. Skipping this file.");
+                            #if DEBUG
+                            DebugLogger.Log($"Warning: Referenced attachment or image missing: {tempFile}. Skipping this file.");
+                            #endif
                             // Optionally, remove the reference from HTML if needed
                         }
                     }
@@ -913,7 +997,9 @@ namespace MsgToPdfConverter.Services
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error in ConvertSingleMsgFileWithProgress: {ex.Message}");
+                #if DEBUG
+                DebugLogger.Log($"Error in ConvertSingleMsgFileWithProgress: {ex.Message}");
+                #endif
                 return false;
             }
         }

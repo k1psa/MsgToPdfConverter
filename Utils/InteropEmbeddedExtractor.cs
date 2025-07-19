@@ -92,7 +92,7 @@ public class InteropEmbeddedExtractor
                                     {
                                         rel.OpenXmlPart.GetStream().CopyTo(fs);
                                     }
-                                    Console.WriteLine($"[InteropExtractor] Extracted orphaned Excel: {outPath}");
+                                  
                                 }
                                 // Prevent duplicate: only add orphaned Excel if no in-flow .xlsx with same file name exists
                                 bool hasInFlow = results.Any(r =>
@@ -112,7 +112,9 @@ public class InteropEmbeddedExtractor
                                         RunIndex = -1,
                                         CharPosition = -1
                                     });
-                                    Console.WriteLine($"[InteropExtractor] Added orphaned Excel to results: {fileName}");
+#if DEBUG
+                                    DebugLogger.Log($"[InteropExtractor] Added orphaned Excel to results: {fileName}");
+#endif
                                 }
                             }
                         }
@@ -121,16 +123,20 @@ public class InteropEmbeddedExtractor
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[InteropExtractor] OpenXml document order parse error: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[InteropExtractor] OpenXml document order parse error: {ex.Message}");
+#endif
             }
 
             // --- 2. Extract objects in order ---
             // Print extracted objects for debug
-            Console.WriteLine("[InteropExtractor] Extracted OpenXml objects:");
+#if DEBUG
+            DebugLogger.Log("[InteropExtractor] Extracted OpenXml objects:");
             foreach (var tuple in orderedRelIdsWithPos)
             {
-                Console.WriteLine($"  relId={tuple.relId}, paraIdx={tuple.paraIdx}, runIdx={tuple.runIdx}, charPos={tuple.charPos}");
+                DebugLogger.Log($"  relId={tuple.relId}, paraIdx={tuple.paraIdx}, runIdx={tuple.runIdx}, charPos={tuple.charPos}");
             }
+#endif
 
             var relIdToFile = new Dictionary<string, string>();
             var relIdToOleClass = new Dictionary<string, string>();
@@ -203,7 +209,9 @@ public class InteropEmbeddedExtractor
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[InteropExtractor] OpenXml extraction error: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[InteropExtractor] OpenXml extraction error: {ex.Message}");
+#endif
             }
 
 
@@ -227,7 +235,9 @@ public class InteropEmbeddedExtractor
                                 {
                                     rel.OpenXmlPart.GetStream().CopyTo(fs);
                                 }
-                                Console.WriteLine($"[InteropExtractor] Extracted orphaned Excel: {outPath}");
+#if DEBUG
+                                DebugLogger.Log($"[InteropExtractor] Extracted orphaned Excel: {outPath}");
+#endif
                             }
                             // Only add to results if not already present
                             if (!results.Any(r => Path.GetFileName(r.FilePath).Equals(fileName, StringComparison.OrdinalIgnoreCase)))
@@ -243,7 +253,9 @@ public class InteropEmbeddedExtractor
                                     RunIndex = -1,
                                     CharPosition = -1
                                 });
-                                Console.WriteLine($"[InteropExtractor] Added orphaned Excel to results: {fileName}");
+#if DEBUG
+                                DebugLogger.Log($"[InteropExtractor] Added orphaned Excel to results: {fileName}");
+#endif
                             }
                         }
                     }
@@ -251,15 +263,19 @@ public class InteropEmbeddedExtractor
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[InteropExtractor] Error extracting orphaned Excel: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[InteropExtractor] Error extracting orphaned Excel: {ex.Message}");
+#endif
             }
 
             // After results are populated
-            Console.WriteLine("[InteropExtractor] Results after OpenXml extraction:");
+#if DEBUG
+            DebugLogger.Log("[InteropExtractor] Results after OpenXml extraction:");
             foreach (var obj in results)
             {
-                Console.WriteLine($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName}, ProgId={obj.ProgId}, ParaIdx={obj.ParagraphIndex}, RunIdx={obj.RunIndex}, CharPos={obj.CharPosition}");
+                DebugLogger.Log($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName}, ProgId={obj.ProgId}, ParaIdx={obj.ParagraphIndex}, RunIdx={obj.RunIndex}, CharPos={obj.CharPosition}");
             }
+#endif
 
             // --- 3. Extract real files from .bin using OlePackageExtractor ---
             var binObjs = results.Where(obj => obj.FilePath.EndsWith(".bin", StringComparison.OrdinalIgnoreCase)).ToList();
@@ -301,7 +317,9 @@ public class InteropEmbeddedExtractor
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[InteropExtractor] OLE bin extraction error: {ex.Message}");
+#if DEBUG
+                    DebugLogger.Log($"[InteropExtractor] OLE bin extraction error: {ex.Message}");
+#endif
                 }
             }
             // Replace .bin objects with real extracted files
@@ -320,7 +338,9 @@ public class InteropEmbeddedExtractor
                     wordApp = new Application { Visible = false, DisplayAlerts = WdAlertLevel.wdAlertsNone };
                     doc = wordApp.Documents.Open(docxPath, ReadOnly: true, Visible: false);
                     var inlineShapeMeta = new List<(int Index, string ProgId, int Page, int CharPosition, string FileName)>();
-                    Console.WriteLine("[InteropExtractor] InlineShapes from Interop:");
+#if DEBUG
+                    DebugLogger.Log("[InteropExtractor] InlineShapes from Interop:");
+#endif
                     for (int idx = 1; idx <= doc.InlineShapes.Count; idx++)
                     {
                         var shape = doc.InlineShapes[idx];
@@ -344,19 +364,27 @@ public class InteropEmbeddedExtractor
                         }
                         catch { }
                         inlineShapeMeta.Add((idx, progId, page, charPos, fileName));
-                        Console.WriteLine($"  [{idx}] File={fileName}, ProgId={progId}, CharPos={charPos}, Page={page}");
+#if DEBUG
+                        DebugLogger.Log($"  [{idx}] File={fileName}, ProgId={progId}, CharPos={charPos}, Page={page}");
+#endif
                     }
                     // Filter out bogus InlineShapes (empty ProgId or file name)
                     var validInlineShapes = inlineShapeMeta
                         .Where(meta => !string.IsNullOrWhiteSpace(meta.ProgId) && meta.ProgId != "" && meta.ProgId != null)
                         .ToList();
-                    Console.WriteLine($"[InteropExtractor] Valid InlineShapes for mapping: {validInlineShapes.Count}");
+#if DEBUG
+                    DebugLogger.Log($"[InteropExtractor] Valid InlineShapes for mapping: {validInlineShapes.Count}");
+#endif
                     foreach (var meta in validInlineShapes)
                     {
-                        Console.WriteLine($"  [Valid] Index={meta.Index}, ProgId={meta.ProgId}, FileName={meta.FileName}, Page={meta.Page}");
+#if DEBUG
+                        DebugLogger.Log($"  [Valid] Index={meta.Index}, ProgId={meta.ProgId}, FileName={meta.FileName}, Page={meta.Page}");
+#endif
                     }
                     // Mapping debug
-                    Console.WriteLine("[InteropExtractor] Mapping results:");
+#if DEBUG
+                    DebugLogger.Log("[InteropExtractor] Mapping results:");
+#endif
                     var usedInlineShapes = new HashSet<int>();
 
                     // Split results into in-flow and orphaned
@@ -396,12 +424,16 @@ public class InteropEmbeddedExtractor
                             var meta = validInlineShapes[matchedIdx];
                             obj.PageNumber = meta.Page > 0 ? meta.Page : (meta.Index);
                             usedInlineShapes.Add(matchedIdx);
-                            Console.WriteLine($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} mapped to InlineShape[{meta.Index}] Page={obj.PageNumber}");
+#if DEBUG
+                            DebugLogger.Log($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} mapped to InlineShape[{meta.Index}] Page={obj.PageNumber}");
+#endif
                         }
                         else
                         {
                             obj.PageNumber = 1;
-                            Console.WriteLine($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} could not be mapped to any InlineShape");
+#if DEBUG
+                            DebugLogger.Log($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} could not be mapped to any InlineShape");
+#endif
                         }
                     }
                     // 2. Map orphaned objects to any remaining InlineShapes
@@ -432,12 +464,16 @@ public class InteropEmbeddedExtractor
                             var meta = validInlineShapes[matchedIdx];
                             obj.PageNumber = meta.Page > 0 ? meta.Page : (meta.Index);
                             usedInlineShapes.Add(matchedIdx);
-                            Console.WriteLine($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} mapped to InlineShape[{meta.Index}] Page={obj.PageNumber}");
+#if DEBUG
+                            DebugLogger.Log($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} mapped to InlineShape[{meta.Index}] Page={obj.PageNumber}");
+#endif
                         }
                         else
                         {
                             obj.PageNumber = 1;
-                            Console.WriteLine($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} could not be mapped to any InlineShape");
+#if DEBUG
+                            DebugLogger.Log($"  [{obj.DocumentOrderIndex}] File={obj.ExtractedFileName} could not be mapped to any InlineShape");
+#endif
                         }
                     }
                 }
@@ -449,7 +485,9 @@ public class InteropEmbeddedExtractor
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"[InteropExtractor] Page mapping failed: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[InteropExtractor] Page mapping failed: {ex.Message}");
+#endif
                 for (int i = 0; i < results.Count; i++)
                 {
                     results[i].PageNumber = i + 1;

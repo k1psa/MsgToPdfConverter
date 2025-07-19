@@ -77,7 +77,9 @@ namespace MsgToPdfConverter
             var inputFile = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "PdfAppendTestInput.txt");
             if (!File.Exists(inputFile))
             {
-                Console.WriteLine($"Input file not found: {inputFile}");
+#if DEBUG
+                DebugLogger.Log($"Input file not found: {inputFile}");
+#endif
                 return;
             }
             var lines = File.ReadAllLines(inputFile);
@@ -91,7 +93,9 @@ namespace MsgToPdfConverter
             }
             if (filtered.Count < 3)
             {
-                Console.WriteLine("Please provide at least two input PDF paths and one output PDF path in PdfAppendTestInput.txt");
+#if DEBUG
+                DebugLogger.Log("Please provide at least two input PDF paths and one output PDF path in PdfAppendTestInput.txt");
+#endif
                 return;
             }
             // If the last input before output is a JPG, convert it to PDF and use that in the merge
@@ -106,20 +110,28 @@ namespace MsgToPdfConverter
                 if (File.Exists(lastInput))
                 {
                     CreatePdfFromJpg(lastInput, jpgPdf);
-                    Console.WriteLine($"Created PDF from JPG: {jpgPdf}");
+#if DEBUG
+                    DebugLogger.Log($"Created PDF from JPG: {jpgPdf}");
+#endif
                     pdfsToMerge[pdfsToMerge.Count - 1] = jpgPdf;
                 }
                 else
                 {
-                    Console.WriteLine($"JPG file not found: {lastInput}");
+#if DEBUG
+                    DebugLogger.Log($"JPG file not found: {lastInput}");
+#endif
                     pdfsToMerge.RemoveAt(pdfsToMerge.Count - 1);
                 }
             }
-            Console.WriteLine("Merging the following PDFs:");
-            foreach (var f in pdfsToMerge) Console.WriteLine(f);
-            Console.WriteLine($"Output: {output}");
+#if DEBUG
+            DebugLogger.Log("Merging the following PDFs:");
+            foreach (var f in pdfsToMerge) DebugLogger.Log(f);
+            DebugLogger.Log($"Output: {output}");
+#endif
             AppendPdfs(pdfsToMerge, output);
-            Console.WriteLine($"Merged PDF created at: {output}");
+#if DEBUG
+            DebugLogger.Log($"Merged PDF created at: {output}");
+#endif
         }
 
         // Helper to create a simple one-page PDF with text
@@ -158,14 +170,20 @@ namespace MsgToPdfConverter
             if (File.Exists(jpgPath))
             {
                 CreatePdfFromJpg(jpgPath, pdfPath);
-                Console.WriteLine($"Created PDF from JPG: {pdfPath}");
+#if DEBUG
+                DebugLogger.Log($"Created PDF from JPG: {pdfPath}");
+#endif
             }
             else
             {
-                Console.WriteLine($"JPG file not found: {jpgPath}");
+#if DEBUG
+                DebugLogger.Log($"JPG file not found: {jpgPath}");
+#endif
             }
             RunTest();
-            Console.WriteLine("Press any key to exit...");
+#if DEBUG
+            DebugLogger.Log("Press any key to exit...");
+#endif
             Console.ReadKey();
         }
     }

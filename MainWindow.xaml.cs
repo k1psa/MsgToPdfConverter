@@ -29,13 +29,13 @@ namespace MsgToPdfConverter
                 {
                     // Fallback to default if icon.ico is missing
                     _trayIcon.Icon = System.Drawing.SystemIcons.Application;
-                    Console.WriteLine($"[DEBUG] icon.ico not found at {iconPath}, using default icon.");
+  
                 }
             }
-            catch (Exception ex)
+            catch
             {
                 _trayIcon.Icon = System.Drawing.SystemIcons.Application;
-                Console.WriteLine($"[DEBUG] Failed to load icon.ico: {ex.Message}");
+           
             }
             _trayIcon.Visible = false;
             _trayIcon.DoubleClick += TrayIcon_DoubleClick;
@@ -64,7 +64,7 @@ namespace MsgToPdfConverter
         // Drag-and-drop event handlers delegate to ViewModel
         private void FilesListBox_Drop(object sender, DragEventArgs e)
         {
-            Console.WriteLine("[DEBUG] FilesListBox_Drop event triggered");
+      
             
             var listBox = sender as System.Windows.Controls.ListBox;
             var droppedData = e.Data.GetData(typeof(string)) as string;
@@ -77,7 +77,7 @@ namespace MsgToPdfConverter
             
             if (isExternalDrop)
             {
-                Console.WriteLine("[DEBUG] External drop detected, calling ViewModel.HandleDrop");
+         
                 _viewModel.HandleDrop(e.Data);
                 return;
             }
@@ -141,7 +141,7 @@ namespace MsgToPdfConverter
             var listBox = sender as System.Windows.Controls.ListBox;
             if (e.Key == System.Windows.Input.Key.Delete && listBox != null && listBox.SelectedItems.Count > 0)
             {
-                Console.WriteLine($"FilesListBox_KeyDown: Deleting {listBox.SelectedItems.Count} items");
+          
                 var items = new System.Collections.Generic.List<string>();
                 foreach (var item in listBox.SelectedItems)
                 {

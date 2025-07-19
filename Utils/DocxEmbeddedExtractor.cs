@@ -24,14 +24,22 @@ namespace MsgToPdfConverter.Utils
         /// <returns>List of embedded files with their data and position</returns>
         public static List<EmbeddedFileInfo> ExtractEmbeddedFiles(string docxPath)
         {
-            Console.WriteLine($"[DEBUG] ExtractEmbeddedFiles called for: {docxPath}");
+
             var result = new List<EmbeddedFileInfo>();
             using (var doc = WordprocessingDocument.Open(docxPath, false))
             {
                 var mainPart = doc.MainDocumentPart;
-                if (mainPart == null) { Console.WriteLine("[DEBUG] mainPart is null"); return result; }
+                #if DEBUG
+                if (mainPart == null) { DebugLogger.Log("[DEBUG] mainPart is null"); return result; }
+                #else
+                if (mainPart == null) { return result; }
+                #endif
                 var body = mainPart.Document.Body;
-                if (body == null) { Console.WriteLine("[DEBUG] body is null"); return result; }
+                #if DEBUG
+                if (body == null) { DebugLogger.Log("[DEBUG] body is null"); return result; }
+                #else
+                if (body == null) { return result; }
+                #endif
                 int paraIndex = 0;
                 foreach (var para in body.Elements<Paragraph>())
                 {
@@ -63,7 +71,9 @@ namespace MsgToPdfConverter.Utils
                                                     Data = oleInfo.Data,
                                                     ParagraphIndex = paraIndex
                                                 });
-                                                Console.WriteLine($"[DEBUG] Extracted OLE-embedded file: {oleInfo.FileName}, ContentType: {oleInfo.ContentType}, ParagraphIndex: {paraIndex}");
+                                                #if DEBUG
+                                                DebugLogger.Log($"[DEBUG] Extracted OLE-embedded file: {oleInfo.FileName}, ContentType: {oleInfo.ContentType}, ParagraphIndex: {paraIndex}");
+                                                #endif
                                             }
                                             else
                                             {
@@ -74,7 +84,9 @@ namespace MsgToPdfConverter.Utils
                                                     Data = ms.ToArray(),
                                                     ParagraphIndex = paraIndex
                                                 });
-                                                Console.WriteLine($"[DEBUG] Extracted EmbeddedPackagePart (raw): {pkgPart.Uri}, ContentType: {pkgPart.ContentType}, ParagraphIndex: {paraIndex}");
+                                                #if DEBUG
+                                                DebugLogger.Log($"[DEBUG] Extracted EmbeddedPackagePart (raw): {pkgPart.Uri}, ContentType: {pkgPart.ContentType}, ParagraphIndex: {paraIndex}");
+                                                #endif
                                             }
                                         }
                                     }
@@ -94,7 +106,9 @@ namespace MsgToPdfConverter.Utils
                                                     Data = oleInfo.Data,
                                                     ParagraphIndex = paraIndex
                                                 });
-                                                Console.WriteLine($"[DEBUG] Extracted OLE-embedded file: {oleInfo.FileName}, ContentType: {oleInfo.ContentType}, ParagraphIndex: {paraIndex}");
+                                                #if DEBUG
+                                                DebugLogger.Log($"[DEBUG] Extracted OLE-embedded file: {oleInfo.FileName}, ContentType: {oleInfo.ContentType}, ParagraphIndex: {paraIndex}");
+                                                #endif
                                             }
                                             else
                                             {
@@ -105,7 +119,9 @@ namespace MsgToPdfConverter.Utils
                                                     Data = ms.ToArray(),
                                                     ParagraphIndex = paraIndex
                                                 });
-                                                Console.WriteLine($"[DEBUG] Extracted EmbeddedObjectPart (raw): {objPart.Uri}, ContentType: {objPart.ContentType}, ParagraphIndex: {paraIndex}");
+                                                #if DEBUG
+                                                DebugLogger.Log($"[DEBUG] Extracted EmbeddedObjectPart (raw): {objPart.Uri}, ContentType: {objPart.ContentType}, ParagraphIndex: {paraIndex}");
+                                                #endif
                                             }
                                         }
                                     }
@@ -134,7 +150,9 @@ namespace MsgToPdfConverter.Utils
                                                 Data = oleInfo.Data,
                                                 ParagraphIndex = paraIndex
                                             });
-                                            Console.WriteLine($"[DEBUG] Extracted OLE-embedded file (VML): {oleInfo.FileName}, ContentType: {oleInfo.ContentType}, ParagraphIndex: {paraIndex}");
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DEBUG] Extracted OLE-embedded file (VML): {oleInfo.FileName}, ContentType: {oleInfo.ContentType}, ParagraphIndex: {paraIndex}");
+                                            #endif
                                         }
                                         else
                                         {
@@ -145,7 +163,9 @@ namespace MsgToPdfConverter.Utils
                                                 Data = ms.ToArray(),
                                                 ParagraphIndex = paraIndex
                                             });
-                                            Console.WriteLine($"[DEBUG] Extracted EmbeddedPackagePart (VML, raw): {pkgPart.Uri}, ContentType: {pkgPart.ContentType}, ParagraphIndex: {paraIndex}");
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DEBUG] Extracted EmbeddedPackagePart (VML, raw): {pkgPart.Uri}, ContentType: {pkgPart.ContentType}, ParagraphIndex: {paraIndex}");
+                                            #endif
                                         }
                                     }
                                 }
@@ -164,7 +184,9 @@ namespace MsgToPdfConverter.Utils
                                                 Data = oleInfo.Data,
                                                 ParagraphIndex = paraIndex
                                             });
-                                            Console.WriteLine($"[DEBUG] Extracted OLE-embedded file (VML): {oleInfo.FileName}, ContentType: {oleInfo.ContentType}, ParagraphIndex: {paraIndex}");
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DEBUG] Extracted OLE-embedded file (VML): {oleInfo.FileName}, ContentType: {oleInfo.ContentType}, ParagraphIndex: {paraIndex}");
+                                            #endif
                                         }
                                         else
                                         {
@@ -175,7 +197,9 @@ namespace MsgToPdfConverter.Utils
                                                 Data = ms.ToArray(),
                                                 ParagraphIndex = paraIndex
                                             });
-                                            Console.WriteLine($"[DEBUG] Extracted EmbeddedObjectPart (VML, raw): {objPart.Uri}, ContentType: {objPart.ContentType}, ParagraphIndex: {paraIndex}");
+                                            #if DEBUG
+                                            DebugLogger.Log($"[DEBUG] Extracted EmbeddedObjectPart (VML, raw): {objPart.Uri}, ContentType: {objPart.ContentType}, ParagraphIndex: {paraIndex}");
+                                            #endif
                                         }
                                     }
                                 }
@@ -202,7 +226,9 @@ namespace MsgToPdfConverter.Utils
                                     Data = oleInfo.Data,
                                     ParagraphIndex = -1
                                 });
-                                Console.WriteLine($"[DEBUG] Extracted OLE-embedded file (unreferenced): {oleInfo.FileName}, ContentType: {oleInfo.ContentType}, ParagraphIndex: -1");
+                                #if DEBUG
+                                DebugLogger.Log($"[DEBUG] Extracted OLE-embedded file (unreferenced): {oleInfo.FileName}, ContentType: {oleInfo.ContentType}, ParagraphIndex: -1");
+                                #endif
                             }
                             else
                             {
@@ -213,13 +239,18 @@ namespace MsgToPdfConverter.Utils
                                     Data = ms.ToArray(),
                                     ParagraphIndex = -1
                                 });
-                                Console.WriteLine($"[DEBUG] Extracted EmbeddedPackagePart (unreferenced, raw): {pkgPart.Uri}, ContentType: {pkgPart.ContentType}, ParagraphIndex: -1");
+                                #if DEBUG
+                                DebugLogger.Log($"[DEBUG] Extracted EmbeddedPackagePart (unreferenced, raw): {pkgPart.Uri}, ContentType: {pkgPart.ContentType}, ParagraphIndex: -1");
+                                #endif
                             }
                         }
                     }
                 }
             }
-            Console.WriteLine($"[DEBUG] ExtractEmbeddedFiles returning {result.Count} embedded files");
+         
+            #if DEBUG
+            DebugLogger.Log($"[DEBUG] ExtractEmbeddedFiles returning {result.Count} embedded files");
+            #endif
             return result;
         }
 
@@ -232,20 +263,22 @@ namespace MsgToPdfConverter.Utils
             {
                 var mainPart = doc.MainDocumentPart;
                 if (mainPart == null) return;
-                Console.WriteLine($"[DEBUG] Parts in {docxPath}:");
+                #if DEBUG
+                DebugLogger.Log($"[DEBUG] Parts in {docxPath}:");
                 foreach (var part in mainPart.Parts)
                 {
-                    Console.WriteLine($"  [Part] URI: {part.OpenXmlPart.Uri}, ContentType: {part.OpenXmlPart.ContentType}");
+                    DebugLogger.Log($"  [Part] URI: {part.OpenXmlPart.Uri}, ContentType: {part.OpenXmlPart.ContentType}");
                 }
                 // Also log EmbeddedPackageParts and EmbeddedObjectParts
                 foreach (var pkg in mainPart.EmbeddedPackageParts)
                 {
-                    Console.WriteLine($"  [EmbeddedPackagePart] URI: {pkg.Uri}, ContentType: {pkg.ContentType}");
+                    DebugLogger.Log($"  [EmbeddedPackagePart] URI: {pkg.Uri}, ContentType: {pkg.ContentType}");
                 }
                 foreach (var obj in mainPart.EmbeddedObjectParts)
                 {
-                    Console.WriteLine($"  [EmbeddedObjectPart] URI: {obj.Uri}, ContentType: {obj.ContentType}");
+                    DebugLogger.Log($"  [EmbeddedObjectPart] URI: {obj.Uri}, ContentType: {obj.ContentType}");
                 }
+                #endif
             }
         }
     }

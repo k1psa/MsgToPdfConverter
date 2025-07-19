@@ -10,21 +10,29 @@ namespace MsgToPdfConverter
         {
             if (!File.Exists(testFile))
             {
-                Console.WriteLine($"Test file {testFile} not found");
+#if DEBUG
+                DebugLogger.Log($"Test file {testFile} not found");
+#endif
                 return;
             }
 
-            Console.WriteLine($"Testing extraction from {testFile}");
-            Console.WriteLine("========================================");
+            #if DEBUG
+            DebugLogger.Log($"Testing extraction from {testFile}");
+            DebugLogger.Log("========================================");
+            #endif
 
             try
             {
                 string tempDir = Path.Combine(Path.GetTempPath(), "MsgToPdf_Test_" + Guid.NewGuid());
                 Directory.CreateDirectory(tempDir);
-                Console.WriteLine($"Temp directory: {tempDir}");
+                #if DEBUG
+                DebugLogger.Log($"Temp directory: {tempDir}");
+                #endif
 
                 var embedded = InteropEmbeddedExtractor.ExtractEmbeddedObjects(testFile, tempDir);
-                Console.WriteLine($"Total extracted objects: {embedded.Count}");
+                #if DEBUG
+                DebugLogger.Log($"Total extracted objects: {embedded.Count}");
+                #endif
 
                 foreach (var obj in embedded)
                 {
@@ -34,16 +42,22 @@ namespace MsgToPdfConverter
                     {
                         fileSize = new FileInfo(obj.FilePath).Length;
                     }
-                    Console.WriteLine($"- {fileName} (Page {obj.PageNumber}, OLE Class: {obj.OleClass}) - {fileSize} bytes");
+#if DEBUG
+                    DebugLogger.Log($"- {fileName} (Page {obj.PageNumber}, OLE Class: {obj.OleClass}) - {fileSize} bytes");
+#endif
                 }
 
-                Console.WriteLine("\nExtraction test completed!");
-                Console.WriteLine($"Files saved in: {tempDir}");
+                #if DEBUG
+                DebugLogger.Log("\nExtraction test completed!");
+                DebugLogger.Log($"Files saved in: {tempDir}");
+                #endif
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Test failed: {ex.Message}");
-                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+#if DEBUG
+                DebugLogger.Log($"Test failed: {ex.Message}");
+                DebugLogger.Log($"Stack trace: {ex.StackTrace}");
+#endif
             }
         }
     }

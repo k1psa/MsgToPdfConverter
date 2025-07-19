@@ -27,9 +27,11 @@ namespace MsgToPdfConverter.Services
                             double y = 100;
                             gfx.DrawImage(img, x, y, imgWidth, imgHeight);
                         }
-                        catch (Exception ex)
+                        catch (Exception)
                         {
-                            Console.WriteLine($"[IMG2PDF] Failed to load image: {imagePath} - {ex.Message}");
+#if DEBUG
+                            DebugLogger.Log($"[IMG2PDF] Failed to load image: {imagePath} - error");
+#endif
                         }
                     }
                     var font = new PdfSharp.Drawing.XFont("Arial", 16);
@@ -128,9 +130,9 @@ namespace MsgToPdfConverter.Services
                     }
                 }
             }
-            catch (Exception ex)
+            catch (Exception)
             {
-                Console.WriteLine($"Error creating image PDF: {ex.Message}");
+               
                 // Fallback to text-only PDF
                 AddHeaderPdf(pdfPath, headerText ?? "Attachment Hierarchy");
             }

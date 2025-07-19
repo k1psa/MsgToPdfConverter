@@ -179,7 +179,9 @@ namespace MsgToPdfConverter.Services
         public OutlookImportResult ExtractChildMsgFromDragDrop(IDataObject data, string outputFolder, Func<string, string> sanitizeFileName, string expectedFileName)
         {
             var result = new OutlookImportResult();
-            Console.WriteLine("[OutlookImportService] Starting child MSG extraction (hash-based)...");
+#if DEBUG
+            DebugLogger.Log("[OutlookImportService] Starting child MSG extraction (hash-based)...");
+#endif
             try
             {
                 // 1. Get hash of dragged MSG data
@@ -190,43 +192,60 @@ namespace MsgToPdfConverter.Services
                 object fileContents0Obj = null;
                 bool fileContentsPresent = data.GetDataPresent("FileContents");
                 bool fileContents0Present = data.GetDataPresent("FileContents0");
-                Console.WriteLine($"[OutlookImportService] FileContents present: {fileContentsPresent}");
-                Console.WriteLine($"[OutlookImportService] FileContents0 present: {fileContents0Present}");
+
                 if (fileContentsPresent)
                 {
                     fileContentsObj = data.GetData("FileContents");
                     if (fileContentsObj == null)
                     {
-                        Console.WriteLine("[OutlookImportService] FileContents value is null");
+#if DEBUG
+                        DebugLogger.Log("[OutlookImportService] FileContents value is null");
+#endif
                     }
                     else
                     {
-                        Console.WriteLine($"[OutlookImportService] FileContents type: {fileContentsObj.GetType().FullName}");
+#if DEBUG
+                        DebugLogger.Log($"[OutlookImportService] FileContents type: {fileContentsObj.GetType().FullName}");
+#endif
                         try
                         {
                             if (fileContentsObj is MemoryStream ms)
                             {
-                                Console.WriteLine($"[OutlookImportService] FileContents MemoryStream length: {ms.Length}");
+
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] FileContents MemoryStream length: {ms.Length}");
+#endif
                                 draggedStream = ms;
                             }
                             else if (fileContentsObj is Stream s)
                             {
-                                Console.WriteLine($"[OutlookImportService] FileContents Stream length: {s.Length}");
+
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] FileContents Stream length: {s.Length}");
+#endif
                                 draggedStream = s;
                             }
                             else if (fileContentsObj is byte[] arr)
                             {
-                                Console.WriteLine($"[OutlookImportService] FileContents byte[] length: {arr.Length}");
+
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] FileContents byte[] length: {arr.Length}");
+#endif
                                 draggedBytes = arr;
                             }
                             else
                             {
-                                Console.WriteLine("[OutlookImportService] FileContents is of unknown type");
+
+#if DEBUG
+                                DebugLogger.Log("[OutlookImportService] FileContents is of unknown type");
+#endif
                             }
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[OutlookImportService] Exception reading FileContents: {ex.Message}");
+#if DEBUG
+                            DebugLogger.Log($"[OutlookImportService] Exception reading FileContents: {ex.Message}");
+#endif
                         }
                     }
                 }
@@ -235,36 +254,54 @@ namespace MsgToPdfConverter.Services
                     fileContents0Obj = data.GetData("FileContents0");
                     if (fileContents0Obj == null)
                     {
-                        Console.WriteLine("[OutlookImportService] FileContents0 value is null");
+#if DEBUG
+                        DebugLogger.Log("[OutlookImportService] FileContents0 value is null");
+#endif
                     }
                     else
                     {
-                        Console.WriteLine($"[OutlookImportService] FileContents0 type: {fileContents0Obj.GetType().FullName}");
+#if DEBUG
+                        DebugLogger.Log($"[OutlookImportService] FileContents0 type: {fileContents0Obj.GetType().FullName}");
+#endif
                         try
                         {
                             if (fileContents0Obj is MemoryStream ms)
                             {
-                                Console.WriteLine($"[OutlookImportService] FileContents0 MemoryStream length: {ms.Length}");
+
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] FileContents0 MemoryStream length: {ms.Length}");
+#endif
                                 draggedStream = ms;
                             }
                             else if (fileContents0Obj is Stream s)
                             {
-                                Console.WriteLine($"[OutlookImportService] FileContents0 Stream length: {s.Length}");
+
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] FileContents0 Stream length: {s.Length}");
+#endif
                                 draggedStream = s;
                             }
                             else if (fileContents0Obj is byte[] arr)
                             {
-                                Console.WriteLine($"[OutlookImportService] FileContents0 byte[] length: {arr.Length}");
+
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] FileContents0 byte[] length: {arr.Length}");
+#endif
                                 draggedBytes = arr;
                             }
                             else
                             {
-                                Console.WriteLine("[OutlookImportService] FileContents0 is of unknown type");
+
+#if DEBUG
+                                DebugLogger.Log("[OutlookImportService] FileContents0 is of unknown type");
+#endif
                             }
                         }
                         catch (Exception ex)
                         {
-                            Console.WriteLine($"[OutlookImportService] Exception reading FileContents0: {ex.Message}");
+#if DEBUG
+                            DebugLogger.Log($"[OutlookImportService] Exception reading FileContents0: {ex.Message}");
+#endif
                         }
                     }
                 }
@@ -293,7 +330,9 @@ namespace MsgToPdfConverter.Services
                     if (inspector != null && inspector.CurrentItem is Microsoft.Office.Interop.Outlook.MailItem mailItemInspector)
                     {
                         parentMailItem = mailItemInspector;
-                        Console.WriteLine("[OutlookImportService] Using ActiveInspector for child MSG extraction.");
+#if DEBUG
+                        DebugLogger.Log("[OutlookImportService] Using ActiveInspector for child MSG extraction.");
+#endif
                     }
                     else
                     {
@@ -304,7 +343,9 @@ namespace MsgToPdfConverter.Services
                             if (selectedItem is Microsoft.Office.Interop.Outlook.MailItem mailItemExplorer)
                             {
                                 parentMailItem = mailItemExplorer;
-                                Console.WriteLine("[OutlookImportService] Using ActiveExplorer selection for child MSG extraction.");
+#if DEBUG
+                                DebugLogger.Log("[OutlookImportService] Using ActiveExplorer selection for child MSG extraction.");
+#endif
                             }
                         }
                     }
@@ -331,7 +372,10 @@ namespace MsgToPdfConverter.Services
                                         {
                                             var hash = sha256.ComputeHash(fileStream);
                                             string attHash = BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
-                                            Console.WriteLine($"[OutlookImportService] Attachment '{attName}' hash: {attHash}");
+
+#if DEBUG
+                                            DebugLogger.Log($"[OutlookImportService] Attachment '{attName}' hash: {attHash}");
+#endif
                                             if (attHash == draggedMsgHash)
                                             {
                                                 // Found the correct attachment
@@ -348,7 +392,10 @@ namespace MsgToPdfConverter.Services
                                                 }
                                                 File.Copy(tempMsgPath, destPath, true);
                                                 result.ExtractedFiles.Add(destPath);
-                                                Console.WriteLine($"[OutlookImportService] Successfully saved child MSG (hash match): {destPath}");
+
+#if DEBUG
+                                                DebugLogger.Log($"[OutlookImportService] Successfully saved child MSG (hash match): {destPath}");
+#endif
                                                 found = true;
                                                 break;
                                             }
@@ -356,7 +403,10 @@ namespace MsgToPdfConverter.Services
                                     }
                                     catch (Exception ex)
                                     {
-                                        Console.WriteLine($"[OutlookImportService] Error saving/checking attachment '{attName}': {ex.Message}");
+
+#if DEBUG
+                                        DebugLogger.Log($"[OutlookImportService] Error saving/checking attachment '{attName}': {ex.Message}");
+#endif
                                     }
                                     finally
                                     {
@@ -398,12 +448,17 @@ namespace MsgToPdfConverter.Services
                                         }
                                         File.Copy(tempMsgPath, destPath, true);
                                         result.ExtractedFiles.Add(destPath);
-                                        Console.WriteLine($"[OutlookImportService] Fallback: saved child MSG by name: {destPath}");
+
+#if DEBUG
+                                        DebugLogger.Log($"[OutlookImportService] Fallback: saved child MSG by name: {destPath}");
+#endif
                                         extractedCount++;
                                     }
                                     catch (Exception ex)
                                     {
-                                        Console.WriteLine($"[OutlookImportService] Error saving fallback attachment '{attName}': {ex.Message}");
+#if DEBUG
+                                        DebugLogger.Log($"[OutlookImportService] Error saving fallback attachment '{attName}': {ex.Message}");
+#endif
                                     }
                                     finally
                                     {
@@ -414,7 +469,10 @@ namespace MsgToPdfConverter.Services
                             }
                             if (extractedCount > 1)
                             {
-                                Console.WriteLine($"[OutlookImportService] Fallback: Multiple child MSGs with same name extracted: {extractedCount}");
+
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] Fallback: Multiple child MSGs with same name extracted: {extractedCount}");
+#endif
                             }
                             if (extractedCount == 0)
                             {
@@ -436,7 +494,10 @@ namespace MsgToPdfConverter.Services
             {
                 result.SkippedFiles.Add("Child MSG could not be extracted: " + ex.Message);
             }
-            Console.WriteLine($"[OutlookImportService] Child MSG extraction complete. Found {result.ExtractedFiles.Count} files, skipped {result.SkippedFiles.Count}");
+
+#if DEBUG
+            DebugLogger.Log($"[OutlookImportService] Child MSG extraction complete. Found {result.ExtractedFiles.Count} files, skipped {result.SkippedFiles.Count}");
+#endif
             return result;
         }
 
