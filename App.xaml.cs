@@ -83,6 +83,11 @@ namespace MsgToPdfConverter
             // (Removed diagnostic logging)
 
             var pendingFiles = new System.Collections.Concurrent.ConcurrentQueue<string>();
+            // Buffer initial file/folder argument if present (for first launch via context menu)
+            if (e.Args != null && e.Args.Length == 1 && !string.IsNullOrWhiteSpace(e.Args[0]))
+            {
+                pendingFiles.Enqueue(e.Args[0]);
+            }
             singleInstance.FileReceived += (file) =>
             {
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
