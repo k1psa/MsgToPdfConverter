@@ -18,6 +18,11 @@ namespace MsgToPdfConverter.Utils
                 using (var key = Registry.CurrentUser.CreateSubKey(MenuKeyPath))
                 {
                     key.SetValue(null, MenuText);
+                    // Set icon for menu item
+                    key.SetValue("Icon", exePath);
+                    // Ensure 'Extended' value is NOT set so it appears in the main context menu
+                    if (key.GetValue("Extended") != null)
+                        key.DeleteValue("Extended");
                 }
                 using (var key = Registry.CurrentUser.CreateSubKey(CommandKeyPath))
                 {
