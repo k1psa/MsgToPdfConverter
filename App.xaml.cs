@@ -80,12 +80,7 @@ namespace MsgToPdfConverter
             }
 
             // Diagnostic logging for single-instance issues
-            try
-            {
-                string logPath = System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Desktop), "MsgToPdfConverter_debuglog.txt");
-                System.IO.File.AppendAllText(logPath, $"[{DateTime.Now}] Entering normal WPF mode. PID: {System.Diagnostics.Process.GetCurrentProcess().Id}\n");
-            }
-            catch { }
+            // (Removed diagnostic logging)
 
             var pendingFiles = new System.Collections.Concurrent.ConcurrentQueue<string>();
             singleInstance.FileReceived += (file) =>
