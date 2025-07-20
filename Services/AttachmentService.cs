@@ -1872,36 +1872,34 @@ namespace MsgToPdfConverter.Services
             else
             {
                 int total = 1;
-                // For DOCX/XLSX, count embedded files in 'word/embeddings/' or 'xl/embeddings/'
                 if (ext == ".docx" || ext == ".xlsx")
                 {
+                    int embedCount = 0;
                     try
                     {
                         using (var archive = System.IO.Compression.ZipFile.OpenRead(filePath))
                         {
                             foreach (var entry in archive.Entries)
                             {
-                                if ((ext == ".docx" && entry.FullName.StartsWith("word/embeddings/", System.StringComparison.OrdinalIgnoreCase)) ||
-                                    (ext == ".xlsx" && entry.FullName.StartsWith("xl/embeddings/", System.StringComparison.OrdinalIgnoreCase)))
+                                if ((ext == ".docx" && entry.FullName.StartsWith("word/embeddings/", StringComparison.OrdinalIgnoreCase)) ||
+                                    (ext == ".xlsx" && entry.FullName.StartsWith("xl/embeddings/", StringComparison.OrdinalIgnoreCase)))
                                 {
-                                    string embeddedExt = System.IO.Path.GetExtension(entry.Name).ToLowerInvariant();
-                                    if (embeddedExt == ".doc" || embeddedExt == ".docx" || embeddedExt == ".xls" || embeddedExt == ".xlsx")
-                                    {
-                                        total++;
-                                    }
+                                    // Count all files in the embeddings folder, regardless of extension (including .bin)
+                                    embedCount++;
                                 }
                             }
                         }
                     }
                     catch { }
+                    total = 1 + 2 * embedCount;
                 }
-                // Also count any other embedded files found by DocxEmbeddedExtractor
-                if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
+                else if (ext == ".doc" || ext == ".xls")
                 {
+                    // Only count embedded files using DocxEmbeddedExtractor for doc/xls
                     try
                     {
                         var embeddedFiles = MsgToPdfConverter.Utils.DocxEmbeddedExtractor.ExtractEmbeddedFiles(filePath);
-                        if (embeddedFiles != null)
+                        if (embeddedFiles != null && embeddedFiles.Count > 0)
                             total += embeddedFiles.Count;
                     }
                     catch { }
