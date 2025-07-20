@@ -1911,7 +1911,7 @@ namespace MsgToPdfConverter.Services
         /// <summary>
         /// Extracts embedded OLE/Package objects from a DOCX/XLSX file. Progress ticks happen during PDF insertion.
         /// </summary>
-private int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tempDir, List<string> allTempFiles, List<string> allPdfFiles, Action progressTick)
+        private int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tempDir, List<string> allTempFiles, List<string> allPdfFiles, Action progressTick)
         {
             int count = 0;
             try
@@ -1926,24 +1926,21 @@ private int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tem
                             // Only process files in 'word/embeddings/'
                             if (entry.FullName.StartsWith("word/embeddings/", StringComparison.OrdinalIgnoreCase))
                             {
-                                string ext = Path.GetExtension(entry.Name).ToLowerInvariant();
-                                if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
+                                string outDir = Path.Combine(Path.GetTempPath(), "msgtopdf");
+                                Directory.CreateDirectory(outDir);
+                                string outPath = Path.Combine(outDir, entry.Name);
+                                entry.ExtractToFile(outPath, true);
+                                allTempFiles.Add(outPath);
+                                // Convert to PDF using existing delegate
+                                string pdfPath = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(entry.Name) + ".pdf");
+                                if (_tryConvertOfficeToPdf != null && _tryConvertOfficeToPdf(outPath, pdfPath))
                                 {
-                                    string outDir = Path.Combine(Path.GetTempPath(), "msgtopdf");
-                                    Directory.CreateDirectory(outDir);
-                                    string outPath = Path.Combine(outDir, entry.Name);
-                                    entry.ExtractToFile(outPath, true);
-                                    allTempFiles.Add(outPath);
-                                    // Convert to PDF using existing delegate
-                                    string pdfPath = Path.Combine(tempDir, Path.GetFileNameWithoutExtension(entry.Name) + ".pdf");
-                                    if (_tryConvertOfficeToPdf != null && _tryConvertOfficeToPdf(outPath, pdfPath))
-                                    {
-                                        allTempFiles.Add(pdfPath);
-                                        // Do NOT add to allPdfFiles! Embedded PDFs should only be inserted at mapped positions, not merged at start/end.
-                                    }
-                                    progressTick?.Invoke();
-                                    count++;
+                                    allTempFiles.Add(pdfPath);
+                                    // Do NOT add to allPdfFiles! Embedded PDFs should only be inserted at mapped positions, not merged at start/end.
                                 }
+                                // Always tick for each file in the embeddings folder (regardless of extension)
+                                progressTick?.Invoke();
+                                count++;
                             }
                         }
                     }
@@ -1958,6 +1955,7 @@ private int ExtractEmbeddedObjectsWithProgress(string officeFilePath, string tem
                         string outPath = Path.Combine(tempDir, safeName);
                         File.WriteAllBytes(outPath, embedded.Data);
                         allTempFiles.Add(outPath);
+                        // Always tick for each file extracted here (regardless of extension)
                         progressTick?.Invoke();
                         count++;
                     }
