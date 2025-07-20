@@ -502,7 +502,7 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (ext == ".zip")
                 {
-                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, null);
+                    finalAttachmentPdf = ProcessZipAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, progressTick);
                     if (finalAttachmentPdf != null)
                     {
                         allTempFiles.Add(finalAttachmentPdf);
@@ -510,7 +510,7 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (ext == ".7z")
                 {
-                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, null);
+                    finalAttachmentPdf = Process7zAttachmentWithHierarchy(attPath, tempDir, headerText, allTempFiles, new List<string>(), attName, false, progressTick);
                     if (finalAttachmentPdf != null)
                     {
                         allTempFiles.Add(finalAttachmentPdf);
@@ -851,8 +851,8 @@ namespace MsgToPdfConverter.Services
                             unconvertibleFiles.Add(errorFileName);
                         }
 
-                        // No progress tick here - progress is handled at a higher level
-                        // to avoid double-counting files inside ZIP archives
+                        // Progress tick for every file processed in ZIP
+                        progressTick?.Invoke();
                     }
 
                     // Skip unconvertible files notification (no header creation)
@@ -1171,8 +1171,8 @@ namespace MsgToPdfConverter.Services
                             unconvertibleFiles.Add(errorFileName);
                         }
 
-                        // No progress tick here - progress is handled at a higher level
-                        // to avoid double-counting files inside 7z archives
+                        // Progress tick for every file processed in 7z
+                        progressTick?.Invoke();
                     }
 
                     // Skip unconvertible files notification (no header creation)
@@ -1668,7 +1668,7 @@ namespace MsgToPdfConverter.Services
                 {
                     if (att is Storage.Message nestedMsg)
                     {
-                        // Count nested MSG as 1 item (don't count its internal attachments)
+                        // Count nested MSG as 1 item
                         count += 1;
                     }
                     else if (att is Storage.Attachment a)
@@ -1692,14 +1692,8 @@ namespace MsgToPdfConverter.Services
                                             System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(entryPath));
                                             entry.ExtractToFile(entryPath, true);
                                             string entryExt = System.IO.Path.GetExtension(entryPath).ToLowerInvariant();
-                                            if (entryExt == ".msg")
+                                            if (entryExt == ".zip" || entryExt == ".7z")
                                             {
-                                                // Count MSG files only, not their internal attachments
-                                                count += 1;
-                                            }
-                                            else if (entryExt == ".zip" || entryExt == ".7z")
-                                            {
-                                                // Recurse into nested archive without double-counting
                                                 try
                                                 {
                                                     count += CountAllProcessableItemsFromFile(entryPath);
@@ -1708,8 +1702,8 @@ namespace MsgToPdfConverter.Services
                                             }
                                             else
                                             {
-                                                // Don't count regular files in ZIP - only MSG files matter for progress
-                                                // count++; // Count each file as 1 item
+                                                // Count every file (not just MSG)
+                                                count++;
                                             }
                                         }
                                     }
@@ -1729,12 +1723,7 @@ namespace MsgToPdfConverter.Services
                                                 entryStream.CopyTo(fileStream);
                                             }
                                             string entryExt = System.IO.Path.GetExtension(entryPath).ToLowerInvariant();
-                                            if (entryExt == ".msg")
-                                            {
-                                                // Count MSG files only, not their internal attachments
-                                                count += 1;
-                                            }
-                                            else if (entryExt == ".zip" || entryExt == ".7z")
+                                            if (entryExt == ".zip" || entryExt == ".7z")
                                             {
                                                 try
                                                 {
@@ -1744,8 +1733,8 @@ namespace MsgToPdfConverter.Services
                                             }
                                             else
                                             {
-                                                // Don't count regular files in 7z - only MSG files matter for progress
-                                                // count++; // Count each file as 1 item
+                                                // Count every file (not just MSG)
+                                                count++;
                                             }
                                         }
                                     }
@@ -1759,8 +1748,8 @@ namespace MsgToPdfConverter.Services
                         }
                         else
                         {
-                            // Don't count regular attachments - only count at the MSG level
-                            // count++; // Count each attachment as 1 item (including Office files)
+                            // Count every regular attachment (not just MSG)
+                            count++;
                         }
                     }
                 }
@@ -1777,141 +1766,101 @@ namespace MsgToPdfConverter.Services
             string ext = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
             if (ext == ".msg")
             {
-                // Count MSG files as 1 item each (don't count their internal attachments)
-                return 1;
+                try
+                {
+                    using (var msg = new Storage.Message(filePath))
+                    {
+                        return CountAllProcessableItems(msg);
+                    }
+                }
+                catch { return 1; }
             }
             else if (ext == ".zip")
             {
-                int count = 0;
-                string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MsgToPdf_CountAllItems_" + Guid.NewGuid().ToString());
-                System.IO.Directory.CreateDirectory(tempDir);
+                int zipCount = 0;
+                string zipTempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MsgToPdf_CountAllItems_" + Guid.NewGuid().ToString());
+                System.IO.Directory.CreateDirectory(zipTempDir);
                 try
                 {
-                    using (var archive = System.IO.Compression.ZipFile.OpenRead(filePath))
+                    using (var zipArchive = System.IO.Compression.ZipFile.OpenRead(filePath))
                     {
-                        foreach (var entry in archive.Entries)
+                        foreach (var zipEntry in zipArchive.Entries)
                         {
-                            if (entry.Length == 0) continue; // Skip directories
-                            string entryPath = System.IO.Path.Combine(tempDir, entry.FullName);
-                            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(entryPath));
-                            entry.ExtractToFile(entryPath, true);
-                            string entryExt = System.IO.Path.GetExtension(entryPath).ToLowerInvariant();
-                            if (entryExt == ".msg")
+                            if (zipEntry.Length == 0) continue;
+                            string zipEntryPath = System.IO.Path.Combine(zipTempDir, zipEntry.FullName);
+                            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(zipEntryPath));
+                            zipEntry.ExtractToFile(zipEntryPath, true);
+                            string zipEntryExt = System.IO.Path.GetExtension(zipEntryPath).ToLowerInvariant();
+                            if (zipEntryExt == ".zip" || zipEntryExt == ".7z")
                             {
-                                // Count MSG files only
-                                count += 1;
-                            }
-                            else if (entryExt == ".zip" || entryExt == ".7z")
-                            {
-                                // For nested archives, count recursively
-                                count += CountAllProcessableItemsFromFile(entryPath);
+                                try
+                                {
+                                    zipCount += CountAllProcessableItemsFromFile(zipEntryPath);
+                                }
+                                catch { zipCount++; }
                             }
                             else
                             {
-                                // Don't count regular files - only MSG files matter for progress
-                                // count++; // Count each file as 1 item
+                                // Count every file (not just MSG)
+                                zipCount++;
                             }
                         }
                     }
                 }
-                catch { count++; }
+                catch { zipCount++; }
                 finally
                 {
-                    try { System.IO.Directory.Delete(tempDir, true); } catch { }
+                    try { System.IO.Directory.Delete(zipTempDir, true); } catch { }
                 }
-                return count;
+                return zipCount;
             }
             else if (ext == ".7z")
             {
-                int count = 0;
-                string tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MsgToPdf_CountAllItems_" + Guid.NewGuid().ToString());
-                System.IO.Directory.CreateDirectory(tempDir);
+                int sevenCount = 0;
+                string sevenTempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "MsgToPdf_CountAllItems_" + Guid.NewGuid().ToString());
+                System.IO.Directory.CreateDirectory(sevenTempDir);
                 try
                 {
-                    using (var archive = SharpCompress.Archives.SevenZip.SevenZipArchive.Open(filePath))
+                    using (var sevenArchive = SharpCompress.Archives.SevenZip.SevenZipArchive.Open(filePath))
                     {
-                        foreach (var entry in archive.Entries)
+                        foreach (var sevenEntry in sevenArchive.Entries)
                         {
-                            if (entry.IsDirectory) continue;
-                            string entryPath = System.IO.Path.Combine(tempDir, entry.Key);
-                            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(entryPath));
-                            using (var entryStream = entry.OpenEntryStream())
-                            using (var fileStream = System.IO.File.Create(entryPath))
+                            if (sevenEntry.IsDirectory) continue;
+                            string sevenEntryPath = System.IO.Path.Combine(sevenTempDir, sevenEntry.Key);
+                            System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(sevenEntryPath));
+                            using (var entryStream = sevenEntry.OpenEntryStream())
+                            using (var fileStream = System.IO.File.Create(sevenEntryPath))
                             {
                                 entryStream.CopyTo(fileStream);
                             }
-                            string entryExt = System.IO.Path.GetExtension(entryPath).ToLowerInvariant();
-                            if (entryExt == ".msg")
+                            string sevenEntryExt = System.IO.Path.GetExtension(sevenEntryPath).ToLowerInvariant();
+                            if (sevenEntryExt == ".zip" || sevenEntryExt == ".7z")
                             {
-                                // Count MSG files only
-                                count += 1;
-                            }
-                            else if (entryExt == ".zip" || entryExt == ".7z")
-                            {
-                                // For nested archives, count recursively
-                                count += CountAllProcessableItemsFromFile(entryPath);
+                                try
+                                {
+                                    sevenCount += CountAllProcessableItemsFromFile(sevenEntryPath);
+                                }
+                                catch { sevenCount++; }
                             }
                             else
                             {
-                                // Don't count regular files - only MSG files matter for progress
-                                // count++; // Count each file as 1 item
+                                // Count every file (not just MSG)
+                                sevenCount++;
                             }
                         }
                     }
                 }
-                catch { count++; }
+                catch { sevenCount++; }
                 finally
                 {
-                    try { System.IO.Directory.Delete(tempDir, true); } catch { }
+                    try { System.IO.Directory.Delete(sevenTempDir, true); } catch { }
                 }
-                return count;
+                return sevenCount;
             }
             else
             {
-                // For regular files (including Office files), count as 1 item plus embedded objects
-                int count = 1; // The main file itself
-                
-                // If it's an Office file, also count embedded objects
-                string fileExt = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
-                if (fileExt == ".doc" || fileExt == ".docx" || fileExt == ".xls" || fileExt == ".xlsx")
-                {
-                    try
-                    {
-                        int embeddedCount = CountEmbeddedObjects(filePath);
-                        count += embeddedCount;
-#if DEBUG
-                        DebugLogger.Log($"[COUNT] File {filePath}: 1 main + {embeddedCount} embedded = {count} total");
-#endif
-                    }
-                    catch (Exception ex)
-                    {
-#if DEBUG
-                        DebugLogger.Log($"[COUNT] Error counting embedded objects in {filePath}: {ex.Message}");
-#endif
-                    }
-                }
-                
-                return count;
-            }
-        }
-
-        /// <summary>
-        /// Counts embedded objects in an Office file without extracting them
-        /// </summary>
-        private static int CountEmbeddedObjects(string officeFilePath)
-        {
-            try
-            {
-                // Use DocxEmbeddedExtractor to get count of embedded files
-                var embeddedFiles = MsgToPdfConverter.Utils.DocxEmbeddedExtractor.ExtractEmbeddedFiles(officeFilePath);
-                return embeddedFiles?.Count ?? 0;
-            }
-            catch (Exception ex)
-            {
-#if DEBUG
-                DebugLogger.Log($"[COUNT-EMBED] Error counting embedded objects: {ex.Message}");
-#endif
-                return 0;
+                // Count every regular file
+                return 1;
             }
         }
 

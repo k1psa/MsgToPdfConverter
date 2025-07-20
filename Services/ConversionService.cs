@@ -687,7 +687,7 @@ namespace MsgToPdfConverter.Services
                         int fileProgress = 0;
                         int totalCount = attachmentService.CountAllProcessableItemsFromFile(filePath);
                         updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
-                        
+
                         string outputPdf = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
                         // Use only the main temp folder for all attachment processing
                         string tempDir = baseTempDir;
@@ -697,11 +697,13 @@ namespace MsgToPdfConverter.Services
                         string headerText = $"File: {System.IO.Path.GetFileName(filePath)}";
                         var parentChain = new List<string> { System.IO.Path.GetFileName(filePath) };
                         string processedPdf = null;
+                        // Progress tick lambda for ZIP/7z: increment fileProgress and update UI
+                        Action progressTick = () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1));
                         try
                         {
                             processedPdf = attachmentService.ProcessSingleAttachmentWithHierarchy(
                                 null, filePath, tempDir, headerText, allTempFiles, allPdfFiles, parentChain, baseName, extractOriginalOnly,
-                                () => updateFileProgress?.Invoke(++fileProgress, Math.Max(totalCount, 1)));
+                                progressTick);
                             // Track all temp files created in allTempFiles
                             foreach (var tempF in allTempFiles)
                                 sessionTempFiles.Add(tempF);
