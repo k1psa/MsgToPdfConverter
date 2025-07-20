@@ -1750,6 +1750,18 @@ namespace MsgToPdfConverter.Services
                         {
                             // Count every regular attachment (not just MSG)
                             count++;
+
+                            // If Office file, count embedded files too
+                            if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
+                            {
+                                try
+                                {
+                                    var embeddedFiles = MsgToPdfConverter.Utils.DocxEmbeddedExtractor.ExtractEmbeddedFiles(a.FileName);
+                                    if (embeddedFiles != null)
+                                        count += embeddedFiles.Count;
+                                }
+                                catch { }
+                            }
                         }
                     }
                 }
@@ -1859,8 +1871,42 @@ namespace MsgToPdfConverter.Services
             }
             else
             {
-                // Count every regular file
-                return 1;
+                int total = 1;
+                // For DOCX/XLSX, count embedded files in 'word/embeddings/' or 'xl/embeddings/'
+                if (ext == ".docx" || ext == ".xlsx")
+                {
+                    try
+                    {
+                        using (var archive = System.IO.Compression.ZipFile.OpenRead(filePath))
+                        {
+                            foreach (var entry in archive.Entries)
+                            {
+                                if ((ext == ".docx" && entry.FullName.StartsWith("word/embeddings/", System.StringComparison.OrdinalIgnoreCase)) ||
+                                    (ext == ".xlsx" && entry.FullName.StartsWith("xl/embeddings/", System.StringComparison.OrdinalIgnoreCase)))
+                                {
+                                    string embeddedExt = System.IO.Path.GetExtension(entry.Name).ToLowerInvariant();
+                                    if (embeddedExt == ".doc" || embeddedExt == ".docx" || embeddedExt == ".xls" || embeddedExt == ".xlsx")
+                                    {
+                                        total++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    catch { }
+                }
+                // Also count any other embedded files found by DocxEmbeddedExtractor
+                if (ext == ".doc" || ext == ".docx" || ext == ".xls" || ext == ".xlsx")
+                {
+                    try
+                    {
+                        var embeddedFiles = MsgToPdfConverter.Utils.DocxEmbeddedExtractor.ExtractEmbeddedFiles(filePath);
+                        if (embeddedFiles != null)
+                            total += embeddedFiles.Count;
+                    }
+                    catch { }
+                }
+                return total;
             }
         }
 

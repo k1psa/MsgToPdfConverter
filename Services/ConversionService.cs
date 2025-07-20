@@ -685,7 +685,16 @@ namespace MsgToPdfConverter.Services
                         // Use the same hierarchical logic as for attachments
                         // Reset file progress for non-MSG files and set up progress tracking
                         int fileProgress = 0;
-                        int totalCount = attachmentService.CountAllProcessableItemsFromFile(filePath);
+                        int totalCount;
+                        string extLower = System.IO.Path.GetExtension(filePath).ToLowerInvariant();
+                        if (extLower == ".doc" || extLower == ".docx" || extLower == ".xls" || extLower == ".xlsx")
+                        {
+                            totalCount = attachmentService.CountAllProcessableItemsFromFile(filePath);
+                        }
+                        else
+                        {
+                            totalCount = attachmentService.CountAllProcessableItemsFromFile(filePath);
+                        }
                         updateFileProgress?.Invoke(0, Math.Max(totalCount, 1));
 
                         string outputPdf = GenerateUniquePdfFileName(filePath, dir, selectedFiles);
