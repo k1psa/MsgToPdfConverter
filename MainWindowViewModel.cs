@@ -476,19 +476,14 @@ namespace MsgToPdfConverter
                 ProcessingStatus = "";
                 
                 // Delay resetting file progress to let user see 100% completion
-#pragma warning disable CS4014 // Because this call is not awaited, execution continues before call is completed
-                Task.Delay(2000).ContinueWith(_ =>
-                {
-                    Application.Current.Dispatcher.Invoke(() =>
-                    {
-                        _pendingShowProgressRing = false;
-                        _progressRingDelayTimer.Stop();
-                        IsProcessingFile = false;
-                        FileProgressValue = 0;
-                        FileProgressMax = 0;
-                    });
-                });
-#pragma warning restore CS4014
+
+                // Immediately hide the circular progress ring
+                IsProcessingFile = false;
+                _pendingShowProgressRing = false;
+                _progressRingDelayTimer.Stop();
+                // Optionally reset progress values after hiding the ring
+                FileProgressValue = 0;
+                FileProgressMax = 0;
                 
                 // After conversion, reset confirmation so dialog will show again if needed next time
                 _combinePdfOverwriteConfirmed = false;
