@@ -109,141 +109,191 @@ namespace MsgToPdfConverter.Services
                 mainPageCount = mainPdf.GetNumberOfPages();
             }
 
-            var anchorCandidates = validObjects
-                .Where(o => o.PageNumber > 0 && o.PageNumber <= mainPageCount)
-                .Select(o => new {
-                    PageNumber = o.PageNumber,
-                    CharPosition = o.CharPosition,
-                    ProgId = o.ProgId,
-                    OleClass = o.OleClass,
-                    FileExt = Path.GetExtension(o.FilePath)?.ToLowerInvariant(),
-                    DocumentOrderIndex = o.DocumentOrderIndex
-                })
-                .ToList();
 
+
+            // --- Strict Inline Shape Index Mapping ---
             var mappedObjects = new List<(InteropEmbeddedExtractor.ExtractedObjectInfo obj, int anchorPage, string reason)>();
             var unmappedObjects = new List<(InteropEmbeddedExtractor.ExtractedObjectInfo obj, string reason)>();
 
-            foreach (var obj in validObjects)
+
+            // --- Fix: Map embedded files to inline shapes/pages by index ---
+            // Get all valid inline shape pages (sorted by PageNumber ascending)
+            var inlineShapePages = extractedObjects
+                .Where(o => o.PageNumber > 0)
+                .OrderBy(o => o.PageNumber)
+                .Select(o => o.PageNumber)
+                .Distinct()
+                .ToList();
+
+            // Map each embedded file to the corresponding inline shape page by index
+            for (int i = 0; i < validObjects.Count; i++)
             {
-                int anchorPage = -1;
-                string reason = "";
-                // 1. Try exact PageNumber
-                if (obj.PageNumber > 0 && obj.PageNumber <= mainPageCount)
+                var obj = validObjects[i];
+                if (i < inlineShapePages.Count)
                 {
-                    anchorPage = obj.PageNumber;
-                    reason = $"Mapped by PageNumber={anchorPage}";
-                }
-                // 2. Try closest anchor by CharPosition
-                else if (obj.CharPosition > 0)
-                {
-                    var closest = anchorCandidates
-                        .OrderBy(a => Math.Abs(a.CharPosition - obj.CharPosition))
-                        .FirstOrDefault();
-                    if (closest != null)
-                    {
-                        anchorPage = closest.PageNumber;
-                        reason = $"Mapped by closest CharPosition (obj={obj.CharPosition}, anchor={closest.CharPosition})";
-                    }
-                }
-                // 3. Try matching ProgId/OleClass/file extension
-                else if (!string.IsNullOrWhiteSpace(obj.ProgId) || !string.IsNullOrWhiteSpace(obj.OleClass) ||
-                         Path.GetExtension(obj.FilePath)?.ToLowerInvariant() == ".xls")
-                {
-                    // Special handling: always try to map .xls by extension if not already mapped
-                    var match = anchorCandidates.FirstOrDefault(a =>
-                        (!string.IsNullOrWhiteSpace(obj.ProgId) && a.ProgId == obj.ProgId) ||
-                        (!string.IsNullOrWhiteSpace(obj.OleClass) && a.OleClass == obj.OleClass) ||
-                        (a.FileExt == Path.GetExtension(obj.FilePath)?.ToLowerInvariant())
-                    );
-                    if (match != null)
-                    {
-                        anchorPage = match.PageNumber;
-                        reason = $"Mapped by ProgId/OleClass/FileExt (ProgId={obj.ProgId}, OleClass={obj.OleClass}, Ext={Path.GetExtension(obj.FilePath)?.ToLowerInvariant()})";
-                    }
-                }
-                // 4. Fallback to last page
-                if (anchorPage <= 0 || anchorPage > mainPageCount)
-                {
-                    anchorPage = mainPageCount;
-                    reason = $"Unmapped: fallback to last page ({mainPageCount})";
-                    unmappedObjects.Add((obj, reason));
+                    int anchorPage = inlineShapePages[i];
+                    mappedObjects.Add((obj, anchorPage, $"Mapped to inline shape index {i} (anchor page {anchorPage})"));
                 }
                 else
                 {
-                    mappedObjects.Add((obj, anchorPage, reason));
+                    unmappedObjects.Add((obj, "Unmapped: not enough inline shapes/pages for mapping"));
                 }
             }
 
             // Log mapping summary
-
 #if DEBUG
-        DebugLogger.Log("[PDF-INSERT] --- MAPPING SUMMARY ---");
+            DebugLogger.Log("[PDF-INSERT] --- STRICT INLINE SHAPE INDEX MAPPING SUMMARY ---");
 #endif
             foreach (var m in mappedObjects)
             {
-
 #if DEBUG
-                DebugLogger.Log($"[MAPPED] {Path.GetFileName(m.obj.FilePath)} -> after page {m.anchorPage} ({m.reason})");
+                DebugLogger.Log($"[STRICT-MAPPED] {Path.GetFileName(m.obj.FilePath)} -> after page {m.anchorPage} ({m.reason})");
 #endif
             }
             foreach (var u in unmappedObjects)
             {
-
 #if DEBUG
                 DebugLogger.Log($"[UNMAPPED] {Path.GetFileName(u.obj.FilePath)} -> after last page ({mainPageCount}) ({u.reason})");
 #endif
             }
 
-
-#if DEBUG
-        DebugLogger.Log($"[PDF-INSERT] TOTAL EMBEDDED ITEMS (valid): {validObjects.Count}");
-#endif
-
-#if DEBUG
-        DebugLogger.Log($"[PDF-INSERT] TOTAL MAPPED: {mappedObjects.Count}, TOTAL UNMAPPED: {unmappedObjects.Count}");
-#endif
-
-            // --- Markdown Table of Mapping Results ---
-
-#if DEBUG
-        DebugLogger.Log("[PDF-INSERT] --- EMBEDDED OBJECT MAPPING TABLE ---");
-#endif
-
-#if DEBUG
-        DebugLogger.Log("| File | Anchor Page | Mapping Reason | PageNumber | CharPos | OleClass | ProgId | Ext | Size |");
-#endif
-
-#if DEBUG
-        DebugLogger.Log("|------|-------------|---------------|------------|---------|----------|--------|-----|------|");
-#endif
+            // --- Recursively extract and convert all embedded objects and their attachments to PDF ---
+            var pdfCache = new Dictionary<string, string>(); // Maps original file path to PDF path (may be same as original)
+            // Track parent-child relationships for correct insertion order
+            var expandedObjects = new List<(InteropEmbeddedExtractor.ExtractedObjectInfo obj, int anchorPage, string reason, string parentId)>();
+            void RecursivelyConvertAndExpand(InteropEmbeddedExtractor.ExtractedObjectInfo obj, int anchorPage, string reason, string parentId)
+            {
+                var ext = Path.GetExtension(obj.FilePath)?.ToLowerInvariant();
+                bool isPdf = IsPdfFile(obj.FilePath);
+                if (isPdf)
+                {
+                    pdfCache[obj.FilePath] = obj.FilePath;
+                    expandedObjects.Add((obj, anchorPage, reason, parentId));
+                }
+                else if (ext == ".docx" || ext == ".doc")
+                {
+                    string tempPdfPath = Path.Combine(Path.GetTempPath(), $"doc_temp_{Guid.NewGuid()}.pdf");
+                    bool converted = OfficeConversionService.TryConvertOfficeToPdf(obj.FilePath, tempPdfPath);
+                    if (converted && File.Exists(tempPdfPath))
+                    {
+                        pdfCache[obj.FilePath] = tempPdfPath;
+                        pdfCache[tempPdfPath] = tempPdfPath;
+                        var pdfObj = new InteropEmbeddedExtractor.ExtractedObjectInfo { FilePath = tempPdfPath, PageNumber = obj.PageNumber, CharPosition = obj.CharPosition, ProgId = obj.ProgId, OleClass = obj.OleClass, DocumentOrderIndex = obj.DocumentOrderIndex };
+                        expandedObjects.Add((pdfObj, anchorPage, reason, parentId));
+                    }
+                    else
+                    {
+                        pdfCache[obj.FilePath] = null;
+                        expandedObjects.Add((obj, anchorPage, reason, parentId));
+                    }
+                }
+                else if (ext == ".xlsx")
+                {
+                    string tempPdfPath = Path.Combine(Path.GetTempPath(), $"xlsx_temp_{Guid.NewGuid()}.pdf");
+                    if (TryConvertXlsxToPdf(obj.FilePath, tempPdfPath) && File.Exists(tempPdfPath))
+                    {
+                        pdfCache[obj.FilePath] = tempPdfPath;
+                        pdfCache[tempPdfPath] = tempPdfPath;
+                        var pdfObj = new InteropEmbeddedExtractor.ExtractedObjectInfo { FilePath = tempPdfPath, PageNumber = obj.PageNumber, CharPosition = obj.CharPosition, ProgId = obj.ProgId, OleClass = obj.OleClass, DocumentOrderIndex = obj.DocumentOrderIndex };
+                        expandedObjects.Add((pdfObj, anchorPage, reason, parentId));
+                    }
+                    else
+                    {
+                        pdfCache[obj.FilePath] = null;
+                        expandedObjects.Add((obj, anchorPage, reason, parentId));
+                    }
+                }
+                else if (ext == ".msg")
+                {
+                    string tempPdfPath = Path.Combine(Path.GetTempPath(), $"msg_temp_{Guid.NewGuid()}.pdf");
+                    var (converted, attachmentFiles) = TryConvertMsgToPdfWithAttachments(obj.FilePath, tempPdfPath);
+                    string objId = obj.FilePath + "|" + obj.DocumentOrderIndex;
+                    if (converted && File.Exists(tempPdfPath))
+                    {
+                        pdfCache[obj.FilePath] = tempPdfPath;
+                        pdfCache[tempPdfPath] = tempPdfPath;
+                        var pdfObj = new InteropEmbeddedExtractor.ExtractedObjectInfo { FilePath = tempPdfPath, PageNumber = obj.PageNumber, CharPosition = obj.CharPosition, ProgId = obj.ProgId, OleClass = obj.OleClass, DocumentOrderIndex = obj.DocumentOrderIndex };
+                        expandedObjects.Add((pdfObj, anchorPage, reason, parentId));
+                        // Recursively process only true attachments (not inline images)
+                        foreach (var attPath in attachmentFiles)
+                        {
+                            if (File.Exists(attPath))
+                            {
+                                var attExt = Path.GetExtension(attPath)?.ToLowerInvariant();
+                                if (attExt == ".jpg" || attExt == ".jpeg" || attExt == ".png" || attExt == ".bmp" || attExt == ".gif" || attExt == ".tif" || attExt == ".tiff" || attExt == ".webp")
+                                {
+                                    string imgPdfPath = Path.Combine(Path.GetTempPath(), $"img2pdf_{Guid.NewGuid()}.pdf");
+                                    bool imgConverted = TryConvertImageToPdf(attPath, imgPdfPath);
+                                    var imgObj = new InteropEmbeddedExtractor.ExtractedObjectInfo { FilePath = imgPdfPath, PageNumber = obj.PageNumber, CharPosition = obj.CharPosition, ProgId = null, OleClass = null, DocumentOrderIndex = obj.DocumentOrderIndex };
+                                    if (imgConverted && File.Exists(imgPdfPath))
+                                    {
+                                        pdfCache[attPath] = imgPdfPath;
+                                        pdfCache[imgPdfPath] = imgPdfPath;
+                                        expandedObjects.Add((imgObj, anchorPage, "Image attachment of MSG", objId));
+                                    }
+                                    else
+                                    {
+                                        pdfCache[attPath] = null;
+                                        pdfCache[imgPdfPath] = null;
+                                        expandedObjects.Add((imgObj, anchorPage, "Image attachment conversion failed", objId));
+                                    }
+                                }
+                                else
+                                {
+                                    var attObj = new InteropEmbeddedExtractor.ExtractedObjectInfo { FilePath = attPath, PageNumber = obj.PageNumber, CharPosition = obj.CharPosition, ProgId = null, OleClass = null, DocumentOrderIndex = obj.DocumentOrderIndex };
+                                    RecursivelyConvertAndExpand(attObj, anchorPage, "Attachment of MSG", objId);
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        pdfCache[obj.FilePath] = null;
+                        expandedObjects.Add((obj, anchorPage, reason, parentId));
+                    }
+                }
+                else if (ext == ".zip")
+                {
+                    var zipEntries = ZipHelper.ExtractZipEntries(obj.FilePath);
+                    foreach (var entry in zipEntries)
+                    {
+                        string tempFile = Path.Combine(Path.GetTempPath(), $"zip_entry_{Guid.NewGuid()}_{entry.FileName}");
+                        File.WriteAllBytes(tempFile, entry.Data);
+                        var attObj = new InteropEmbeddedExtractor.ExtractedObjectInfo { FilePath = tempFile, PageNumber = obj.PageNumber, CharPosition = obj.CharPosition, ProgId = null, OleClass = null, DocumentOrderIndex = obj.DocumentOrderIndex };
+                        RecursivelyConvertAndExpand(attObj, anchorPage, "ZIP entry", obj.FilePath + "|" + obj.DocumentOrderIndex);
+                        try { File.Delete(tempFile); } catch { }
+                    }
+                    pdfCache[obj.FilePath] = null; // ZIP itself not inserted
+                }
+                else if (ext == ".7z")
+                {
+                    string tempDir = Path.GetTempPath();
+                    var allTempFiles = new List<string>();
+                    string headerText = $"Extracted from {Path.GetFileName(obj.FilePath)}";
+                    var parentChain = new List<string>();
+                    string currentItem = Path.GetFileName(obj.FilePath);
+                    string resultPdf = _attachmentService.Process7zAttachmentWithHierarchy(
+                        obj.FilePath, tempDir, headerText, allTempFiles, parentChain, currentItem, false);
+                    if (!string.IsNullOrEmpty(resultPdf) && File.Exists(resultPdf))
+                    {
+                        var attObj = new InteropEmbeddedExtractor.ExtractedObjectInfo { FilePath = resultPdf, PageNumber = obj.PageNumber, CharPosition = obj.CharPosition, ProgId = null, OleClass = null, DocumentOrderIndex = obj.DocumentOrderIndex };
+                        RecursivelyConvertAndExpand(attObj, anchorPage, "7Z extracted PDF", obj.FilePath + "|" + obj.DocumentOrderIndex);
+                    }
+                    foreach (var f in allTempFiles) { try { File.Delete(f); } catch { } }
+                    pdfCache[obj.FilePath] = null; // 7Z itself not inserted
+                }
+                else
+                {
+                    pdfCache[obj.FilePath] = null;
+                    expandedObjects.Add((obj, anchorPage, reason, parentId));
+                }
+            }
+            // Expand all mapped and unmapped objects
             foreach (var m in mappedObjects)
-            {
-                var obj = m.obj;
-
-#if DEBUG
-                DebugLogger.Log($"| {Path.GetFileName(obj.FilePath)} | {m.anchorPage} | {m.reason} | {obj.PageNumber} | {obj.CharPosition} | {obj.OleClass} | {obj.ProgId} | {Path.GetExtension(obj.FilePath)?.ToLowerInvariant()} | {GetFileSizeString(obj.FilePath)} |");
-#endif
-            }
+                RecursivelyConvertAndExpand(m.obj, m.anchorPage, m.reason, null);
             foreach (var u in unmappedObjects)
-            {
-                var obj = u.obj;
-
-#if DEBUG
-                DebugLogger.Log($"| {Path.GetFileName(obj.FilePath)} | {mainPageCount} | {u.reason} | {obj.PageNumber} | {obj.CharPosition} | {obj.OleClass} | {obj.ProgId} | {Path.GetExtension(obj.FilePath)?.ToLowerInvariant()} | {GetFileSizeString(obj.FilePath)} |");
-#endif
-#if DEBUG
-        DebugLogger.Log("|------|-------------|---------------|------------|---------|----------|--------|-----|------|");
-#endif
-            }
-
-
-#if DEBUG
-        DebugLogger.Log("");
-#endif
-
-            // Interleave main pages and mapped embedded objects, then append unmapped objects after last page
-            var objectsByPage = mappedObjects.OrderBy(m => m.anchorPage).ThenBy(m => m.obj.DocumentOrderIndex).ToList();
+                RecursivelyConvertAndExpand(u.obj, mainPageCount, u.reason, null);
+            // Flat insertion: for each anchor page, append all expanded objects with that anchor page, ordered by DocumentOrderIndex
             try
             {
                 using (var outputStream = new FileStream(outputPdfPath, FileMode.Create, FileAccess.Write))
@@ -251,55 +301,113 @@ namespace MsgToPdfConverter.Services
                 using (var outputPdf = new PdfDocument(pdfWriter))
                 using (var mainPdf = new PdfDocument(new PdfReader(mainPdfPath)))
                 {
-                    int currentOutputPage = 0;
                     for (int mainPage = 1; mainPage <= mainPageCount; mainPage++)
                     {
-
 #if DEBUG
-                        DebugLogger.Log($"[PDF-INSERT][DEBUG] Copying main page {mainPage} (output page {currentOutputPage + 1})");
+                        DebugLogger.Log($"[PDF-INSERT][DEBUG] Copying main page {mainPage} (output page {outputPdf.GetNumberOfPages() + 1})");
 #endif
                         mainPdf.CopyPagesTo(mainPage, mainPage, outputPdf);
-                        currentOutputPage++;
-                        var pageObjects = objectsByPage.Where(m => m.anchorPage == mainPage).OrderBy(m => m.obj.DocumentOrderIndex).ToList();
-                        if (pageObjects.Count > 0)
-                        {
-                            foreach (var m in pageObjects)
-                            {
-                                // PATCH: Always insert .xlsx and .xls files as attachments, never skip as duplicate
 
-                                currentOutputPage = InsertEmbeddedObject(m.obj, outputPdf, currentOutputPage, progressTick);
+                        var pageObjects = expandedObjects
+                            .Where(m => m.anchorPage == mainPage)
+                            .OrderBy(m => m.obj.CharPosition >= 0 ? m.obj.CharPosition : int.MaxValue)
+                            .ThenBy(m => m.obj.DocumentOrderIndex)
+                            .ToList();
+                        foreach (var m in pageObjects)
+                        {
+                            string pdfPath = pdfCache[m.obj.FilePath];
+#if DEBUG
+                            DebugLogger.Log($"[PDF-INSERT][DEBUG] Appending embedded file after main page {mainPage}: {Path.GetFileName(m.obj.FilePath)} (anchor={m.anchorPage}, order={m.obj.DocumentOrderIndex})");
+#endif
+                            if (!string.IsNullOrEmpty(pdfPath) && File.Exists(pdfPath))
+                            {
+                                try
+                                {
+                                    using (var embeddedReader = new PdfReader(pdfPath))
+                                    using (var embeddedPdf = new PdfDocument(embeddedReader))
+                                    {
+                                        int embeddedPageCount = embeddedPdf.GetNumberOfPages();
+#if DEBUG
+                                        DebugLogger.Log($"[PDF-INSERT][DEBUG] Embedded file {Path.GetFileName(m.obj.FilePath)} has {embeddedPageCount} pages");
+#endif
+                                        for (int ep = 1; ep <= embeddedPageCount; ep++)
+                                        {
+                                            embeddedPdf.CopyPagesTo(ep, ep, outputPdf);
+                                        }
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+#if DEBUG
+                                    DebugLogger.Log($"[PDF-INSERT][ERROR] Failed to copy embedded PDF {pdfPath}: {ex.Message}");
+#endif
+                                }
+                            }
+                            else
+                            {
+                                int before = outputPdf.GetNumberOfPages();
+                                InsertPlaceholderForFile(m.obj.FilePath, outputPdf, before, Path.GetExtension(m.obj.FilePath)?.ToLowerInvariant());
                             }
                         }
                     }
-                    // Append unmapped objects after last page
-                    if (unmappedObjects.Count > 0)
-
+                    // Append unmapped objects after last page only
                     foreach (var u in unmappedObjects)
                     {
-                    currentOutputPage = InsertEmbeddedObject(u.obj, outputPdf, currentOutputPage, progressTick);
+                        string pdfPath = pdfCache[u.obj.FilePath];
+                        if (!string.IsNullOrEmpty(pdfPath) && File.Exists(pdfPath))
+                        {
+                            try
+                            {
+                                using (var embeddedReader = new PdfReader(pdfPath))
+                                using (var embeddedPdf = new PdfDocument(embeddedReader))
+                                {
+                                    int embeddedPageCount = embeddedPdf.GetNumberOfPages();
+                                    for (int ep = 1; ep <= embeddedPageCount; ep++)
+                                    {
+                                        embeddedPdf.CopyPagesTo(ep, ep, outputPdf);
+                                    }
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+#if DEBUG
+                                DebugLogger.Log($"[PDF-INSERT][ERROR] Failed to copy embedded PDF {pdfPath}: {ex.Message}");
+#endif
+                            }
+                        }
+                        else
+                        {
+                            int before = outputPdf.GetNumberOfPages();
+                            InsertPlaceholderForFile(u.obj.FilePath, outputPdf, before, Path.GetExtension(u.obj.FilePath)?.ToLowerInvariant());
+                        }
                     }
-
-
                 }
-
+                // Cleanup temp PDFs
+                foreach (var kvp in pdfCache)
+                {
+                    if (kvp.Value != null && kvp.Value != kvp.Key && File.Exists(kvp.Value))
+                    {
+                        try { File.Delete(kvp.Value); } catch { }
+                    }
+                }
             }
             catch (Exception ex)
             {
-                #if DEBUG
+#if DEBUG
                 DebugLogger.Log($"[PDF-INSERT] Error creating PDF with embedded files: {ex.Message}");
-                #endif
+#endif
                 try
                 {
                     File.Copy(mainPdfPath, outputPdfPath, true);
-                    #if DEBUG
+#if DEBUG
                     DebugLogger.Log("[PDF-INSERT] Fallback: copied main PDF without embedded files");
-                    #endif
+#endif
                 }
                 catch (Exception copyEx)
                 {
-                    #if DEBUG
+#if DEBUG
                     DebugLogger.Log($"[PDF-INSERT] Fallback copy failed: {copyEx.Message}");
-                    #endif
+#endif
                 }
             }
         }
@@ -413,9 +521,6 @@ namespace MsgToPdfConverter.Services
                             }
                             else
                             {
-                                #if DEBUG
-                                DebugLogger.Log($"[PDF-INSERT][DEBUG] ZIP entry: {entry.FileName} not recognized as supported type, inserting placeholder.");
-                                #endif
                                 currentOutputPage = InsertPlaceholderForFile(tempFile, outputPdf, currentOutputPage, $"ZIP Entry ({entryExt})");
                             }
                             try { File.Delete(tempFile); } catch { }
@@ -459,17 +564,11 @@ namespace MsgToPdfConverter.Services
                                 currentOutputPage = InsertPdfFile_NoSeparator(resultPdf, outputPdf, currentOutputPage, "7Z-PDF", progressTick);
                             else
                             {
-                                #if DEBUG
-                                DebugLogger.Log($"[PDF-INSERT][DEBUG] 7Z result not recognized as PDF, inserting placeholder.");
-                                #endif
                                 currentOutputPage = InsertPlaceholderForFile(resultPdf, outputPdf, currentOutputPage, "7Z");
                             }
                         }
                         else
                         {
-                            #if DEBUG
-                            DebugLogger.Log($"[PDF-INSERT] 7Z processing failed or returned no PDF, adding placeholder for {obj.FilePath}");
-                            #endif
                             currentOutputPage = InsertPlaceholderForFile(obj.FilePath, outputPdf, currentOutputPage, "7Z");
                         }
                         // Cleanup temp files
@@ -1779,6 +1878,26 @@ namespace MsgToPdfConverter.Services
                 #if DEBUG
                 DebugLogger.Log($"[PDF-INSERT] Failed to insert error placeholder: {ex.Message}");
                 #endif
+            }
+        }
+
+        // --- Add helper for image to PDF conversion ---
+        private static bool TryConvertImageToPdf(string imagePath, string outputPdfPath)
+        {
+            try
+            {
+                using (var writer = new iText.Kernel.Pdf.PdfWriter(outputPdfPath))
+                using (var pdf = new iText.Kernel.Pdf.PdfDocument(writer))
+                using (var docImg = new iText.Layout.Document(pdf))
+                {
+                    var img = new iText.Layout.Element.Image(iText.IO.Image.ImageDataFactory.Create(imagePath));
+                    docImg.Add(img);
+                }
+                return File.Exists(outputPdfPath);
+            }
+            catch
+            {
+                return false;
             }
         }
     }
