@@ -288,12 +288,26 @@ namespace MsgToPdfConverter.Services
                     expandedObjects.Add((obj, anchorPage, reason, parentId));
                 }
             }
-            // Expand all mapped and unmapped objects
+            // Expand all mapped and unmapped objects, but only count progress for first depth
             foreach (var m in mappedObjects)
+            {
                 RecursivelyConvertAndExpand(m.obj, m.anchorPage, m.reason, null);
+                // Progress tick for each top-level mapped object ONLY
+                if (progressTick != null)
+                    progressTick.Invoke();
+                if (s_currentProgressCallback != null)
+                    s_currentProgressCallback.Invoke();
+            }
             foreach (var u in unmappedObjects)
+            {
                 RecursivelyConvertAndExpand(u.obj, mainPageCount, u.reason, null);
-            // Flat insertion: for each anchor page, append all expanded objects with that anchor page, ordered by DocumentOrderIndex
+                // Progress tick for each top-level unmapped object ONLY
+                if (progressTick != null)
+                    progressTick.Invoke();
+                if (s_currentProgressCallback != null)
+                    s_currentProgressCallback.Invoke();
+            }
+
             try
             {
                 using (var outputStream = new FileStream(outputPdfPath, FileMode.Create, FileAccess.Write))
@@ -390,6 +404,8 @@ namespace MsgToPdfConverter.Services
                         try { File.Delete(kvp.Value); } catch { }
                     }
                 }
+
+
             }
             catch (Exception ex)
             {
@@ -713,9 +729,7 @@ namespace MsgToPdfConverter.Services
                         #endif
                     }
                     
-                    // Call progress tick once per embedded file (not per page) 
-                    progressTick?.Invoke();
-                    s_currentProgressCallback?.Invoke();
+                    // Progress tick REMOVED: Only top-level objects should trigger ticks
                     
                     #if DEBUG
                     DebugLogger.Log($"[PDF-INSERT] *** PDF INSERTION COMPLETE *** Successfully inserted {embeddedPageCount} pages from {Path.GetFileName(pdfPath)}, final total pages: {outputPdf.GetNumberOfPages()}");
@@ -750,7 +764,7 @@ namespace MsgToPdfConverter.Services
                     var (converted, attachmentFiles) = TryConvertMsgToPdfWithAttachments(msgPath, tempPdfPath);
                     if (converted && File.Exists(tempPdfPath))
                     {
-                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "MSG", progressTick);
+                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "MSG");
                         
                         // Insert extracted attachments after the MSG content
                         foreach (var attachmentPath in attachmentFiles)
@@ -798,7 +812,7 @@ namespace MsgToPdfConverter.Services
                     bool converted = TryConvertDocxToPdf(docxPath, tempPdfPath);
                     if (converted && File.Exists(tempPdfPath))
                     {
-                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "DOCX", progressTick);
+                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "DOCX");
                     }
                     else
                     {
@@ -850,7 +864,7 @@ namespace MsgToPdfConverter.Services
                         DebugLogger.Log($"[PDF-INSERT] *** XLSX PDF CREATED *** Temp PDF exists, size: {fileInfo.Length} bytes");
                         DebugLogger.Log($"[PDF-INSERT] *** XLSX PDF INSERTION *** Now treating converted XLSX as regular PDF");
                         #endif
-                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "XLSX", progressTick);
+                        currentPage = InsertPdfFile_NoSeparator(tempPdfPath, outputPdf, currentPage, "XLSX");
                         #if DEBUG
                         DebugLogger.Log($"[PDF-INSERT] *** XLSX PDF INSERTED *** Successfully inserted converted XLSX as PDF");
                         #endif
