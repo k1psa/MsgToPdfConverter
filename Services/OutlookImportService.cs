@@ -18,7 +18,9 @@ namespace MsgToPdfConverter.Services
         {
             var result = new OutlookImportResult();
             
-            System.Diagnostics.Debug.WriteLine("[OutlookImportService] Starting extraction...");
+#if DEBUG
+            DebugLogger.Log("[OutlookImportService] Starting extraction...");
+#endif
             
             // Skip all the complex stream extraction - go directly to Outlook Interop like attachments do
             try
@@ -26,11 +28,15 @@ namespace MsgToPdfConverter.Services
                 var outlookApp = System.Runtime.InteropServices.Marshal.GetActiveObject("Outlook.Application") as Microsoft.Office.Interop.Outlook.Application;
                 if (outlookApp != null)
                 {
-                    System.Diagnostics.Debug.WriteLine("[OutlookImportService] Outlook app found");
+#if DEBUG
+                    DebugLogger.Log("[OutlookImportService] Outlook app found");
+#endif
                     var explorer = outlookApp.ActiveExplorer();
                     if (explorer != null && explorer.Selection != null && explorer.Selection.Count > 0)
                     {
-                        System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Found {explorer.Selection.Count} selected items");
+#if DEBUG
+                        DebugLogger.Log($"[OutlookImportService] Found {explorer.Selection.Count} selected items");
+#endif
                         
                         // Process each selected email
                         for (int i = 1; i <= explorer.Selection.Count; i++)
@@ -38,7 +44,9 @@ namespace MsgToPdfConverter.Services
                             var mailItem = explorer.Selection[i] as Microsoft.Office.Interop.Outlook.MailItem;
                             if (mailItem != null)
                             {
-                                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Processing email: {mailItem.Subject}");
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] Processing email: {mailItem.Subject}");
+#endif
                                 
                                 string safeSubject = sanitizeFileName(mailItem.Subject ?? "untitled");
                                 string fileName = safeSubject + ".msg";
@@ -52,31 +60,43 @@ namespace MsgToPdfConverter.Services
                                     counter++;
                                 }
                                 
-                                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Saving to: {destPath}");
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] Saving to: {destPath}");
+#endif
                                 mailItem.SaveAs(destPath, Microsoft.Office.Interop.Outlook.OlSaveAsType.olMSG);
                                 result.ExtractedFiles.Add(destPath);
-                                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Successfully saved: {destPath}");
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] Successfully saved: {destPath}");
+#endif
                             }
                         }
                     }
                     else
                     {
-                        System.Diagnostics.Debug.WriteLine("[OutlookImportService] No explorer or selection found");
+#if DEBUG
+                        DebugLogger.Log("[OutlookImportService] No explorer or selection found");
+#endif
                     }
                 }
                 else
                 {
-                    System.Diagnostics.Debug.WriteLine("[OutlookImportService] Outlook app not found");
+#if DEBUG
+                    DebugLogger.Log("[OutlookImportService] Outlook app not found");
+#endif
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Exception: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[OutlookImportService] Exception: {ex.Message}");
+#endif
                 // If Interop fails, add to skipped
                 result.SkippedFiles.Add("Email could not be extracted: " + ex.Message);
             }
             
-            System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Extraction complete. Found {result.ExtractedFiles.Count} files, skipped {result.SkippedFiles.Count}");
+#if DEBUG
+            DebugLogger.Log($"[OutlookImportService] Extraction complete. Found {result.ExtractedFiles.Count} files, skipped {result.SkippedFiles.Count}");
+#endif
             return result;
         }
 
@@ -91,7 +111,9 @@ namespace MsgToPdfConverter.Services
                     var fileGroupStream = (MemoryStream)data.GetData("FileGroupDescriptorW");
                     fileGroupStream.Position = 0;
                     var fileNames = GetFileNamesFromFileGroupDescriptorW(fileGroupStream);
-                    System.Diagnostics.Debug.WriteLine($"[OutlookImportService] FileGroupDescriptorW present. Attachment count: {fileNames.Length}");
+#if DEBUG
+                    DebugLogger.Log($"[OutlookImportService] FileGroupDescriptorW present. Attachment count: {fileNames.Length}");
+#endif
                     // Track hashes of already saved files in outputFolder
                     var existingFiles = Directory.GetFiles(outputFolder);
                     var existingHashes = new HashSet<string>();
@@ -118,7 +140,9 @@ namespace MsgToPdfConverter.Services
                         // The actual file data is in the FileContents stream
                         string fileContentsFormat = i == 0 ? "FileContents" : $"FileContents{i}";
                         bool hasFileContents = data.GetDataPresent(fileContentsFormat);
-                        System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Attachment {i}: {originalName}, FileContentsFormat: {fileContentsFormat}, HasFileContents: {hasFileContents}");
+#if DEBUG
+                        DebugLogger.Log($"[OutlookImportService] Attachment {i}: {originalName}, FileContentsFormat: {fileContentsFormat}, HasFileContents: {hasFileContents}");
+#endif
                         if (hasFileContents)
                         {
                             using (var fileStream = (MemoryStream)data.GetData(fileContentsFormat))
@@ -132,7 +156,9 @@ namespace MsgToPdfConverter.Services
                                     if (existingHashes.Contains(hashStr))
                                     {
                                         result.SkippedFiles.Add(originalName);
-                                        System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Skipped saving duplicate attachment (identical content): {originalName}");
+#if DEBUG
+                                        DebugLogger.Log($"[OutlookImportService] Skipped saving duplicate attachment (identical content): {originalName}");
+#endif
                                         continue;
                                     }
                                     existingHashes.Add(hashStr);
@@ -152,25 +178,33 @@ namespace MsgToPdfConverter.Services
                                     fileStream.WriteTo(outStream);
                                 }
                                 result.ExtractedFiles.Add(destPath);
-                                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Saved attachment: {destPath}");
+#if DEBUG
+                                DebugLogger.Log($"[OutlookImportService] Saved attachment: {destPath}");
+#endif
                             }
                         }
                         else
                         {
                             result.SkippedFiles.Add(originalName);
-                            System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Skipped (no file data): {originalName}");
+#if DEBUG
+                            DebugLogger.Log($"[OutlookImportService] Skipped (no file data): {originalName}");
+#endif
                         }
                     }
                 }
                 else
                 {
                     result.SkippedFiles.Add("No FileGroupDescriptorW present");
-                    System.Diagnostics.Debug.WriteLine($"[OutlookImportService] No FileGroupDescriptorW present in drop data.");
+#if DEBUG
+                    DebugLogger.Log($"[OutlookImportService] No FileGroupDescriptorW present in drop data.");
+#endif
                 }
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"[OutlookImportService] Exception extracting attachment: {ex.Message}");
+#if DEBUG
+                DebugLogger.Log($"[OutlookImportService] Exception extracting attachment: {ex.Message}");
+#endif
                 result.SkippedFiles.Add("Attachment could not be extracted: " + ex.Message);
             }
             return result;

@@ -19,12 +19,16 @@ namespace MsgToPdfConverter.Services
             {
                 if (string.IsNullOrWhiteSpace(path))
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] GetFileHash: Path is null or empty.");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] GetFileHash: Path is null or empty.");
+                    #endif
                     return null;
                 }
                 if (!File.Exists(path))
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] GetFileHash: File does not exist: {path}");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] GetFileHash: File does not exist: {path}");
+                    #endif
                     return null;
                 }
                 try
@@ -40,7 +44,9 @@ namespace MsgToPdfConverter.Services
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] GetFileHash: Exception for {path}: {ex.Message}");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] GetFileHash: Exception for {path}: {ex.Message}");
+                    #endif
                     return null;
                 }
             }
@@ -51,24 +57,32 @@ namespace MsgToPdfConverter.Services
             {
                 if (string.IsNullOrWhiteSpace(file))
                 {
-                    System.Diagnostics.Debug.WriteLine("[FileListService] Skipping null or empty file path in currentFiles.");
+                    #if DEBUG
+                    DebugLogger.Log("[FileListService] Skipping null or empty file path in currentFiles.");
+                    #endif
                     continue;
                 }
                 if (!File.Exists(file))
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] File does not exist: {file}");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] File does not exist: {file}");
+                    #endif
                     continue;
                 }
                 string ext = Path.GetExtension(file)?.ToLowerInvariant();
                 if (string.IsNullOrEmpty(ext) || !supportedExtensions.Contains(ext))
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] Unsupported extension: {file}");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] Unsupported extension: {file}");
+                    #endif
                     continue;
                 }
                 string hash = GetFileHash(file);
                 if (hash == null)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] Could not compute hash for: {file}. Skipping file.");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] Could not compute hash for: {file}. Skipping file.");
+                    #endif
                     continue;
                 }
                 if (!extToHashSet.ContainsKey(ext))
@@ -80,7 +94,9 @@ namespace MsgToPdfConverter.Services
                 }
                 else
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] Duplicate file skipped (same hash and extension): {file}");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] Duplicate file skipped (same hash and extension): {file}");
+                    #endif
                 }
             }
 
@@ -89,24 +105,32 @@ namespace MsgToPdfConverter.Services
             {
                 if (string.IsNullOrWhiteSpace(file))
                 {
-                    System.Diagnostics.Debug.WriteLine("[FileListService] Skipping null or empty file path in newFiles.");
+                    #if DEBUG
+                    DebugLogger.Log("[FileListService] Skipping null or empty file path in newFiles.");
+                    #endif
                     continue;
                 }
                 if (!File.Exists(file))
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] File does not exist: {file}");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] File does not exist: {file}");
+                    #endif
                     continue;
                 }
                 string ext = Path.GetExtension(file)?.ToLowerInvariant();
                 if (string.IsNullOrEmpty(ext) || !supportedExtensions.Contains(ext))
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] Unsupported extension: {file}");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] Unsupported extension: {file}");
+                    #endif
                     continue;
                 }
                 string hash = GetFileHash(file);
                 if (hash == null)
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] Could not compute hash for: {file}. Skipping file.");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] Could not compute hash for: {file}. Skipping file.");
+                    #endif
                     continue;
                 }
                 if (!extToHashSet.ContainsKey(ext))
@@ -118,7 +142,9 @@ namespace MsgToPdfConverter.Services
                 }
                 else
                 {
-                    System.Diagnostics.Debug.WriteLine($"[FileListService] Duplicate file skipped (same hash and extension): {file}");
+                    #if DEBUG
+                    DebugLogger.Log($"[FileListService] Duplicate file skipped (same hash and extension): {file}");
+                    #endif
                 }
             }
             return result;

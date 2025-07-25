@@ -557,7 +557,12 @@ namespace MsgToPdfConverter.Services
                                     }
                                 }
 
-                                foreach (var prot in filesToProtect) Console.WriteLine($"  {prot}");
+                                foreach (var prot in filesToProtect)
+                                {
+                                    #if DEBUG
+                                    DebugLogger.Log($"  {prot}");
+                                    #endif
+                                }
                                 // DEBUG: Print temp and protected files before cleanup
                                 AttachmentService.DebugPrintTempAndProtectedFiles(allTempFiles, filesToProtect);
                                 foreach (var f in allTempFiles)
