@@ -89,7 +89,23 @@ namespace MsgToPdfConverter
         public bool IsPinned { get => _isPinned; set { _isPinned = value; OnPropertyChanged(nameof(IsPinned)); } }
         public int ProgressValue { get => _progressValue; set { _progressValue = value; OnPropertyChanged(nameof(ProgressValue)); } }
         public int ProgressMax { get => _progressMax; set { _progressMax = value; OnPropertyChanged(nameof(ProgressMax)); } }
-        public string ProcessingStatus { get => _processingStatus; set { _processingStatus = value; OnPropertyChanged(nameof(ProcessingStatus)); } }
+        public string ProcessingStatus
+        {
+            get => _processingStatus;
+            set
+            {
+                if (_processingStatus != value)
+                {
+                    _processingStatus = value;
+                    OnPropertyChanged(nameof(ProcessingStatus));
+                }
+                else
+                {
+                    _processingStatus = value;
+                    OnPropertyChanged(nameof(ProcessingStatus));
+                }
+            }
+        }
         public string FileCountText { get => _fileCountText; set { _fileCountText = value; OnPropertyChanged(nameof(FileCountText)); } }
         public bool AppendAttachments { get => _appendAttachments; set { _appendAttachments = value; OnPropertyChanged(nameof(AppendAttachments)); } }
         public bool CombineAllPdfs
@@ -258,10 +274,30 @@ namespace MsgToPdfConverter
                         _attachmentService,
                         (fileProcessed, total, progress, statusText) =>
                         {
-                            ProcessingStatus = statusText;
+                            // FINAL: Hide, reset, then show ring with DispatcherPriority.Render for guaranteed UI refresh
+                            Application.Current.Dispatcher.Invoke(() =>
+                            {
+                                IsProcessingFile = false;
+                                FileProgressValue = 0;
+                                FileProgressMax = 1;
+                                OnPropertyChanged(nameof(IsProcessingFile));
+                                OnPropertyChanged(nameof(FileProgressValue));
+                                OnPropertyChanged(nameof(FileProgressMax));
+                                OnPropertyChanged(nameof(FileProgressPercentage));
+                                OnPropertyChanged(nameof(FileProgressRatio));
+                            });
+                            Application.Current.Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                FileProgressMax = progress > 0 ? progress : 1;
+                                IsProcessingFile = true;
+                                OnPropertyChanged(nameof(IsProcessingFile));
+                                OnPropertyChanged(nameof(FileProgressMax));
+                            }), DispatcherPriority.Render);
+                            // Update status after ring is reset and shown
+                            Application.Current.Dispatcher.BeginInvoke(new Action(() => ProcessingStatus = statusText), DispatcherPriority.Render);
                             ProgressValue = fileProcessed;
-                            // Remove direct IsProcessingFile set here
                             #if DEBUG
+                            DebugLogger.Log($"[PROGRESS-RESET-FINAL] Ring forcibly hidden, reset, and shown for new file (DispatcherPriority.Render): {statusText}");
                             DebugLogger.Log($"Progress: {fileProcessed}/{total} - {statusText}");
                             #endif
                         },
@@ -271,19 +307,9 @@ namespace MsgToPdfConverter
                             {
                                 FileProgressValue = current;
                                 FileProgressMax = max;
-                                // Progress ring delay logic
-                                if (max > 0 && current < max)
+                                if (max > 0 && current >= max)
                                 {
-                                    if (!_progressRingDelayTimer.IsEnabled && !IsProcessingFile)
-                                    {
-                                        _pendingShowProgressRing = true;
-                                        _progressRingDelayTimer.Start();
-                                    }
-                                }
-                                else
-                                {
-                                    _pendingShowProgressRing = false;
-                                    _progressRingDelayTimer.Stop();
+                                    // Hide ring when file finishes—do NOT reset to 0% in view
                                     IsProcessingFile = false;
                                 }
                                 #if DEBUG

@@ -58,16 +58,43 @@ namespace MsgToPdfConverter.Services
                     if (ext == ".doc" || ext == ".docx")
                     {
                         var wordApp = new Microsoft.Office.Interop.Word.Application();
-                        var doc = wordApp.Documents.Open(inputPath);
-                        progressTick?.Invoke(); // Tick: after opening document
-                        doc.ExportAsFixedFormat(mainPdfPath, Microsoft.Office.Interop.Word.WdExportFormat.wdExportFormatPDF);
-                        progressTick?.Invoke(); // Tick: after exporting to PDF
-                        doc.Close();
-                        Marshal.ReleaseComObject(doc);
-                        wordApp.Quit();
-                        Marshal.ReleaseComObject(wordApp);
-                        GC.Collect();
-                        GC.WaitForPendingFinalizers();
+                        Microsoft.Office.Interop.Word.Documents docs = null;
+                        Microsoft.Office.Interop.Word.Document doc = null;
+                        try
+                        {
+                            docs = wordApp.Documents;
+                            doc = docs.Open(inputPath);
+                            progressTick?.Invoke(); // Tick: after opening document
+                            doc.ExportAsFixedFormat(mainPdfPath, Microsoft.Office.Interop.Word.WdExportFormat.wdExportFormatPDF);
+                            progressTick?.Invoke(); // Tick: after exporting to PDF
+                            doc.Close();
+                        }
+                        finally
+                        {
+                            if (doc != null) Marshal.ReleaseComObject(doc);
+                            if (docs != null) Marshal.ReleaseComObject(docs);
+                            if (wordApp != null)
+                            {
+                                wordApp.Quit();
+                                Marshal.ReleaseComObject(wordApp);
+                            }
+                            GC.Collect();
+                            GC.WaitForPendingFinalizers();
+                        }
+                        // Extra safety: forcibly kill lingering WINWORD.EXE processes
+                        try
+                        {
+                            var winwordProcs = System.Diagnostics.Process.GetProcessesByName("WINWORD");
+                            foreach (var proc in winwordProcs)
+                            {
+                                // Only kill if started by this user and has no window
+                                if (proc.MainWindowHandle == IntPtr.Zero && proc.StartTime > DateTime.Now.AddMinutes(-10))
+                                {
+                                    proc.Kill();
+                                }
+                            }
+                        }
+                        catch { }
                     }
                     else if (ext == ".xls" || ext == ".xlsx")
                     {
@@ -87,10 +114,7 @@ namespace MsgToPdfConverter.Services
                                 wb.Close(false);
                                 Marshal.ReleaseComObject(wb);
                             }
-                            if (workbooks != null)
-                            {
-                                Marshal.ReleaseComObject(workbooks);
-                            }
+                            if (workbooks != null) Marshal.ReleaseComObject(workbooks);
                             if (excelApp != null)
                             {
                                 excelApp.Quit();

@@ -80,7 +80,21 @@ namespace MsgToPdfConverter
         private static void OnProgressChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
         {
             var control = d as CircularProgressIndicator;
-            control?.AnimateToProgress();
+            if (control == null) return;
+
+            double newValue = (double)e.NewValue;
+            // If progress is reset to 0, update immediately and skip animation
+            if (newValue == 0)
+            {
+                control._isAnimating = false;
+                control.BeginAnimation(AnimatedProgressProperty, null); // Stop any running animation
+                control.AnimatedProgress = 0;
+                control.UpdateProgress();
+            }
+            else
+            {
+                control.AnimateToProgress();
+            }
         }
 
         private static void OnAnimatedProgressChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
@@ -91,12 +105,22 @@ namespace MsgToPdfConverter
 
         private void AnimateToProgress()
         {
+            double targetProgress = Progress;
+            double currentProgress = AnimatedProgress;
+
+            // If target is 0, reset immediately
+            if (targetProgress == 0)
+            {
+                _isAnimating = false;
+                BeginAnimation(AnimatedProgressProperty, null); // Stop any running animation
+                AnimatedProgress = 0;
+                UpdateProgress();
+                return;
+            }
+
             if (_isAnimating)
                 return;
 
-            double targetProgress = Progress;
-            double currentProgress = AnimatedProgress;
-            
             // If starting from 0, add a small delay before starting animation
             if (currentProgress == 0 && targetProgress > 0)
             {
