@@ -484,6 +484,17 @@ namespace MsgToPdfConverter
                 DebugLogger.Log("[DEBUG] Completion dialog closed.");
                 #endif
                 if (IsPinned && mainWindow2 != null) mainWindow2.Topmost = wasTopmost2;
+                // Run temp cleanup after each conversion (before resetting state)
+                try
+                {
+                    PdfEmbeddedInsertionService.ForceCleanupAllTempArtifacts();
+                }
+                catch (Exception cleanupEx)
+                {
+#if DEBUG
+                    DebugLogger.Log($"[CLEANUP][AFTER-CONVERSION] Cleanup failed: {cleanupEx.Message}");
+#endif
+                }
             }
             catch (Exception ex)
             {
