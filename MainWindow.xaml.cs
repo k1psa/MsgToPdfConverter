@@ -169,6 +169,9 @@ namespace MsgToPdfConverter
 
         protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
         {
+            #if DEBUG
+            DebugLogger.Log("[CLEANUP][OnClosing] Starting temp cleanup (window close)...");
+            #endif
             string behavior = Properties.Settings.Default.CloseButtonBehavior ?? "Ask";
             if (behavior == "Minimize")
             {
@@ -213,6 +216,17 @@ namespace MsgToPdfConverter
                 catch { }
                 _trayIcon = null;
             }
+            // Aggressively clean up all temp files/folders on window close
+            try
+            {
+                MsgToPdfConverter.Services.PdfEmbeddedInsertionService.ForceCleanupAllTempArtifacts();
+            }
+            catch (Exception ex)
+            {
+#if DEBUG
+                DebugLogger.Log($"[CLEANUP][OnClosing] Exception during temp cleanup: {ex.Message}");
+#endif
+            }
             base.OnClosing(e);
             // Ensure all background threads and tasks are stopped
             System.Windows.Threading.Dispatcher.CurrentDispatcher.InvokeShutdown();
@@ -220,6 +234,9 @@ namespace MsgToPdfConverter
             Application.Current.Shutdown();
             // As a last resort, force exit if still running
             Environment.Exit(0);
+            #if DEBUG
+            DebugLogger.Log("[CLEANUP][OnClosing] Temp cleanup complete.");
+            #endif
         }
 
         private void RestoreFromTray()

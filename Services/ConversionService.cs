@@ -895,21 +895,10 @@ namespace MsgToPdfConverter.Services
             }
             finally
             {
-                // Delete all files and subfolders in baseTempDir after conversion
+                // Centralized temp cleanup
                 try
                 {
-                    if (System.IO.Directory.Exists(baseTempDir))
-                    {
-                        foreach (var file in System.IO.Directory.GetFiles(baseTempDir, "*", SearchOption.AllDirectories))
-                        {
-                            try { System.IO.File.Delete(file); } catch { }
-                        }
-                        foreach (var dir in System.IO.Directory.GetDirectories(baseTempDir, "*", SearchOption.AllDirectories).OrderByDescending(d => d.Length))
-                        {
-                            try { System.IO.Directory.Delete(dir, true); } catch { }
-                        }
-                        try { System.IO.Directory.Delete(baseTempDir, true); } catch { }
-                    }
+                    MsgToPdfConverter.Services.AttachmentService.CleanupMsgToPdfTempFolder();
                 }
                 catch { }
             }

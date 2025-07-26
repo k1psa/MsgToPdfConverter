@@ -182,7 +182,17 @@ namespace MsgToPdfConverter
 
         protected override void OnExit(ExitEventArgs e)
         {
-  
+            // Aggressively clean up all temp files/folders on app exit
+            try
+            {
+                MsgToPdfConverter.Services.PdfEmbeddedInsertionService.ForceCleanupAllTempArtifacts();
+            }
+            catch (Exception ex)
+            {
+#if DEBUG
+                DebugLogger.Log($"[CLEANUP][OnExit] Exception during final temp cleanup: {ex.Message}");
+#endif
+            }
             base.OnExit(e);
         }
     }

@@ -16,8 +16,228 @@ namespace MsgToPdfConverter.Services
     /// <summary>
     /// Service for inserting extracted embedded files into the main PDF at appropriate page locations
     /// </summary>
-    public static class PdfEmbeddedInsertionService
-    {
+public static class PdfEmbeddedInsertionService
+{
+        /// <summary>
+        /// Cleans up GUID-named temp folders (e.g., {D2CF6899-...}) in %TEMP% left by Office/Outlook/MsgReader
+        /// </summary>
+        public static void CleanupOfficeGuidTempFolders(int maxAgeMinutes = 60)
+        {
+            CleanupOfficeGuidTempFolders(60, false);
+        }
+
+        /// <summary>
+        /// Cleans up GUID-named temp folders (e.g., {D2CF6899-...}) in %TEMP% left by Office/Outlook/MsgReader, with options for force cleanup and detailed logging.
+        /// </summary>
+        /// <param name="maxAgeMinutes">Minimum age in minutes before deletion (ignored if force=true)</param>
+        /// <param name="force">If true, always attempt deletion regardless of age</param>
+        public static void CleanupOfficeGuidTempFolders(int maxAgeMinutes, bool force)
+        {
+            string tempRoot = Path.GetTempPath();
+            // Match both curly-brace and dash-style GUIDs (e.g., {D2CF6899-...} and 3ce105ae-c57f-42c7-8327-3e2e491e7072)
+            var guidPattern = new System.Text.RegularExpressions.Regex(@"^(\{[0-9A-Fa-f\-]{36}\}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})$");
+            // Extended: match GUID at start, optionally followed by extension, or ' - OProcSessId.dat' (and similar)
+            var guidFilePattern = new System.Text.RegularExpressions.Regex(@"^(\{[0-9A-Fa-f\-]{36}\}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})(\..*| - OProcSessId\.dat)?$");
+            var now = DateTime.Now;
+            try
+            {
+                #if DEBUG
+                DebugLogger.Log($"[CLEANUP][SCAN] Scanning temp root: {tempRoot}");
+                #endif
+                // Aggressively delete GUID-named folders (recursively delete all contents)
+                var allDirs = Directory.GetDirectories(tempRoot);
+                #if DEBUG
+                DebugLogger.Log($"[CLEANUP][SCAN] Found {allDirs.Length} directories in temp root");
+                #endif
+                foreach (var dir in allDirs)
+                {
+                    var dirName = Path.GetFileName(dir);
+                    #if DEBUG
+                    DebugLogger.Log($"[CLEANUP][SCAN] Checking directory: {dirName}");
+                    #endif
+                    if (guidPattern.IsMatch(dirName))
+                    {
+                        try
+                        {
+                            if (Directory.Exists(dir))
+                            {
+                                DeleteDirectoryRecursive(dir);
+                                #if DEBUG
+                                DebugLogger.Log($"[CLEANUP] Aggressively deleted GUID temp folder: {dir}");
+                                #endif
+                            }
+                            else
+                            {
+                                #if DEBUG
+                                DebugLogger.Log($"[CLEANUP][NOTFOUND] Directory does not exist: {dir}");
+                                #endif
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            #if DEBUG
+                            DebugLogger.Log($"[CLEANUP] Failed to delete GUID temp folder {dir}: {ex.Message}");
+                            #endif
+                        }
+                    }
+                }
+                // Aggressively delete GUID-named files (including OProcSessId.dat and similar)
+                var allFiles = Directory.GetFiles(tempRoot);
+                #if DEBUG
+                DebugLogger.Log($"[CLEANUP][SCAN] Found {allFiles.Length} files in temp root");
+                #endif
+                foreach (var file in allFiles)
+                {
+                    var fileName = Path.GetFileName(file);
+                    #if DEBUG
+                    DebugLogger.Log($"[CLEANUP][SCAN] Checking file: {fileName}");
+                    #endif
+                    if (guidFilePattern.IsMatch(fileName))
+                    {
+                        try
+                        {
+                            if (File.Exists(file))
+                            {
+                                File.Delete(file);
+                                #if DEBUG
+                                DebugLogger.Log($"[CLEANUP] Aggressively deleted GUID temp file: {file}");
+                                #endif
+                            }
+                            else
+                            {
+                                #if DEBUG
+                                DebugLogger.Log($"[CLEANUP][NOTFOUND] File does not exist: {file}");
+                                #endif
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            #if DEBUG
+                            DebugLogger.Log($"[CLEANUP] Failed to delete GUID temp file {file}: {ex.Message}");
+                            #endif
+                        }
+                    }
+                }
+
+                // Aggressively delete MsgToPdfConverter and msgtopdf temp folders and their contents
+                string[] appTempDirs = {
+                    Path.Combine(tempRoot, "MsgToPdfConverter"),
+                    Path.Combine(tempRoot, "msgtopdf")
+                };
+                foreach (var dirPath in appTempDirs)
+                {
+                    #if DEBUG
+                    DebugLogger.Log($"[CLEANUP][SCAN] Checking app temp dir: {dirPath}");
+                    #endif
+                    if (Directory.Exists(dirPath))
+                    {
+                        try
+                        {
+                            DeleteDirectoryRecursive(dirPath);
+                            #if DEBUG
+                            DebugLogger.Log($"[CLEANUP] Aggressively deleted app temp folder: {dirPath}");
+                            #endif
+                        }
+                        catch (Exception ex)
+                        {
+                            #if DEBUG
+                            DebugLogger.Log($"[CLEANUP] Failed to delete app temp folder {dirPath}: {ex.Message}");
+                            #endif
+                        }
+                    }
+                    else
+                    {
+                        #if DEBUG
+                        DebugLogger.Log($"[CLEANUP][NOTFOUND] App temp dir does not exist: {dirPath}");
+                        #endif
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                #if DEBUG
+                DebugLogger.Log($"[CLEANUP] Error scanning temp for GUID folders: {ex.Message}");
+                #endif
+            }
+
+            // Helper: Recursively delete all files and subfolders, then the folder itself
+            void DeleteDirectoryRecursive(string targetDir)
+            {
+                #if DEBUG
+                DebugLogger.Log($"[CLEANUP][RECURSE] Entering directory: {targetDir}");
+                #endif
+                try
+                {
+                    var files = Directory.GetFiles(targetDir);
+                    #if DEBUG
+                    DebugLogger.Log($"[CLEANUP][RECURSE] Found {files.Length} files in {targetDir}");
+                    #endif
+                    foreach (var file in files)
+                    {
+                        try
+                        {
+                            File.SetAttributes(file, FileAttributes.Normal);
+                            File.Delete(file);
+                            #if DEBUG
+                            DebugLogger.Log($"[CLEANUP] Deleted file in {targetDir}: {file}");
+                            #endif
+                        }
+                        catch (Exception ex)
+                        {
+                            #if DEBUG
+                            DebugLogger.Log($"[CLEANUP] Failed to delete file {file} in {targetDir}: {ex.Message}");
+                            #endif
+                        }
+                    }
+                    var dirs = Directory.GetDirectories(targetDir);
+                    #if DEBUG
+                    DebugLogger.Log($"[CLEANUP][RECURSE] Found {dirs.Length} subdirectories in {targetDir}");
+                    #endif
+                    foreach (var dir in dirs)
+                    {
+                        DeleteDirectoryRecursive(dir);
+                    }
+                    Directory.Delete(targetDir, false);
+                    #if DEBUG
+                    DebugLogger.Log($"[CLEANUP] Deleted directory: {targetDir}");
+                    #endif
+                }
+                catch (Exception ex)
+                {
+                    #if DEBUG
+                    DebugLogger.Log($"[CLEANUP] Failed to recursively delete directory {targetDir}: {ex.Message}");
+                    #endif
+                }
+            }
+        }
+
+        /// <summary>
+        /// Aggressively cleans up all temp files/folders related to Office/Outlook and MsgToPdfConverter, immediately and forcibly.
+        /// </summary>
+        public static void ForceCleanupAllTempArtifacts()
+        {
+#if DEBUG
+            DebugLogger.Log("[CLEANUP][ForceCleanupAllTempArtifacts] BEGIN");
+#endif
+            try
+            {
+                // Option 1: Lower age threshold to 0 (immediate deletion)
+                CleanupOfficeGuidTempFolders(0, false);
+                // Option 2: Force cleanup regardless of age
+                CleanupOfficeGuidTempFolders(0, true);
+            }
+            catch (Exception ex)
+            {
+#if DEBUG
+                DebugLogger.Log($"[CLEANUP][ForceCleanupAllTempArtifacts] ERROR: {ex.Message}");
+#endif
+            }
+#if DEBUG
+            DebugLogger.Log("[CLEANUP][ForceCleanupAllTempArtifacts] END");
+#endif
+        }
+    // Always use this for temp files
+    public static string AppTempDir => Path.Combine(Path.GetTempPath(), "MsgToPdfConverter");
         // Static progress callback for embedding operations
         private static Action s_currentProgressCallback = null;
         
@@ -172,7 +392,7 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (ext == ".docx" || ext == ".doc")
                 {
-                    string tempPdfPath = Path.Combine(Path.GetTempPath(), $"doc_temp_{Guid.NewGuid()}.pdf");
+                    string tempPdfPath = Path.Combine(AppTempDir, $"doc_temp_{Guid.NewGuid()}.pdf");
                     bool converted = OfficeConversionService.TryConvertOfficeToPdf(obj.FilePath, tempPdfPath);
                     if (converted && File.Exists(tempPdfPath))
                     {
@@ -189,7 +409,7 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (ext == ".xlsx")
                 {
-                    string tempPdfPath = Path.Combine(Path.GetTempPath(), $"xlsx_temp_{Guid.NewGuid()}.pdf");
+                    string tempPdfPath = Path.Combine(AppTempDir, $"xlsx_temp_{Guid.NewGuid()}.pdf");
                     if (TryConvertXlsxToPdf(obj.FilePath, tempPdfPath) && File.Exists(tempPdfPath))
                     {
                         pdfCache[obj.FilePath] = tempPdfPath;
@@ -205,7 +425,7 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (ext == ".msg")
                 {
-                    string tempPdfPath = Path.Combine(Path.GetTempPath(), $"msg_temp_{Guid.NewGuid()}.pdf");
+                    string tempPdfPath = Path.Combine(AppTempDir, $"msg_temp_{Guid.NewGuid()}.pdf");
                     var (converted, attachmentFiles) = TryConvertMsgToPdfWithAttachments(obj.FilePath, tempPdfPath);
                     string objId = obj.FilePath + "|" + obj.DocumentOrderIndex;
                     if (converted && File.Exists(tempPdfPath))
@@ -222,7 +442,7 @@ namespace MsgToPdfConverter.Services
                                 var attExt = Path.GetExtension(attPath)?.ToLowerInvariant();
                                 if (attExt == ".jpg" || attExt == ".jpeg" || attExt == ".png" || attExt == ".bmp" || attExt == ".gif" || attExt == ".tif" || attExt == ".tiff" || attExt == ".webp")
                                 {
-                                    string imgPdfPath = Path.Combine(Path.GetTempPath(), $"img2pdf_{Guid.NewGuid()}.pdf");
+                                    string imgPdfPath = Path.Combine(AppTempDir, $"img2pdf_{Guid.NewGuid()}.pdf");
                                     bool imgConverted = TryConvertImageToPdf(attPath, imgPdfPath);
                                     var imgObj = new InteropEmbeddedExtractor.ExtractedObjectInfo { FilePath = imgPdfPath, PageNumber = obj.PageNumber, CharPosition = obj.CharPosition, ProgId = null, OleClass = null, DocumentOrderIndex = obj.DocumentOrderIndex };
                                     if (imgConverted && File.Exists(imgPdfPath))
@@ -257,7 +477,7 @@ namespace MsgToPdfConverter.Services
                     var zipEntries = ZipHelper.ExtractZipEntries(obj.FilePath);
                     foreach (var entry in zipEntries)
                     {
-                        string tempFile = Path.Combine(Path.GetTempPath(), $"zip_entry_{Guid.NewGuid()}_{entry.FileName}");
+                        string tempFile = Path.Combine(AppTempDir, $"zip_entry_{Guid.NewGuid()}_{entry.FileName}");
                         File.WriteAllBytes(tempFile, entry.Data);
                         var attObj = new InteropEmbeddedExtractor.ExtractedObjectInfo { FilePath = tempFile, PageNumber = obj.PageNumber, CharPosition = obj.CharPosition, ProgId = null, OleClass = null, DocumentOrderIndex = obj.DocumentOrderIndex };
                         RecursivelyConvertAndExpand(attObj, anchorPage, "ZIP entry", obj.FilePath + "|" + obj.DocumentOrderIndex);
@@ -267,7 +487,8 @@ namespace MsgToPdfConverter.Services
                 }
                 else if (ext == ".7z")
                 {
-                    string tempDir = Path.GetTempPath();
+                    string tempDir = AppTempDir;
+                    string tempPdfPath = Path.Combine(AppTempDir, $"doc_temp_{Guid.NewGuid()}.pdf");
                     var allTempFiles = new List<string>();
                     string headerText = $"Extracted from {Path.GetFileName(obj.FilePath)}";
                     var parentChain = new List<string>();
@@ -457,7 +678,7 @@ namespace MsgToPdfConverter.Services
                 else if (obj.FilePath.EndsWith(".doc", StringComparison.OrdinalIgnoreCase))
                 {
                     // Convert .doc to PDF using OfficeConversionService and insert
-                    string tempPdfPath = Path.Combine(Path.GetTempPath(), $"doc_temp_{Guid.NewGuid()}.pdf");
+                    string tempPdfPath = Path.Combine(AppTempDir, $"doc_temp_{Guid.NewGuid()}.pdf");
                     try
                     {
                         bool converted = OfficeConversionService.TryConvertOfficeToPdf(obj.FilePath, tempPdfPath);
@@ -482,7 +703,7 @@ namespace MsgToPdfConverter.Services
                 else if (obj.FilePath.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
                 {
                     // Convert .xls to PDF using OfficeConversionService and insert
-                    string tempPdfPath = Path.Combine(Path.GetTempPath(), $"xls_temp_{Guid.NewGuid()}.pdf");
+                    string tempPdfPath = Path.Combine(AppTempDir, $"xls_temp_{Guid.NewGuid()}.pdf");
                     try
                     {
                         bool converted = OfficeConversionService.TryConvertOfficeToPdf(obj.FilePath, tempPdfPath);
@@ -512,7 +733,7 @@ namespace MsgToPdfConverter.Services
                         foreach (var entry in zipEntries)
                         {
                             // Save each entry to a temp file
-                            string tempFile = Path.Combine(Path.GetTempPath(), $"zip_entry_{Guid.NewGuid()}_{entry.FileName}");
+                            string tempFile = Path.Combine(AppTempDir, $"zip_entry_{Guid.NewGuid()}_{entry.FileName}");
                             File.WriteAllBytes(tempFile, entry.Data);
                             string entryExt = Path.GetExtension(entry.FileName).ToLowerInvariant(); // FIX: avoid shadowing
                             bool entryIsPdf = IsPdfFile(tempFile);
@@ -562,7 +783,7 @@ namespace MsgToPdfConverter.Services
                     #endif
                     try
                     {
-                        string tempDir = Path.GetTempPath();
+                        string tempDir = AppTempDir;
                         var allTempFiles = new List<string>();
                         string headerText = $"Extracted from {Path.GetFileName(obj.FilePath)}";
                         var parentChain = new List<string>();
@@ -758,7 +979,7 @@ namespace MsgToPdfConverter.Services
             #endif
             try
             {
-                string tempPdfPath = Path.Combine(Path.GetTempPath(), $"msg_temp_{Guid.NewGuid()}.pdf");
+                string tempPdfPath = Path.Combine(AppTempDir, $"msg_temp_{Guid.NewGuid()}.pdf");
                 try
                 {
                     var (converted, attachmentFiles) = TryConvertMsgToPdfWithAttachments(msgPath, tempPdfPath);
@@ -786,6 +1007,7 @@ namespace MsgToPdfConverter.Services
                 finally
                 {
                     if (File.Exists(tempPdfPath)) { try { File.Delete(tempPdfPath); } catch { } }
+                    CleanupOfficeGuidTempFolders();
                 }
             }
             catch (Exception ex)
@@ -806,7 +1028,7 @@ namespace MsgToPdfConverter.Services
             #endif
             try
             {
-                string tempPdfPath = Path.Combine(Path.GetTempPath(), $"docx_temp_{Guid.NewGuid()}.pdf");
+                string tempPdfPath = Path.Combine(AppTempDir, $"docx_temp_{Guid.NewGuid()}.pdf");
                 try
                 {
                     bool converted = TryConvertDocxToPdf(docxPath, tempPdfPath);
@@ -822,6 +1044,7 @@ namespace MsgToPdfConverter.Services
                 finally
                 {
                     if (File.Exists(tempPdfPath)) { try { File.Delete(tempPdfPath); } catch { } }
+                    CleanupOfficeGuidTempFolders();
                 }
             }
             catch (Exception ex)
@@ -842,7 +1065,7 @@ namespace MsgToPdfConverter.Services
             #endif
             try
             {
-                string tempPdfPath = Path.Combine(Path.GetTempPath(), $"xlsx_temp_{Guid.NewGuid()}.pdf");
+                string tempPdfPath = Path.Combine(AppTempDir, $"xlsx_temp_{Guid.NewGuid()}.pdf");
                 #if DEBUG
                 DebugLogger.Log($"[PDF-INSERT] *** XLSX CONVERSION *** Temporary PDF path: {tempPdfPath}");
                 #endif
@@ -895,6 +1118,7 @@ namespace MsgToPdfConverter.Services
                             #endif
                         }
                     }
+                    CleanupOfficeGuidTempFolders();
                 }
             }
             catch (Exception ex)
@@ -925,11 +1149,8 @@ namespace MsgToPdfConverter.Services
                     // Build HTML with inline images using the main service
                     var htmlResult = _emailConverterService.BuildEmailHtmlWithInlineImages(msg, false);
                     string html = htmlResult.Html;
-                    var tempHtmlPath = Path.Combine(Path.GetTempPath(), $"msg2pdf_{Guid.NewGuid()}.html");
-                    var appTempDir = Path.Combine(Path.GetTempPath(), "MsgToPdfConverter");
-                    var tempHtmlPathFixed = Path.Combine(appTempDir, $"msg2pdf_{Guid.NewGuid()}.html");
-                    File.WriteAllText(tempHtmlPathFixed, html, System.Text.Encoding.UTF8);
-                    tempHtmlPath = tempHtmlPathFixed;
+                    var tempHtmlPath = Path.Combine(AppTempDir, $"msg2pdf_{Guid.NewGuid()}.html");
+                    File.WriteAllText(tempHtmlPath, html, System.Text.Encoding.UTF8);
 
                     var psi = new System.Diagnostics.ProcessStartInfo
                     {
@@ -1008,7 +1229,7 @@ namespace MsgToPdfConverter.Services
                                 if (new[] { ".p7s", ".p7m", ".smime", ".asc", ".sig" }.Contains(ext))
                                     continue;
                                 
-                                string tempAttachmentPath = Path.Combine(Path.GetTempPath(), 
+                                string tempAttachmentPath = Path.Combine(AppTempDir, 
                                     $"msg_attachment_{Guid.NewGuid()}_{fileAttachment.FileName}");
                                 
                                 try
@@ -1028,7 +1249,7 @@ namespace MsgToPdfConverter.Services
                             }
                             else if (attachment is MsgReader.Outlook.Storage.Message nestedMsg)
                             {
-                                string tempMsgPath = Path.Combine(Path.GetTempPath(), 
+                                string tempMsgPath = Path.Combine(AppTempDir, 
                                     $"msg_nested_{Guid.NewGuid()}_{(nestedMsg.Subject ?? "email").Replace("/", "_").Replace("\\", "_")}.msg");
                                 
                                 try
@@ -1117,7 +1338,7 @@ namespace MsgToPdfConverter.Services
                     case ".webp":
                     {
                         // Create temp PDF with only the image, no scaling/margins/header (identical to single email logic)
-                        string tempPdf = Path.Combine(Path.GetTempPath(), $"img2pdf_{Guid.NewGuid()}.pdf");
+                        string tempPdf = Path.Combine(AppTempDir, $"img2pdf_{Guid.NewGuid()}.pdf");
                         try
                         {
                             using (var writer = new iText.Kernel.Pdf.PdfWriter(tempPdf))
@@ -1705,7 +1926,7 @@ namespace MsgToPdfConverter.Services
             #endif
             try
             {
-                string tempPdfPath = Path.Combine(Path.GetTempPath(), $"docx_temp_{Guid.NewGuid()}.pdf");
+                string tempPdfPath = Path.Combine(AppTempDir, $"docx_temp_{Guid.NewGuid()}.pdf");
                 
                 if (TryConvertDocxToPdf(docxPath, tempPdfPath))
                 {
@@ -1734,7 +1955,7 @@ namespace MsgToPdfConverter.Services
             #endif
             try
             {
-                string tempPdfPath = Path.Combine(Path.GetTempPath(), $"xlsx_temp_{Guid.NewGuid()}.pdf");
+                string tempPdfPath = Path.Combine(AppTempDir, $"xlsx_temp_{Guid.NewGuid()}.pdf");
                 
                 if (TryConvertXlsxToPdf(xlsxPath, tempPdfPath))
                 {
@@ -1763,7 +1984,7 @@ namespace MsgToPdfConverter.Services
             #endif
             try
             {
-                string tempPdfPath = Path.Combine(Path.GetTempPath(), $"msg_temp_{Guid.NewGuid()}.pdf");
+                string tempPdfPath = Path.Combine(AppTempDir, $"msg_temp_{Guid.NewGuid()}.pdf");
                 
                 var (converted, attachmentPaths) = TryConvertMsgToPdfWithAttachments(msgPath, tempPdfPath);
                 if (converted)

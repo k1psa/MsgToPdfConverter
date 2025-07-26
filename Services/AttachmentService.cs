@@ -1926,7 +1926,8 @@ namespace MsgToPdfConverter.Services
                             // Only process files in 'word/embeddings/'
                             if (entry.FullName.StartsWith("word/embeddings/", StringComparison.OrdinalIgnoreCase))
                             {
-                                string outDir = Path.Combine(Path.GetTempPath(), "msgtopdf");
+                                // Use unified app temp directory for all temp files
+                                string outDir = MsgToPdfConverter.Services.PdfEmbeddedInsertionService.AppTempDir;
                                 Directory.CreateDirectory(outDir);
                                 string outPath = Path.Combine(outDir, entry.Name);
                                 entry.ExtractToFile(outPath, true);
